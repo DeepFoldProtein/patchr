@@ -1,7 +1,7 @@
 <div align="center">
   <div>&nbsp;</div>
 
-<img src="docs/patchr_studio.png" width="700"/>
+<video src="docs/e2e_demo_1080p.mp4" width="700" controls></video>
 
 [Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
 
@@ -23,8 +23,8 @@ PATCHR fills them in. It generates physically plausible coordinates for missing 
 ## Quick Start
 
 ```bash
-git clone https://github.com/DeepFoldProtein/boltz-inpainting.git
-cd boltz-inpainting
+git clone https://github.com/DeepFoldProtein/patchr.git
+cd patchr
 pip install -e .[cuda]
 ```
 
@@ -60,8 +60,8 @@ boltz predict examples/inpainting/4zlo_AB.yaml \
 ```bash
 conda create --name patchr python=3.12 llvmlite==0.44.0 numba==0.61.0 numpy==1.26.3
 conda activate patchr
-git clone https://github.com/DeepFoldProtein/boltz-inpainting.git
-cd boltz-inpainting && pip install -e .
+git clone https://github.com/DeepFoldProtein/patchr.git
+cd patchr && pip install -e .
 export KMP_DUPLICATE_LIB_OK=TRUE
 ```
 
@@ -104,12 +104,6 @@ The result: seamless, chemically valid reconstructions that integrate perfectly 
 ## PATCHR-Studio
 
 A desktop app with a visual interface for the full workflow -- no command line needed.
-
-<div align="center">
-
-<video src="docs/e2e_demo_1080p.mp4" width="700" controls></video>
-
-</div>
 
 Available at [patchr.deepfold.org](https://patchr.deepfold.org/).
 
