@@ -386,6 +386,16 @@ class StructureProcessor(
                 if not seqres_sequence:
                     print(f"WARNING: Empty SEQRES for chain {chain_id}, extracting sequence from atoms")
                     seqres_sequence = self.extract_sequence_from_atoms(chain_id)
+                # Fallback for synthetic chains (e.g. D_op2): extract_sequence_from_atoms looks up
+                # label_asym_id in the CIF which only has the base chain ('D'), not 'D_op2'.
+                if not seqres_sequence:
+                    base_id = self._base_chain_id(chain_id)
+                    if base_id != chain_id:
+                        print(f"WARNING: Empty sequence for synthetic chain {chain_id}, "
+                              f"retrying with base chain {base_id}")
+                        seqres_sequence = self.extract_sequence_from_atoms(base_id)
+                        if not seqres_sequence:
+                            seqres_sequence = self.extract_seqres_from_cif(base_id)
                 # Verify sequence type matches entity type
                 if entity_type == 'protein':
                     protein_residues = set('ACDEFGHIKLMNPQRSTVWY')
