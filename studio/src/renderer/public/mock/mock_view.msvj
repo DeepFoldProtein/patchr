@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "_molviewspec_version": "1.0.0",
+  "nodes": [
+    {
+      "type": "data",
+      "id": "structure-1",
+      "params": {
+        "source": "file://mock_structure.pdb",
+        "format": "pdb"
+      }
+    },
+    {
+      "type": "representation",
+      "id": "repr-cartoon",
+      "params": {
+        "style": "cartoon",
+        "colorTheme": "chain"
+      }
+    }
+  ],
+  "metadata": {
+    "timestamp": "2025-10-25T00:00:00Z",
+    "description": "Mock view state for testing",
+    "author": "Patchr Studio"
+  }
+}

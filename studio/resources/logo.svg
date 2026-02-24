@@ -1,0 +1,80 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="proteinGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="patchGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ef4444;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="highlightGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  
+  <!-- Protein structure representation (helix/chain) -->
+  <g transform="translate(256, 256)">
+    <!-- Main protein chain -->
+    <path d="M -120,0 Q -80,-40 -40,-20 T 0,0 T 40,20 T 80,0 T 120,-20" 
+          fill="none" 
+          stroke="url(#proteinGradient)" 
+          stroke-width="12" 
+          stroke-linecap="round"
+          opacity="0.6"/>
+    
+    <!-- Broken/gap section (left side) -->
+    <path d="M -120,0 Q -100,-20 -80,0" 
+          fill="none" 
+          stroke="url(#proteinGradient)" 
+          stroke-width="12" 
+          stroke-linecap="round"
+          stroke-dasharray="8 4"
+          opacity="0.4"/>
+    
+    <!-- Patch overlay (repairing the gap) -->
+    <g transform="translate(-100, -10)">
+      <!-- Patch base (subtle bandage-like shape) -->
+      <ellipse cx="0" cy="0" rx="45" ry="25" 
+               fill="url(#patchGradient)" 
+               opacity="0.9"
+               transform="rotate(-15)"/>
+      
+      <!-- Patch highlight for depth -->
+      <ellipse cx="-8" cy="-8" rx="35" ry="18" 
+               fill="url(#highlightGradient)"/>
+      
+      <!-- Stitching pattern (subtle, not obvious bandage) -->
+      <line x1="-30" y1="0" x2="-10" y2="0" 
+            stroke="#ffffff" 
+            stroke-width="2" 
+            opacity="0.5"
+            stroke-dasharray="2 3"/>
+      <line x1="10" y1="0" x2="30" y2="0" 
+            stroke="#ffffff" 
+            stroke-width="2" 
+            opacity="0.5"
+            stroke-dasharray="2 3"/>
+      
+      <!-- Connection points (showing repair) -->
+      <circle cx="-35" cy="0" r="3" fill="#ffffff" opacity="0.8"/>
+      <circle cx="35" cy="0" r="3" fill="#ffffff" opacity="0.8"/>
+    </g>
+    
+    <!-- Continuation of protein chain (after repair) -->
+    <path d="M -80,0 Q -60,20 -40,0 T 0,0" 
+          fill="none" 
+          stroke="url(#proteinGradient)" 
+          stroke-width="12" 
+          stroke-linecap="round"
+          opacity="0.8"/>
+  </g>
+  
+  <!-- Subtle glow effect -->
+  <circle cx="256" cy="256" r="240" fill="none" stroke="url(#patchGradient)" stroke-width="1" opacity="0.2"/>
+</svg>
+

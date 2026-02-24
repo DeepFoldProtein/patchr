@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "units": "residue",
+  "include": [
+    {
+      "chain": "A",
+      "residues": [10, 11, 12, 13, 14]
+    }
+  ],
+  "exclude": [],
+  "fixed": [
+    {
+      "chain": "A",
+      "residues": [1, 2, 3, 4, 5]
+    }
+  ],
+  "soft_shell_Ang": 3.0
+}
