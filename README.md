@@ -107,6 +107,10 @@ A desktop app with a visual interface for the full workflow -- no command line n
 
 Available at [patchr.deepfold.org](https://patchr.deepfold.org/).
 
+**No GPU?** Run the server on Google Colab for free and connect from PATCHR-Studio:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb)
+
 ## PATCHR Atlas
 
 Pre-computed completed structures for ~35,000 monomeric proteins (and growing to ~160,000 complexes including RNA, DNA, and multi-chain assemblies). Browse and download simulation-ready structures without running anything locally.
