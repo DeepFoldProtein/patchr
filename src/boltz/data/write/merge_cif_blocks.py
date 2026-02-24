@@ -188,6 +188,22 @@ def _parse_crystallographic(
     return cell_lines, symmetry_lines, atom_sites_lines
 
 
+def _quote_cif(v: str) -> str:
+    """Quote an mmCIF value if it contains whitespace (required by the mmCIF spec)."""
+    s = str(v) if v is not None else "?"
+    if s in ("?", "."):
+        return s
+    if " " in s or "\t" in s:
+        # prefer single-quote wrapping; escape internal single quotes if needed
+        if "'" not in s:
+            return f"'{s}'"
+        if '"' not in s:
+            return f'"{s}"'
+        # both quote types present — escape single quotes
+        return "'" + s.replace("'", "\\'") + "'"
+    return s
+
+
 _STRUCT_CONN_KEYS = [
     "_struct_conn.id",
     "_struct_conn.conn_type_id",
@@ -293,7 +309,7 @@ def merge_template_blocks_into_cif(
             extra.append(k)
         for row in struct_conn_rows:
             vals = [row.get(k, "?") for k in _STRUCT_CONN_KEYS]
-            extra.append(" ".join(str(v) for v in vals))
+            extra.append(" ".join(_quote_cif(v) for v in vals))
         extra.append("#")
 
     chem_comp_lines = _parse_chem_comp(template_content, comp_ids)
