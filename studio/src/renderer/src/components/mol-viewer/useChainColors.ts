@@ -12,6 +12,7 @@ import { Color } from "molstar/lib/mol-util/color";
 import { StateTransforms } from "molstar/lib/mol-plugin-state/transforms";
 import type { StructureHierarchyRef } from "molstar/lib/mol-plugin-state/manager/structure/hierarchy-state";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 
 /**
  * Chain color palette for BASE STRUCTURE
@@ -192,7 +193,7 @@ export function useChainColors(
           return;
         }
 
-        console.log(
+        logger.log(
           `[Chain Colors] Representations ready, applying colors to ${structures.length} structure(s)...`
         );
 
@@ -223,7 +224,7 @@ export function useChainColors(
 
             if (hasOverpaint) {
               const label = hierarchyRef.cell?.obj?.label || "unknown";
-              console.log(
+              logger.log(
                 `[Chain Colors] Structure "${label}" already has overpaint, skipping`
               );
               continue;
@@ -231,7 +232,7 @@ export function useChainColors(
           }
 
           const label = hierarchyRef.cell?.obj?.label || "unknown";
-          console.log(
+          logger.log(
             `[Chain Colors] Applying chain colors to structure: "${label}"`
           );
           const succeeded = await applyChainColors(
@@ -246,21 +247,21 @@ export function useChainColors(
           }
         }
 
-        console.log(
+        logger.log(
           `[Chain Colors] Applied colors to ${appliedCount} structure(s) out of ${structures.length}`
         );
 
         if (allSucceeded) {
-          console.log(
+          logger.log(
             `[Chain Colors] ✅ All chain colors applied successfully`
           );
         } else {
-          console.warn(
+          logger.warn(
             `[Chain Colors] ⚠️ WARNING: Some chain colors may not have been applied! Chains may appear in warm colors (yellow/orange/red).`
           );
         }
       } catch (err) {
-        console.error("[Chain Colors] Failed to apply colors:", err);
+        logger.error("[Chain Colors] Failed to apply colors:", err);
       }
     };
 
@@ -270,7 +271,7 @@ export function useChainColors(
     // Also check if structure is already loaded (for cases where event was missed)
     const structures = plugin.managers.structure.hierarchy.current.structures;
     if (structures && structures.length > 0) {
-      console.log(
+      logger.log(
         "[Chain Colors] Structure already loaded, applying colors..."
       );
       void handleRepresentationsReady();
@@ -310,7 +311,7 @@ export function createChainColorLayers(
   if (isResultStructure) {
     const paletteIndex = resultIndex % RESULT_COLOR_PALETTES.length;
     palette = RESULT_COLOR_PALETTES[paletteIndex];
-    console.log(
+    logger.log(
       `[Chain Colors] Using result palette ${paletteIndex} for result index ${resultIndex}`
     );
   } else {
@@ -426,14 +427,14 @@ export async function applyChainColors(
       return false;
     }
 
-    console.log(
+    logger.log(
       `[Chain Colors] Found ${chainIdArray.length} chain(s): ${chainIdArray.join(", ")} (${structureType} structure)`
     );
 
     // Get parent ref for applying colors
     const parentRef = hierarchyRef?.cell?.transform?.ref;
     if (!parentRef) {
-      console.warn("[Chain Colors] Could not get parent ref for structure");
+      logger.warn("[Chain Colors] Could not get parent ref for structure");
       return false;
     }
 
@@ -460,7 +461,7 @@ export async function applyChainColors(
       const r = (colorValue >> 16) & 0xff;
       const g = (colorValue >> 8) & 0xff;
       const b = colorValue & 0xff;
-      console.log(
+      logger.log(
         `[Chain Colors] ✅ Chain ${chainId} -> ${colorHex} (RGB=${r},${g},${b}) [${structureType}]`
       );
     }
@@ -473,17 +474,17 @@ export async function applyChainColors(
         overpaintLayers
       );
       if (succeeded) {
-        console.log(
+        logger.log(
           `[Chain Colors] ✓ Applied colors to ${chainIdArray.length} chain(s) [${structureType}]`
         );
       }
       return succeeded;
     } else {
-      console.warn("[Chain Colors] No chain color layers to apply");
+      logger.warn("[Chain Colors] No chain color layers to apply");
       return false;
     }
   } catch (err) {
-    console.error("[Chain Colors] Failed to apply colors:", err);
+    logger.error("[Chain Colors] Failed to apply colors:", err);
     return false;
   }
 }
@@ -529,7 +530,7 @@ async function applyOverpaintToRepresentations(
         const reprParams = (cell.transform.params as any)?.type?.params || {};
         const reprType = reprParams.type?.name || "unknown";
         const colorTheme = reprParams.colorTheme?.name || "unknown";
-        console.log(
+        logger.log(
           `[Chain Colors] Found representation: ${ref}, type: ${reprType}, colorTheme: ${colorTheme}`
         );
       }
@@ -545,7 +546,7 @@ async function applyOverpaintToRepresentations(
     findRepresentations(structureRef);
 
     if (representationRefs.length === 0) {
-      console.warn(
+      logger.warn(
         "[Chain Colors] No representations found to apply overpaint"
       );
       return false;
@@ -554,7 +555,7 @@ async function applyOverpaintToRepresentations(
     // Note: We skip colorTheme update as it's unreliable with MolStar's StateBuilder API
     // Instead, we rely entirely on overpaint to color the entire chain
     // Overpaint is applied on top of colorTheme, so it will override any default colors
-    console.log(
+    logger.log(
       `[Chain Colors] Found ${representationRefs.length} representation(s), will apply overpaint to cover entire chains`
     );
 
@@ -566,7 +567,7 @@ async function applyOverpaintToRepresentations(
       const cell = cells.get(reprRef);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const reprType = (cell?.transform.params as any)?.type?.name || "unknown";
-      console.log(
+      logger.log(
         `[Chain Colors] Applying overpaint to representation ${reprRef} (type: ${reprType})`
       );
 
@@ -582,10 +583,10 @@ async function applyOverpaintToRepresentations(
     }
 
     await update.commit();
-    console.log(
+    logger.log(
       `[Chain Colors] ✓ Applied overpaint with ${layers.length} chain color layer(s) to ${representationRefs.length} representation(s)`
     );
-    console.log(
+    logger.log(
       `[Chain Colors] ✓ Overpaint will override any default colorTheme colors, ensuring cool colors are shown`
     );
 
@@ -606,14 +607,14 @@ async function applyOverpaintToRepresentations(
                 .OverpaintStructureRepresentation3DFromBundle
           ) {
             hasOverpaint = true;
-            console.log(
+            logger.log(
               `[Chain Colors] ✓ Verified overpaint applied to representation ${reprRef}`
             );
             break;
           }
         }
         if (!hasOverpaint) {
-          console.warn(
+          logger.warn(
             `[Chain Colors] ⚠️ Representation ${reprRef} does NOT have overpaint applied!`
           );
           missingOverpaint.push(reprRef);
@@ -622,10 +623,10 @@ async function applyOverpaintToRepresentations(
       }
 
       if (missingOverpaint.length > 0) {
-        console.warn(
+        logger.warn(
           `[Chain Colors] ⚠️ ${missingOverpaint.length} representation(s) missing overpaint: ${missingOverpaint.join(", ")}`
         );
-        console.warn(
+        logger.warn(
           `[Chain Colors] ⚠️ These representations may show warm colors (yellow/orange/red) from default colorTheme!`
         );
       }
@@ -635,18 +636,18 @@ async function applyOverpaintToRepresentations(
 
     const overpaintApplied = verifyOverpaint();
     if (overpaintApplied) {
-      console.log(
+      logger.log(
         `[Chain Colors] ✅ All representations have overpaint applied - cool colors guaranteed!`
       );
     } else {
-      console.warn(
+      logger.warn(
         `[Chain Colors] ⚠️ Some representations may not have chain colors applied!`
       );
     }
 
     return true;
   } catch (err) {
-    console.error("[Chain Colors] Failed to apply overpaint:", err);
+    logger.error("[Chain Colors] Failed to apply overpaint:", err);
     return false;
   }
 }

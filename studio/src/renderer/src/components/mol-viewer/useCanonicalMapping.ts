@@ -9,6 +9,7 @@ import {
 } from "molstar/lib/mol-model/structure";
 import { StructureProperties } from "molstar/lib/mol-model/structure/structure/properties";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 import { missingRegionsDetectedAtom } from "../../store/repair-atoms";
 import { useCurrentProject, useProjectStore } from "../../store/project-store";
 import type { ResidueMapping } from "../../types/project";
@@ -31,7 +32,7 @@ export function useCanonicalMapping(
     const handleMissingRegionsReady = async (
       segments: RepairSegment[]
     ): Promise<void> => {
-      console.log(
+      logger.log(
         "[Canonical Mapping] Missing regions detected, generating mapping...",
         segments
       );
@@ -41,25 +42,25 @@ export function useCanonicalMapping(
         const structures =
           plugin.managers.structure.hierarchy.current.structures;
         if (!structures || structures.length === 0) {
-          console.warn("[Canonical Mapping] No structure loaded");
+          logger.warn("[Canonical Mapping] No structure loaded");
           return;
         }
 
         const structureRef = structures[0];
         const structure = structureRef.cell.obj?.data as Structure | undefined;
         if (!structure) {
-          console.warn("[Canonical Mapping] Structure data not available");
+          logger.warn("[Canonical Mapping] Structure data not available");
           return;
         }
 
         // Generate mapping from structure and missing regions
         const mapping = generateMapping(structure, missingRegions);
-        console.log("✅ [Canonical Mapping] Mapping generated");
+        logger.log("✅ [Canonical Mapping] Mapping generated");
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to generate mapping";
         setError(message);
-        console.error("❌ [Canonical Mapping] Error:", message);
+        logger.error("❌ [Canonical Mapping] Error:", message);
       }
     };
 

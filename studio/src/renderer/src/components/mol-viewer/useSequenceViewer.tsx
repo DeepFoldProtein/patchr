@@ -19,6 +19,7 @@ import {
 import { StructureProperties } from "molstar/lib/mol-model/structure/structure/properties";
 import { OrderedSet } from "molstar/lib/mol-data/int";
 import { Loci } from "molstar/lib/mol-model/loci";
+import { logger } from "../../lib/logger";
 
 /**
  * Mol* sequence viewer hook with chain highlighting support
@@ -35,7 +36,7 @@ export function useSequenceViewer(
   const isConvertingRef = useRef<boolean>(false);
 
   useEffect(() => {
-    console.log(
+    logger.log(
       `[Sequence Viewer] Setting up sequence viewer (plugin=${!!plugin})`
     );
 
@@ -43,7 +44,7 @@ export function useSequenceViewer(
 
     const container = document.getElementById(containerId);
     if (!container) {
-      console.warn(`Sequence container ${containerId} not found`);
+      logger.warn(`Sequence container ${containerId} not found`);
       return;
     }
 
@@ -59,7 +60,7 @@ export function useSequenceViewer(
         <SequenceView
           ref={(ref: SequenceView | null) => {
             sequenceViewRef.current = ref;
-            console.log(`[Sequence Viewer] SequenceView ref set:`, !!ref);
+            logger.log(`[Sequence Viewer] SequenceView ref set:`, !!ref);
           }}
         />
       </PluginContextContainer>
@@ -74,50 +75,50 @@ export function useSequenceViewer(
 
   // Listen to gap focus events to highlight chain in sequence viewer
   useEffect(() => {
-    console.log(
+    logger.log(
       `[Sequence Viewer] Setting up missing-region:focus listener (plugin=${!!plugin}, gaps=${missingRegions.length})`
     );
 
     if (!plugin || missingRegions.length === 0) return;
 
     const handleGapFocus = (gapId: string): void => {
-      console.log(
+      logger.log(
         `[Sequence Viewer] === missing-region:focus event received ===`
       );
-      console.log(`[Sequence Viewer] Looking for gap ID: ${gapId}`);
-      console.log(
+      logger.log(`[Sequence Viewer] Looking for gap ID: ${gapId}`);
+      logger.log(
         `[Sequence Viewer] Available gaps:`,
         missingRegions.map(g => g.regionId)
       );
 
       const gap = missingRegions.find(g => g.regionId === gapId);
       if (!gap) {
-        console.warn(`[Sequence Viewer] Gap ${gapId} not found in gaps array`);
+        logger.warn(`[Sequence Viewer] Gap ${gapId} not found in gaps array`);
         return;
       }
 
-      console.log(
+      logger.log(
         `[Sequence Viewer] Found gap: chainId=${gap.chainId}, startAuthSeqId=${gap.startAuthSeqId}, endAuthSeqId=${gap.endAuthSeqId}, type=${gap.regionType}`
       );
 
       // Get structure
       const structures = plugin.managers.structure.hierarchy.current.structures;
-      console.log(
+      logger.log(
         `[Sequence Viewer] Structures available: ${structures?.length || 0}`
       );
 
       if (!structures || structures.length === 0) {
-        console.warn(`[Sequence Viewer] No structures available`);
+        logger.warn(`[Sequence Viewer] No structures available`);
         return;
       }
 
       const structure = structures[0].cell.obj?.data;
       if (!structure) {
-        console.warn(`[Sequence Viewer] Structure data is undefined`);
+        logger.warn(`[Sequence Viewer] Structure data is undefined`);
         return;
       }
 
-      console.log(
+      logger.log(
         `[Sequence Viewer] Structure loaded, units: ${structure.units.length}`
       );
 
@@ -130,14 +131,14 @@ export function useSequenceViewer(
         // Try residue before gap
         targetAuthSeqId = gap.startAuthSeqId - 1;
         targetInsCode = ""; // Usually the previous residue doesn't have ins code
-        console.log(
+        logger.log(
           `[Sequence Viewer] Targeting residue before gap: auth_seq_id=${targetAuthSeqId}`
         );
       } else if (gap.endAuthSeqId) {
         // Try residue after gap
         targetAuthSeqId = gap.endAuthSeqId + 1;
         targetInsCode = "";
-        console.log(
+        logger.log(
           `[Sequence Viewer] Targeting residue after gap: auth_seq_id=${targetAuthSeqId}`
         );
       }
@@ -152,7 +153,7 @@ export function useSequenceViewer(
         );
 
         if (targetLoci) {
-          console.log(
+          logger.log(
             `[Sequence Viewer] Found target residue at auth_seq_id=${targetAuthSeqId}`
           );
 
@@ -167,22 +168,22 @@ export function useSequenceViewer(
           const bounds = Loci.getBoundingSphere(targetLoci);
           if (bounds) {
             plugin.canvas3d?.camera.focus(bounds.center, 15, 500);
-            console.log(
+            logger.log(
               `[Sequence Viewer] ✓ Zoomed to auth_seq_id=${targetAuthSeqId}`
             );
           }
         } else {
-          console.warn(
+          logger.warn(
             `[Sequence Viewer] Could not find residue with auth_seq_id=${targetAuthSeqId}`
           );
         }
       }
 
       // Try to change sequence viewer to show the target chain
-      console.log(
+      logger.log(
         `[Sequence Viewer] Attempting to change sequence view to chain ${gap.chainId}`
       );
-      console.log(
+      logger.log(
         `[Sequence Viewer] SequenceView ref available:`,
         !!sequenceViewRef.current
       );
@@ -192,24 +193,24 @@ export function useSequenceViewer(
           const sequenceView = sequenceViewRef.current;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const currentState = (sequenceView as any).state;
-          console.log(`[Sequence Viewer] Current state:`, currentState);
+          logger.log(`[Sequence Viewer] Current state:`, currentState);
 
           // Find the chain group ID for the target chain
           const modelEntityOptions = getModelEntityOptions(structure);
-          console.log(
+          logger.log(
             `[Sequence Viewer] Model entity options:`,
             modelEntityOptions
           );
 
           for (const [modelEntityId] of modelEntityOptions) {
             const chainOptions = getChainOptions(structure, modelEntityId);
-            console.log(
+            logger.log(
               `[Sequence Viewer] Chain options for entity ${modelEntityId}:`,
               chainOptions
             );
 
             for (const [chainGroupId, chainLabel] of chainOptions) {
-              console.log(
+              logger.log(
                 `[Sequence Viewer] Checking chain: ${chainLabel} (ID: ${chainGroupId})`
               );
 
@@ -218,13 +219,13 @@ export function useSequenceViewer(
               const authMatch = chainLabel.match(/\[auth ([^\]]+)\]/);
               const authChainId = authMatch ? authMatch[1] : chainLabel.trim();
 
-              console.log(
+              logger.log(
                 `[Sequence Viewer] Extracted auth chain ID: ${authChainId}`
               );
 
               // Match against auth chain ID
               if (authChainId === gap.chainId) {
-                console.log(
+                logger.log(
                   `[Sequence Viewer] Found matching chain! Setting state...`
                 );
 
@@ -236,7 +237,7 @@ export function useSequenceViewer(
                   mode: "single"
                 });
 
-                console.log(
+                logger.log(
                   `[Sequence Viewer] ✓ Changed sequence view to chain ${gap.chainId}`
                 );
                 return;
@@ -244,26 +245,26 @@ export function useSequenceViewer(
             }
           }
 
-          console.warn(
+          logger.warn(
             `[Sequence Viewer] Could not find chain ${gap.chainId} in sequence options`
           );
         } catch (error) {
-          console.error(
+          logger.error(
             `[Sequence Viewer] Error changing sequence view:`,
             error
           );
         }
       } else {
-        console.warn(`[Sequence Viewer] SequenceView ref not available`);
+        logger.warn(`[Sequence Viewer] SequenceView ref not available`);
       }
     };
 
     bus.on("missing-region:focus", handleGapFocus);
-    console.log(`[Sequence Viewer] missing-region:focus listener registered`);
+    logger.log(`[Sequence Viewer] missing-region:focus listener registered`);
 
     return () => {
       bus.off("missing-region:focus", handleGapFocus);
-      console.log(`[Sequence Viewer] Event listeners unregistered`);
+      logger.log(`[Sequence Viewer] Event listeners unregistered`);
     };
   }, [plugin, missingRegions]);
 
@@ -326,7 +327,7 @@ export function useSequenceViewer(
 
           // If label_seq_id and auth_seq_id are different, we need to convert
           if (labelSeqId !== authSeqId) {
-            console.log(
+            logger.log(
               `[Sequence Viewer] Converting selection from label_seq_id=${labelSeqId} to auth_seq_id=${authSeqId}`
             );
 
@@ -358,7 +359,7 @@ export function useSequenceViewer(
                   plugin.canvas3d?.camera.focus(bounds.center, 8, 500);
                 }
 
-                console.log(
+                logger.log(
                   `[Sequence Viewer] ✓ Converted selection to auth_seq_id=${authSeqId} and zoomed`
                 );
               }
@@ -374,7 +375,7 @@ export function useSequenceViewer(
           return;
         }
       } catch (error) {
-        console.error(
+        logger.error(
           "[Sequence Viewer] Error handling selection change:",
           error
         );

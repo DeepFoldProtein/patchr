@@ -12,6 +12,7 @@ import { useCurrentProject } from "../store/project-store";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import { getSequencePanelData } from "./mol-viewer/useGapDetection";
 import { bus } from "../lib/event-bus";
+import { logger } from "../lib/logger";
 import {
   Eye,
   EyeOff,
@@ -19,7 +20,12 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  FolderOpen
+  FolderOpen,
+  Monitor,
+  Cloud,
+  ExternalLink,
+  ChevronRight,
+  ServerOff
 } from "lucide-react";
 import {
   Dialog,
@@ -158,7 +164,7 @@ function RepairConsole(): React.ReactElement {
         // Read the result file
         const fileResult = await window.api.project.readFileByPath(filePath);
         if (!fileResult.success || !fileResult.content) {
-          console.error(
+          logger.error(
             `Failed to read result file: ${fileResult.error || "Unknown error"}`
           );
           return;
@@ -171,13 +177,13 @@ function RepairConsole(): React.ReactElement {
           superpose
         });
 
-        console.log(
+        logger.log(
           `✅ Result loaded ${superpose ? "with" : "without"} superposition: ${filePath}`
         );
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to load result";
-        console.error("❌ Error loading result:", message);
+        logger.error("❌ Error loading result:", message);
       }
     },
     []
@@ -216,7 +222,7 @@ function RepairConsole(): React.ReactElement {
         setBaseStructures([]);
       }
     } catch (err) {
-      console.error("Failed to load base structures:", err);
+      logger.error("Failed to load base structures:", err);
       setBaseStructures([]);
     }
   }, [currentProject]);
@@ -354,14 +360,14 @@ function RepairConsole(): React.ReactElement {
           }
         }
 
-        console.log(
+        logger.log(
           `[Quality Metrics] CIF parsing complete: totalPLDDT=${totalPLDDT.toFixed(1)}, pLDDTCount=${pLDDTCount}, totalMolProb=${totalMolProb.toFixed(3)}, molProbCount=${molProbCount}`
         );
 
         // For molprobability, if not found in occupancy, it might be in a separate field
         // or not available at all (Boltz may not output this)
       } catch (err) {
-        console.error("[Quality Metrics] CIF parsing error:", err);
+        logger.error("[Quality Metrics] CIF parsing error:", err);
       }
 
       return { totalPLDDT, totalMolProb, pLDDTCount, molProbCount };
@@ -373,7 +379,7 @@ function RepairConsole(): React.ReactElement {
   const calculateQualityMetrics = React.useCallback(
     async (cifFiles: string[], runPath?: string) => {
       try {
-        console.log(
+        logger.log(
           `[Quality Metrics] Calculating for ${cifFiles.length} CIF file(s)`
         );
 
@@ -410,7 +416,7 @@ function RepairConsole(): React.ReactElement {
                               parsed.average_plddt !== undefined ||
                               parsed.average_molprobability !== undefined
                             ) {
-                              console.log(
+                              logger.log(
                                 `[Quality Metrics] ✓ Found metadata file: ${filePath}`
                               );
                               metadataFiles.push(result.content);
@@ -436,7 +442,7 @@ function RepairConsole(): React.ReactElement {
 
             await searchForMetadataFiles(predictionsPath);
           } catch (err) {
-            console.log(
+            logger.log(
               `[Quality Metrics] Could not search predictions directory:`,
               err instanceof Error ? err.message : String(err)
             );
@@ -449,7 +455,7 @@ function RepairConsole(): React.ReactElement {
           const cifFileName = pathParts[pathParts.length - 1];
           const cifDir = pathParts.slice(0, -1).join("/");
 
-          console.log(
+          logger.log(
             `[Quality Metrics] Searching metadata for: ${cifFileName} in ${cifDir}`
           );
 
@@ -541,7 +547,7 @@ function RepairConsole(): React.ReactElement {
           // Remove duplicates
           const uniquePaths = Array.from(new Set(possibleMetadataPaths));
 
-          console.log(
+          logger.log(
             `[Quality Metrics] Trying ${uniquePaths.length} possible paths:`,
             uniquePaths
           );
@@ -550,25 +556,25 @@ function RepairConsole(): React.ReactElement {
             const result =
               await window.api.project.readFileByPath(metadataPath);
             if (result.success && result.content) {
-              console.log(
+              logger.log(
                 `[Quality Metrics] ✓ Found metadata: ${metadataPath}`
               );
               metadataFiles.push(result.content);
               break; // Found one, no need to try others for this CIF file
             } else {
-              console.log(`[Quality Metrics] ✗ Not found: ${metadataPath}`);
+              logger.log(`[Quality Metrics] ✗ Not found: ${metadataPath}`);
             }
           }
         }
 
         if (metadataFiles.length === 0) {
-          console.warn(
+          logger.warn(
             `[Quality Metrics] No metadata files found for ${cifFiles.length} CIF file(s)`
           );
           return null;
         }
 
-        console.log(
+        logger.log(
           `[Quality Metrics] Found ${metadataFiles.length} metadata file(s), extracting inpainting regions...`
         );
 
@@ -582,7 +588,7 @@ function RepairConsole(): React.ReactElement {
           try {
             const metadata = JSON.parse(metadataContent);
 
-            console.log(
+            logger.log(
               `[Quality Metrics] Metadata structure (first 500 chars):`,
               JSON.stringify(metadata, null, 2).substring(0, 500)
             );
@@ -623,14 +629,14 @@ function RepairConsole(): React.ReactElement {
 
                 if (inpaintedResidues.size > 0) {
                   inpaintingRegionsByChain.set(chainId, inpaintedResidues);
-                  console.log(
+                  logger.log(
                     `[Quality Metrics] Chain ${chainId}: ${inpaintedResidues.size} inpainted residues`
                   );
                 }
               }
             }
           } catch (err) {
-            console.error(
+            logger.error(
               "[Quality Metrics] Failed to parse metadata JSON:",
               err
             );
@@ -638,13 +644,13 @@ function RepairConsole(): React.ReactElement {
         }
 
         if (inpaintingRegionsByChain.size === 0) {
-          console.warn(
+          logger.warn(
             `[Quality Metrics] No inpainting regions found in metadata`
           );
           return null;
         }
 
-        console.log(
+        logger.log(
           `[Quality Metrics] Found inpainting regions for ${inpaintingRegionsByChain.size} chain(s), reading CIF files...`
         );
 
@@ -656,10 +662,10 @@ function RepairConsole(): React.ReactElement {
 
         for (const cifFile of cifFiles) {
           try {
-            console.log(`[Quality Metrics] Reading CIF file: ${cifFile}`);
+            logger.log(`[Quality Metrics] Reading CIF file: ${cifFile}`);
             const cifResult = await window.api.project.readFileByPath(cifFile);
             if (!cifResult.success || !cifResult.content) {
-              console.warn(`[Quality Metrics] Failed to read CIF: ${cifFile}`);
+              logger.warn(`[Quality Metrics] Failed to read CIF: ${cifFile}`);
               continue;
             }
 
@@ -671,7 +677,7 @@ function RepairConsole(): React.ReactElement {
               inpaintingRegionsByChain
             );
 
-            console.log(
+            logger.log(
               `[Quality Metrics] Extracted from ${cifFile.split("/").pop()}: ${metrics.pLDDTCount} pLDDT values, ${metrics.molProbCount} molprob values`
             );
 
@@ -680,7 +686,7 @@ function RepairConsole(): React.ReactElement {
             pLDDTCount += metrics.pLDDTCount;
             molProbCount += metrics.molProbCount;
           } catch (err) {
-            console.error(
+            logger.error(
               `[Quality Metrics] Failed to process CIF file ${cifFile}:`,
               err instanceof Error ? err.message : String(err)
             );
@@ -688,7 +694,7 @@ function RepairConsole(): React.ReactElement {
         }
 
         if (pLDDTCount === 0 && molProbCount === 0) {
-          console.warn(
+          logger.warn(
             `[Quality Metrics] No quality metrics found in metadata files`
           );
           return null;
@@ -701,7 +707,7 @@ function RepairConsole(): React.ReactElement {
         // Combined score: use only pLDDT since molprobability is not available
         const combinedScore = avgPLDDT;
 
-        console.log(
+        logger.log(
           `[Quality Metrics] ✓ Calculated: pLDDT=${avgPLDDT.toFixed(1)}, MP=${avgMolProbability.toFixed(3)}, Score=${combinedScore.toFixed(1)}`
         );
 
@@ -711,7 +717,7 @@ function RepairConsole(): React.ReactElement {
           combinedScore
         };
       } catch (err) {
-        console.error(
+        logger.error(
           "[Quality Metrics] Failed to calculate quality metrics:",
           err instanceof Error ? err.message : String(err)
         );
@@ -788,7 +794,7 @@ function RepairConsole(): React.ReactElement {
                 latestResult.cifFiles.find(f => f.includes("model")) ||
                 latestResult.cifFiles[0];
 
-              console.log(
+              logger.log(
                 `🔄 Auto-loading latest result: ${latestResult.runId} - ${firstCifFile}`
               );
 
@@ -804,7 +810,7 @@ function RepairConsole(): React.ReactElement {
           previousResultsRef.current = [];
         }
       } catch (err) {
-        console.error("Failed to load results:", err);
+        logger.error("Failed to load results:", err);
         setResults([]);
         previousResultsRef.current = [];
       } finally {
@@ -877,7 +883,7 @@ function RepairConsole(): React.ReactElement {
       bus.emit("inpainting:remove-result", { filePath, visible: false });
     }
 
-    console.log(`[Hide All] Hidden ${allVisibleFiles.length} structure(s)`);
+    logger.log(`[Hide All] Hidden ${allVisibleFiles.length} structure(s)`);
   }, [visibleFiles]);
 
   // Load YAML file for a run
@@ -897,7 +903,7 @@ function RepairConsole(): React.ReactElement {
             (f: string) => f.endsWith(".yaml") || f.endsWith(".yml")
           );
 
-          console.log(
+          logger.log(
             `[YAML Load] Found ${yamlFiles.length} YAML files in ${predictionsPath}:`,
             yamlFiles
           );
@@ -909,7 +915,7 @@ function RepairConsole(): React.ReactElement {
               await window.api.project.readFileByPath(yamlPath);
             if (yamlResult.success && yamlResult.content) {
               yamlContent = yamlResult.content;
-              console.log(`[YAML Load] Loaded: ${yamlPath}`);
+              logger.log(`[YAML Load] Loaded: ${yamlPath}`);
               break;
             }
           }
@@ -921,7 +927,7 @@ function RepairConsole(): React.ReactElement {
           const yamlResult = await window.api.project.readFileByPath(yamlPath);
           if (yamlResult.success && yamlResult.content) {
             yamlContent = yamlResult.content;
-            console.log(`[YAML Load] Loaded from run dir: ${yamlPath}`);
+            logger.log(`[YAML Load] Loaded from run dir: ${yamlPath}`);
           }
         }
 
@@ -931,7 +937,7 @@ function RepairConsole(): React.ReactElement {
           if (yamlResult.success && yamlResult.yaml) {
             // Convert YAML object back to string for display
             yamlContent = JSON.stringify(yamlResult.yaml, null, 2);
-            console.log(`[YAML Load] Loaded from project root`);
+            logger.log(`[YAML Load] Loaded from project root`);
           }
         }
 
@@ -943,7 +949,7 @@ function RepairConsole(): React.ReactElement {
           setDetailRunId(runId);
         }
       } catch (err) {
-        console.error("Failed to load detail:", err);
+        logger.error("Failed to load detail:", err);
         setDetailYaml("Failed to load YAML file");
         setDetailRunId(runId);
       }
@@ -1194,7 +1200,7 @@ function RepairConsole(): React.ReactElement {
                                   result.predictionsPath
                                 );
                               } catch (error) {
-                                console.error("Failed to open folder:", error);
+                                logger.error("Failed to open folder:", error);
                               }
                             }}
                             variant="ghost"
@@ -1410,7 +1416,7 @@ function SequenceMappingSection(): React.ReactElement {
 
       return result;
     } catch (error) {
-      console.error("Failed to extract sequences:", error);
+      logger.error("Failed to extract sequences:", error);
       return new Map<
         string,
         { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
@@ -1464,13 +1470,13 @@ function SequenceMappingSection(): React.ReactElement {
         { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
       >();
 
-      console.log("[UniProt Search] plugin available:", !!plugin);
+      logger.log("[UniProt Search] plugin available:", !!plugin);
 
       if (plugin) {
         try {
-          console.log("[UniProt Search] Calling getSequencePanelData...");
+          logger.log("[UniProt Search] Calling getSequencePanelData...");
           const data = getSequencePanelData(plugin);
-          console.log(
+          logger.log(
             "[UniProt Search] getSequencePanelData returned:",
             data.size,
             "entries"
@@ -1482,13 +1488,13 @@ function SequenceMappingSection(): React.ReactElement {
             });
           }
         } catch (e) {
-          console.error(
+          logger.error(
             "[UniProt Search] Failed to get fresh sequence data:",
             e
           );
         }
       } else {
-        console.warn("[UniProt Search] Plugin not available!");
+        logger.warn("[UniProt Search] Plugin not available!");
       }
 
       // Separate protein chains from DNA/RNA chains (only for selected chains)
@@ -1497,7 +1503,7 @@ function SequenceMappingSection(): React.ReactElement {
       const chainsToSearch = Array.from(selectedChainsForSearch);
 
       // Debug: Log all chain data
-      console.log(
+      logger.log(
         "[UniProt Search] freshSequenceData entries:",
         Array.from(freshSequenceData.entries()).map(([id, data]) => ({
           chainId: id,
@@ -1508,7 +1514,7 @@ function SequenceMappingSection(): React.ReactElement {
 
       for (const chainId of chainsToSearch) {
         const data = freshSequenceData.get(chainId);
-        console.log(
+        logger.log(
           `[UniProt Search] Chain "${chainId}": polymerType="${data?.polymerType || "not found"}", sequence="${data?.sequence?.substring(0, 20) || "none"}..."`
         );
         if (data?.polymerType === "dna" || data?.polymerType === "rna") {
@@ -1518,7 +1524,7 @@ function SequenceMappingSection(): React.ReactElement {
         }
       }
 
-      console.log(
+      logger.log(
         "Searching UniProt for PDB ID:",
         pdbId,
         "protein chains:",
@@ -1598,7 +1604,7 @@ function SequenceMappingSection(): React.ReactElement {
       setFastaInput(fastaLines.join("\n"));
       setSearchStatus("success");
     } catch (error) {
-      console.error("UniProt search failed:", error);
+      logger.error("UniProt search failed:", error);
       setSearchStatus("error");
     }
   };
@@ -1786,6 +1792,198 @@ function SequenceMappingSection(): React.ReactElement {
   );
 }
 
+const COLAB_NOTEBOOK_URL =
+  "https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb";
+
+function ServerSetupGuide({
+  onUrlChange,
+  onDismiss
+}: {
+  onUrlChange: (url: string) => void;
+  onDismiss: () => void;
+}): React.ReactElement {
+  const [activeTab, setActiveTab] = React.useState<"local" | "colab">("colab");
+  const [colabUrl, setColabUrl] = React.useState("");
+
+  const handleColabUrlApply = (): void => {
+    const trimmed = colabUrl.trim().replace(/\/+$/, "");
+    if (trimmed) {
+      onUrlChange(trimmed);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border-b border-amber-500/20">
+        <div className="flex items-center gap-1.5">
+          <ServerOff className="h-3.5 w-3.5 text-amber-500" />
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            Server not detected
+          </span>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200/50 dark:border-slate-800/50">
+        <button
+          onClick={() => setActiveTab("colab")}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === "colab"
+              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+          }`}
+        >
+          <Cloud className="h-3 w-3" />
+          Google Colab
+        </button>
+        <button
+          onClick={() => setActiveTab("local")}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === "local"
+              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+          }`}
+        >
+          <Monitor className="h-3 w-3" />
+          Local Setup
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="p-3">
+        {activeTab === "colab" ? (
+          <div className="space-y-2.5">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Use a free GPU on Google Colab:
+            </p>
+            <div className="rounded px-2 py-1.5 bg-orange-500/10 border border-orange-500/20">
+              <p className="text-[10px] text-orange-600 dark:text-orange-400">
+                Large targets may fail on Colab free tier due to limited GPU
+                memory (T4 15GB). For large complexes, use Local Setup or Colab
+                Pro.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  1
+                </span>
+                <div className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Open the Colab notebook
+                  </span>
+                  <button
+                    onClick={() =>
+                      window.open(COLAB_NOTEBOOK_URL, "_blank")
+                    }
+                    className="flex items-center gap-1 mt-1 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                  >
+                    Open in Colab
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  2
+                </span>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Run all cells
+                  </span>{" "}
+                  and copy the public URL
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  3
+                </span>
+                <div className="flex-1 text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Paste the URL here
+                  </span>
+                  <div className="flex gap-1.5 mt-1">
+                    <input
+                      type="text"
+                      value={colabUrl}
+                      onChange={e => setColabUrl(e.target.value)}
+                      placeholder="https://xxx.trycloudflare.com"
+                      className="flex-1 rounded border border-input bg-background px-2 py-1 text-[10px] font-mono"
+                      onKeyDown={e => {
+                        if (e.key === "Enter") handleColabUrlApply();
+                      }}
+                    />
+                    <button
+                      onClick={handleColabUrlApply}
+                      disabled={!colabUrl.trim()}
+                      className="rounded bg-blue-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center gap-0.5"
+                    >
+                      Apply
+                      <ChevronRight className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Run the PATCHR server locally with a GPU:
+            </p>
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  1
+                </span>
+                <div className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Clone & install
+                  </span>
+                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all whitespace-pre-wrap">
+                    {`git clone https://github.com/DeepFoldProtein/patchr.git && cd patchr && pip install -e .[cuda]`}
+                  </code>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  2
+                </span>
+                <div className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Start the server
+                  </span>
+                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all">
+                    python -m boltz.server --port 31212
+                  </code>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                  3
+                </span>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Click "Test Connection"
+                  </span>{" "}
+                  above with the default URL
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ContextInpaintSection({
   onJobCompleted
 }: {
@@ -1807,8 +2005,39 @@ function ContextInpaintSection({
     null
   );
   const [error, setError] = React.useState<string | null>(null);
-  // Result files are now managed in Results section, not used here
-  // const [resultFiles, setResultFiles] = React.useState<string[]>([]);
+  const [showSetupGuide, setShowSetupGuide] = React.useState(false);
+
+  // Auto-detect server on mount
+  React.useEffect(() => {
+    if (connectionStatus !== "idle") return;
+
+    let cancelled = false;
+    const autoDetect = async (): Promise<void> => {
+      try {
+        if (!window.api?.boltz?.healthCheck) return;
+        const result = await window.api.boltz.healthCheck(
+          "http://localhost:31212"
+        );
+        if (cancelled) return;
+        if (result.success) {
+          setConnectionStatus("connected");
+          logger.log("[Auto-detect] Server found at localhost:31212");
+        } else {
+          setShowSetupGuide(true);
+          logger.log("[Auto-detect] Server not responding");
+        }
+      } catch {
+        if (cancelled) return;
+        setShowSetupGuide(true);
+        logger.log("[Auto-detect] Server not found at localhost:31212");
+      }
+    };
+
+    void autoDetect();
+    return () => {
+      cancelled = true;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Get chains from selected repair segments
   const availableChains = React.useMemo(() => {
@@ -1863,7 +2092,7 @@ function ContextInpaintSection({
   // Test connection
   const handleTestConnection = async (): Promise<void> => {
     const startTime = Date.now();
-    console.log(
+    logger.log(
       `[Test Connection] Starting health check to ${apiUrl} at ${new Date().toISOString()}`
     );
 
@@ -1891,7 +2120,7 @@ function ContextInpaintSection({
           const elapsed = Date.now() - startTime;
           if (elapsed >= 5000) {
             if (!healthCheckCompleted) {
-              console.log(
+              logger.log(
                 `[Test Connection] ⏱️ Timeout fired after ${elapsed}ms`
               );
               abortController.abort();
@@ -1902,10 +2131,10 @@ function ContextInpaintSection({
           }
         };
         requestAnimationFrame(checkTimeout);
-        console.log(`[Test Connection] ⏱️ Timeout check started (5s limit)`);
+        logger.log(`[Test Connection] ⏱️ Timeout check started (5s limit)`);
       });
 
-      console.log(`[Test Connection] 📡 Calling healthCheck API...`);
+      logger.log(`[Test Connection] 📡 Calling healthCheck API...`);
       const healthCheckStartTime = Date.now();
 
       const healthCheckPromise = window.api.boltz.healthCheck(apiUrl).then(
@@ -1913,14 +2142,14 @@ function ContextInpaintSection({
           const elapsed = Date.now() - healthCheckStartTime;
           const totalElapsed = Date.now() - startTime;
           healthCheckCompleted = true;
-          console.log(
+          logger.log(
             `[Test Connection] ✅ HealthCheck completed in ${elapsed}ms (total: ${totalElapsed}ms), success: ${result.success}`
           );
 
           // Abort timeout if still running
           if (!timeoutSignal.aborted) {
             abortController.abort();
-            console.log(`[Test Connection] 🧹 Timeout aborted`);
+            logger.log(`[Test Connection] 🧹 Timeout aborted`);
           }
 
           return result;
@@ -1929,7 +2158,7 @@ function ContextInpaintSection({
           const elapsed = Date.now() - healthCheckStartTime;
           const totalElapsed = Date.now() - startTime;
           healthCheckCompleted = true;
-          console.log(
+          logger.log(
             `[Test Connection] ❌ HealthCheck failed after ${elapsed}ms (total: ${totalElapsed}ms):`,
             error
           );
@@ -1937,31 +2166,31 @@ function ContextInpaintSection({
           // Abort timeout if still running
           if (!timeoutSignal.aborted) {
             abortController.abort();
-            console.log(`[Test Connection] 🧹 Timeout aborted after error`);
+            logger.log(`[Test Connection] 🧹 Timeout aborted after error`);
           }
 
           throw error;
         }
       );
 
-      console.log(`[Test Connection] 🏁 Starting Promise.race...`);
+      logger.log(`[Test Connection] 🏁 Starting Promise.race...`);
       const result = await Promise.race([healthCheckPromise, timeoutPromise]);
       const totalElapsed = Date.now() - startTime;
-      console.log(
+      logger.log(
         `[Test Connection] 🎯 Promise.race resolved after ${totalElapsed}ms`
       );
 
       if (result.success) {
-        console.log(`[Test Connection] ✅ Connection successful!`);
+        logger.log(`[Test Connection] ✅ Connection successful!`);
         setConnectionStatus("connected");
       } else {
-        console.log(`[Test Connection] ❌ Connection failed: ${result.error}`);
+        logger.log(`[Test Connection] ❌ Connection failed: ${result.error}`);
         setConnectionStatus("error");
         setError(result.error || "Connection failed");
       }
     } catch (err) {
       const totalElapsed = Date.now() - startTime;
-      console.log(
+      logger.log(
         `[Test Connection] 💥 Exception caught after ${totalElapsed}ms:`,
         err
       );
@@ -2059,7 +2288,7 @@ function ContextInpaintSection({
           `  Structure file: ${requestInfo.structureFile}\n` +
           `  Custom sequences: ${requestInfo.customSequences}`;
 
-        console.error("[Template Upload Failed]", {
+        logger.error("[Template Upload Failed]", {
           error: errorMsg,
           request: requestInfo
         });
@@ -2101,7 +2330,7 @@ function ContextInpaintSection({
             `  Custom sequences: ${requestInfo.customSequences}\n` +
             `  Job ID: ${requestInfo.jobId}`;
 
-          console.error("[Template Status Check Failed]", {
+          logger.error("[Template Status Check Failed]", {
             error: errorMsg,
             request: requestInfo
           });
@@ -2124,7 +2353,7 @@ function ContextInpaintSection({
             `  Custom sequences: ${requestInfo.customSequences}\n` +
             `  Job ID: ${requestInfo.jobId}`;
 
-          console.error("[Template Generation Failed]", {
+          logger.error("[Template Generation Failed]", {
             error: errorMsg,
             request: requestInfo
           });
@@ -2193,7 +2422,7 @@ function ContextInpaintSection({
       monitorInterval = setInterval(async () => {
         try {
           if (!window.api?.boltz?.getJobStatus) {
-            console.error("Boltz API not available");
+            logger.error("Boltz API not available");
             if (monitorInterval) clearInterval(monitorInterval);
             setJobStatus("failed");
             setError("Boltz API not available");
@@ -2206,7 +2435,7 @@ function ContextInpaintSection({
           );
 
           if (!statusResult.success || !statusResult.data) {
-            console.error("Status check failed:", statusResult.error);
+            logger.error("Status check failed:", statusResult.error);
             if (monitorInterval) clearInterval(monitorInterval);
             setJobStatus("failed");
             setError(statusResult.error || "Status check failed");
@@ -2268,7 +2497,7 @@ function ContextInpaintSection({
                 downloadResult.cifFiles &&
                 downloadResult.cifFiles.length > 0
               ) {
-                console.log(
+                logger.log(
                   `✓ Results saved: ${downloadResult.cifFiles.length} file(s)`
                 );
               }
@@ -2289,7 +2518,7 @@ function ContextInpaintSection({
             setError(status.error || "Prediction failed");
           }
         } catch (err) {
-          console.error("Failed to check status:", err);
+          logger.error("Failed to check status:", err);
           if (monitorInterval) clearInterval(monitorInterval);
           setJobStatus("failed");
           setError(
@@ -2332,13 +2561,23 @@ function ContextInpaintSection({
             {connectionStatus === "testing"
               ? "Testing..."
               : connectionStatus === "connected"
-                ? "✓ Connected"
+                ? "Connected"
                 : connectionStatus === "error"
                   ? "Try Again"
                   : "Test Connection"}
           </button>
         </div>
       </div>
+
+      {/* Server Setup Guide - shown when server not detected */}
+      {showSetupGuide && connectionStatus !== "connected" && (
+        <ServerSetupGuide
+          onUrlChange={url => {
+            setApiUrl(url);
+          }}
+          onDismiss={() => setShowSetupGuide(false)}
+        />
+      )}
 
       {/* Status Display */}
       {jobStatus !== "idle" && (

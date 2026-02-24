@@ -10,13 +10,18 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/icon.png?asset";
 import { registerProjectIPC } from "./project-manager";
 
+const WINDOW_WIDTH = 1536;
+const WINDOW_HEIGHT = 652;
+const DARK_BG = "#0f172a"; // slate-900
+const LIGHT_BG = "#ffffff";
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1536,
-    height: 652,
+    width: WINDOW_WIDTH,
+    height: WINDOW_HEIGHT,
     show: false,
     autoHideMenuBar: true,
     title: "Patchr Studio",
@@ -74,9 +79,6 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  // IPC test
-  ipcMain.on("ping", () => console.log("pong"));
-
   // Handle theme change for title bar
   ipcMain.handle("app:set-theme", (_event, theme: "light" | "dark") => {
     // Set nativeTheme to update system appearance (macOS, Windows, Linux)
@@ -85,11 +87,9 @@ app.whenReady().then(() => {
     // Also set background color for better visual consistency
     const windows = BrowserWindow.getAllWindows();
     const isDark = theme === "dark";
-    const darkColor = "#0f172a"; // slate-900
-    const lightColor = "#ffffff";
 
     windows.forEach(window => {
-      window.setBackgroundColor(isDark ? darkColor : lightColor);
+      window.setBackgroundColor(isDark ? DARK_BG : LIGHT_BG);
     });
 
     return { success: true };

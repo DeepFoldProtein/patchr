@@ -15,6 +15,7 @@ import { Vec3 } from "molstar/lib/mol-math/linear-algebra";
 import { OrderedSet } from "molstar/lib/mol-data/int";
 import { Loci } from "molstar/lib/mol-model/loci";
 import { StateTransforms } from "molstar/lib/mol-plugin-state/transforms";
+import { logger } from "../../lib/logger";
 
 // Gap boundary representation을 추적하기 위한 label prefix
 const GAP_BOUNDARY_LABEL_PREFIX = "Missing Region Boundary";
@@ -24,7 +25,7 @@ async function clearPreviousMissingRegionBoundaries(
   plugin: PluginUIContext
 ): Promise<void> {
   try {
-    console.log(
+    logger.log(
       "[Gap Visuals DEBUG] clearPreviousMissingRegionBoundaries called"
     );
 
@@ -32,19 +33,19 @@ async function clearPreviousMissingRegionBoundaries(
     const selectionEntries = Array.from(
       plugin.managers.structure.selection.entries.entries()
     );
-    console.log(
+    logger.log(
       "[Gap Visuals DEBUG] Current selection entries:",
       selectionEntries.length
     );
     selectionEntries.forEach(([ref, entry]) => {
-      console.log(
+      logger.log(
         `  - ${ref}: ${entry.selection.elements.length} elements selected`
       );
     });
 
     // Selection 명시적으로 clear
     const clearedSelections = await plugin.managers.structure.selection.clear();
-    console.log(
+    logger.log(
       "[Gap Visuals DEBUG] Cleared selections:",
       clearedSelections.length
     );
@@ -56,7 +57,7 @@ async function clearPreviousMissingRegionBoundaries(
 
     cells.forEach((cell, ref) => {
       if (cell.obj?.label?.startsWith(GAP_BOUNDARY_LABEL_PREFIX)) {
-        console.log(
+        logger.log(
           `[Gap Visuals DEBUG] Found gap boundary to delete: ${cell.obj.label}`
         );
         toDelete.push(ref);
@@ -69,16 +70,16 @@ async function clearPreviousMissingRegionBoundaries(
         update.delete(ref);
       }
       await update.commit();
-      console.log(
+      logger.log(
         `[Missing Region Visuals] Cleared ${toDelete.length} previous boundary representations`
       );
     } else {
-      console.log(
+      logger.log(
         "[Gap Visuals DEBUG] No previous boundary representations to clear"
       );
     }
   } catch (error) {
-    console.error(
+    logger.error(
       "[Missing Region Visuals] Failed to clear previous boundaries:",
       error
     );
@@ -102,7 +103,7 @@ export function useMissingRegionVisuals(
 
     const applyGapVisuals = async (): Promise<void> => {
       try {
-        console.log(
+        logger.log(
           "[Missing Region Visuals] Applying visualization for",
           gaps.length,
           "gaps"
@@ -121,11 +122,11 @@ export function useMissingRegionVisuals(
         // Complete gaps에 대해 measurement distance lines 생성
         await visualizeCompleteGaps(plugin, structure, gaps);
 
-        console.log(
+        logger.log(
           "[Missing Region Visuals] Visualization applied successfully"
         );
       } catch (error) {
-        console.error("[Missing Region Visuals] Error:", error);
+        logger.error("[Missing Region Visuals] Error:", error);
       }
     };
 
@@ -137,7 +138,7 @@ export function useMissingRegionVisuals(
         const entries = Array.from(
           plugin.managers.structure.selection.entries.entries()
         );
-        console.log("[Gap Visuals DEBUG] Selection changed event:", {
+        logger.log("[Gap Visuals DEBUG] Selection changed event:", {
           entryCount: entries.length,
           entries: entries.map(([ref, entry]) => ({
             ref,
@@ -149,7 +150,7 @@ export function useMissingRegionVisuals(
     // User interaction 모니터링 및 빈 공간 클릭 시 selection 해제
     const clickHandler = plugin.behaviors.interaction.click.subscribe(
       ({ current, button, modifiers }) => {
-        console.log("[Gap Visuals DEBUG] User click event:", {
+        logger.log("[Gap Visuals DEBUG] User click event:", {
           lociKind: current.loci.kind,
           isEmpty: current.loci.kind === "empty-loci",
           button,
@@ -158,7 +159,7 @@ export function useMissingRegionVisuals(
 
         // 빈 공간 클릭 시 selection 및 gap boundary representations 해제
         if (current.loci.kind === "empty-loci") {
-          console.log(
+          logger.log(
             "[Gap Visuals DEBUG] Empty loci clicked - clearing selection and gap boundaries"
           );
           plugin.managers.interactivity.lociSelects.deselectAll();
@@ -178,7 +179,7 @@ export function useMissingRegionVisuals(
               update.delete(ref);
             }
             update.commit().then(() => {
-              console.log(
+              logger.log(
                 `[Gap Visuals DEBUG] Cleared ${toDelete.length} gap boundary representations on empty click`
               );
             });
@@ -189,7 +190,7 @@ export function useMissingRegionVisuals(
 
     // Gap 클릭 이벤트 리스너
     const handleGapClick = (regionId: string): void => {
-      console.log(`[Gap Visuals DEBUG] Gap click event received: ${regionId}`);
+      logger.log(`[Gap Visuals DEBUG] Gap click event received: ${regionId}`);
       const gap = gaps.find(g => g.regionId === regionId);
       if (gap && plugin) {
         if (gap.regionType === "partial") {
@@ -221,7 +222,7 @@ async function selectPartialResidue(
   missingRegion: MissingRegionInfo
 ): Promise<void> {
   try {
-    console.log(
+    logger.log(
       `[Missing Region Visuals] === Selecting partial residue ${missingRegion.regionId} ===`
     );
 
@@ -243,32 +244,32 @@ async function selectPartialResidue(
     );
 
     if (!loci) {
-      console.warn(
+      logger.warn(
         `[Missing Region Visuals] Could not find residue for ${missingRegion.regionId}`
       );
       return;
     }
 
-    console.log(`[Gap Visuals DEBUG] Found loci:`, {
+    logger.log(`[Gap Visuals DEBUG] Found loci:`, {
       structure: loci.structure.label,
       elements: loci.elements.length,
       isEmpty: StructureElement.Loci.isEmpty(loci)
     });
 
     // Molstar interactivity manager를 통한 selection (이렇게 하면 자동으로 관리됨)
-    console.log(`[Gap Visuals DEBUG] Calling selectOnly...`);
+    logger.log(`[Gap Visuals DEBUG] Calling selectOnly...`);
     plugin.managers.interactivity.lociSelects.selectOnly({ loci }, false);
 
     // Selection이 실제로 적용되었는지 확인 (즉시 확인)
     const selectionEntries = Array.from(
       plugin.managers.structure.selection.entries.entries()
     );
-    console.log(
+    logger.log(
       "[Gap Visuals DEBUG] After selectOnly - selection entries:",
       selectionEntries.length
     );
     selectionEntries.forEach(([ref, entry]) => {
-      console.log(`  - ${ref}: ${entry.selection.elements.length} elements`);
+      logger.log(`  - ${ref}: ${entry.selection.elements.length} elements`);
     });
 
     // Ball-and-stick representation 추가 (sidechain 표시)
@@ -277,15 +278,15 @@ async function selectPartialResidue(
     // Focus on the residue
     const bounds = Loci.getBoundingSphere(loci);
     if (bounds) {
-      console.log(`[Gap Visuals DEBUG] Focusing camera on bounds:`, bounds);
+      logger.log(`[Gap Visuals DEBUG] Focusing camera on bounds:`, bounds);
       plugin.canvas3d?.camera.focus(bounds.center, 8, 500);
     }
 
-    console.log(
+    logger.log(
       `[Missing Region Visuals] ✓ Selected residue ${missingRegion.regionId} with sidechain`
     );
   } catch (error) {
-    console.error(
+    logger.error(
       `[Missing Region Visuals] Failed to select residue ${missingRegion.regionId}:`,
       error
     );
@@ -405,11 +406,11 @@ async function addBallAndStickForSelection(
 
     await update.commit();
 
-    console.log(
+    logger.log(
       `[Missing Region Visuals] Added ball-and-stick representation for ${tag}`
     );
   } catch (error) {
-    console.error(
+    logger.error(
       `[Missing Region Visuals] Failed to add representation for ${tag}:`,
       error
     );
@@ -428,7 +429,7 @@ async function visualizePartialResidues(
   const partialGaps = gaps.filter(g => g.regionType === "partial");
   if (partialGaps.length === 0) return;
 
-  console.log(
+  logger.log(
     "[Missing Region Visuals] Adding text labels for",
     partialGaps.length,
     "partial residues"
@@ -445,7 +446,7 @@ async function visualizePartialResidues(
       );
 
       if (!loci) {
-        console.warn(
+        logger.warn(
           `[Missing Region Visuals] Could not find residue for partial ${gap.regionId}`
         );
         continue;
@@ -467,11 +468,11 @@ async function visualizePartialResidues(
         }
       });
 
-      console.log(
+      logger.log(
         `[Missing Region Visuals] ✓ Added label for partial residue ${gap.regionId}: "${labelText}"`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `[Missing Region Visuals] Failed to create label for ${gap.regionId}:`,
         error
       );
@@ -491,7 +492,7 @@ async function visualizeCompleteGaps(
   const completeGaps = gaps.filter(g => g.regionType === "complete");
   if (completeGaps.length === 0) return;
 
-  console.log(
+  logger.log(
     "[Missing Region Visuals] Drawing distance lines for",
     completeGaps.length,
     "complete gaps"
@@ -534,11 +535,11 @@ async function visualizeCompleteGaps(
             }
           );
 
-          console.log(
+          logger.log(
             `[Missing Region Visuals] ✓ Added label for ${gap.terminalType} gap ${gap.regionId}: "${labelText}"`
           );
         } else {
-          console.warn(
+          logger.warn(
             `[Missing Region Visuals] Could not find boundary residue for ${gap.terminalType} gap ${gap.regionId}`
           );
         }
@@ -564,7 +565,7 @@ async function visualizeCompleteGaps(
       );
 
       if (!startLoci || !endLoci) {
-        console.warn(
+        logger.warn(
           `[Missing Region Visuals] Could not find loci for gap ${gap.regionId}`
         );
         continue;
@@ -582,11 +583,11 @@ async function visualizeCompleteGaps(
         }
       );
 
-      console.log(
+      logger.log(
         `[Missing Region Visuals] ✓ Distance line for ${gap.regionId} (${gap.regionLength} residues)`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `[Missing Region Visuals] Failed to create distance line for ${gap.regionId}:`,
         error
       );
@@ -617,7 +618,7 @@ function findNearbyResidueLoci(
     // Insertion code 없이 시도
     loci = findResidueLoci(structure, chainId, nearbySeqId, undefined);
     if (loci) {
-      console.log(
+      logger.log(
         `  Found nearby residue at ${nearbySeqId} (offset=${searchDirection * offset})`
       );
       return loci;
@@ -627,7 +628,7 @@ function findNearbyResidueLoci(
     for (const tryInsCode of ["A", "B", "C", "D", "E"]) {
       loci = findResidueLoci(structure, chainId, nearbySeqId, tryInsCode);
       if (loci) {
-        console.log(
+        logger.log(
           `  Found nearby residue at ${nearbySeqId}${tryInsCode} (offset=${searchDirection * offset})`
         );
         return loci;
@@ -635,7 +636,7 @@ function findNearbyResidueLoci(
     }
   }
 
-  console.warn(`  Could not find any residue near ${seqId}${insCode || ""}`);
+  logger.warn(`  Could not find any residue near ${seqId}${insCode || ""}`);
   return null;
 }
 
@@ -650,7 +651,7 @@ async function focusOnGap(
   missingRegion: MissingRegionInfo
 ): Promise<void> {
   try {
-    console.log(
+    logger.log(
       `[Missing Region Visuals] Focusing on gap ${missingRegion.regionId}`
     );
 
@@ -716,7 +717,7 @@ async function focusOnGap(
         }
 
         if (targetLoci) {
-          console.log(
+          logger.log(
             `[Gap Visuals DEBUG] ${missingRegion.terminalType} gap - selecting single boundary residue`
           );
 
@@ -739,11 +740,11 @@ async function focusOnGap(
             plugin.canvas3d?.camera.focus(bounds.center, 12, 500);
           }
 
-          console.log(
+          logger.log(
             `[Missing Region Visuals] ✓ Focused on ${missingRegion.terminalType} gap with single residue (${missingRegion.regionLength} residues missing)`
           );
         } else {
-          console.warn(
+          logger.warn(
             `[Missing Region Visuals] Could not find boundary residue for ${missingRegion.terminalType} gap ${missingRegion.regionId}`
           );
         }
@@ -765,10 +766,10 @@ async function focusOnGap(
         );
 
         if (startLoci && endLoci) {
-          console.log(`[Gap Visuals DEBUG] Internal gap - found both loci`);
+          logger.log(`[Gap Visuals DEBUG] Internal gap - found both loci`);
 
           // 양쪽 경계 residue 모두 선택 - selectOnly로 먼저 clear, 그 다음 select로 추가
-          console.log(
+          logger.log(
             `[Gap Visuals DEBUG] Calling selectOnly for start loci...`
           );
           plugin.managers.interactivity.lociSelects.selectOnly(
@@ -776,7 +777,7 @@ async function focusOnGap(
             false
           );
 
-          console.log(`[Gap Visuals DEBUG] Calling select for end loci...`);
+          logger.log(`[Gap Visuals DEBUG] Calling select for end loci...`);
           plugin.managers.interactivity.lociSelects.select(
             { loci: endLoci },
             false
@@ -786,12 +787,12 @@ async function focusOnGap(
           const selectionEntries = Array.from(
             plugin.managers.structure.selection.entries.entries()
           );
-          console.log(
+          logger.log(
             "[Gap Visuals DEBUG] After complete gap selection - entries:",
             selectionEntries.length
           );
           selectionEntries.forEach(([ref, entry]) => {
-            console.log(
+            logger.log(
               `  - ${ref}: ${entry.selection.elements.length} elements`
             );
           });
@@ -824,19 +825,19 @@ async function focusOnGap(
               500 // 0.5초 애니메이션
             );
 
-            console.log(
+            logger.log(
               `[Missing Region Visuals] ✓ Focused on gap ${missingRegion.regionId} with boundary residues and sidechain displayed`
             );
           }
         } else {
-          console.warn(
+          logger.warn(
             `[Missing Region Visuals] Could not find boundary residues for gap ${missingRegion.regionId}`
           );
         }
       }
     }
   } catch (error) {
-    console.error(
+    logger.error(
       `[Missing Region Visuals] Failed to focus on gap ${missingRegion.regionId}:`,
       error
     );

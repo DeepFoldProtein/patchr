@@ -1,5 +1,6 @@
 // Repair Atoms - Repair Console 상태 관리
 import { atom } from "jotai";
+import { logger } from "../lib/logger";
 import type {
   MissingRegionInfo,
   RepairSegment,
@@ -41,7 +42,7 @@ export const resetRepairStateAtom = atom(null, (_get, set) => {
   set(repairContextsAtom, new Map());
   set(repairResultsAtom, []);
   set(apiConnectionStatusAtom, "idle");
-  console.log("[Repair Atoms] Reset all repair state");
+  logger.log("[Repair Atoms] Reset all repair state");
 });
 
 // 선택된 segment의 컨텍스트 가져오기 (derived atom)

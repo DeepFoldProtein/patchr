@@ -4,6 +4,7 @@ import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import type { StructureInfo } from "../../types/mol-viewer";
 import { bus } from "../../lib/event-bus";
 import { StateTransforms } from "molstar/lib/mol-plugin-state/transforms";
+import { logger } from "../../lib/logger";
 
 /**
  * Wait for representations to be created after preset is applied
@@ -30,7 +31,7 @@ async function waitForRepresentations(
     }
 
     if (foundRepresentations) {
-      console.log(`✓ Representations ready after ${attempt} attempt(s)`);
+      logger.log(`✓ Representations ready after ${attempt} attempt(s)`);
       return true;
     }
 
@@ -38,7 +39,7 @@ async function waitForRepresentations(
     await new Promise(resolve => requestAnimationFrame(resolve));
   }
 
-  console.warn(
+  logger.warn(
     `⚠️ Timeout waiting for representations after ${maxAttempts} attempts`
   );
   return false;
@@ -175,13 +176,13 @@ export function useStructure(
         let dataString =
           data instanceof ArrayBuffer ? new TextDecoder().decode(data) : data;
 
-        console.log("📥 Loading structure...", {
+        logger.log("📥 Loading structure...", {
           format,
           dataLength: dataString.length
         });
 
         // 2. 물 분자(HOH, WAT, SOL, H2O) 필터링
-        console.log("Filtering out water molecules...");
+        logger.log("Filtering out water molecules...");
         dataString = filterWaterResidues(dataString, format);
 
         // Clear existing structures
@@ -190,7 +191,7 @@ export function useStructure(
         // 3. 공식 builder API 사용 (download와 동일한 패턴)
         const formatType = format === "pdb" ? "pdb" : "mmcif";
 
-        console.log("Creating rawData node with format:", formatType);
+        logger.log("Creating rawData node with format:", formatType);
 
         // rawData로 Data.String/Binary 노드 생성
         const dataNode = await plugin.builders.data.rawData({
@@ -198,37 +199,37 @@ export function useStructure(
           label: `Structure.${format}`
         });
 
-        console.log("✓ Data node created:", {
+        logger.log("✓ Data node created:", {
           ref: dataNode.ref,
           cell: dataNode.cell,
           obj: dataNode.cell?.obj
         });
 
         // parseTrajectory로 파싱
-        console.log("Calling parseTrajectory with:", formatType);
+        logger.log("Calling parseTrajectory with:", formatType);
         const trajectory = await plugin.builders.structure.parseTrajectory(
           dataNode,
           formatType
         );
 
-        console.log("✓ Trajectory parsed:", {
+        logger.log("✓ Trajectory parsed:", {
           ref: trajectory.ref,
           cell: trajectory.cell,
           frameCount: trajectory.cell?.obj?.data?.frameCount
         });
 
         // Apply preset (자동으로 모든 설정 적용)
-        console.log("Applying preset...");
+        logger.log("Applying preset...");
         await plugin.builders.structure.hierarchy.applyPreset(
           trajectory,
           "default"
         );
 
-        console.log("✓ Preset applied");
+        logger.log("✓ Preset applied");
 
         // Wait for representations to be created
         await waitForRepresentations(plugin);
-        console.log("✓ Representations ready");
+        logger.log("✓ Representations ready");
 
         // Emit event that representations are ready for coloring
         bus.emit("structure:representations-ready", { isBaseStructure: true });
@@ -236,7 +237,7 @@ export function useStructure(
         // Camera focus
         if (plugin.canvas3d) {
           await plugin.canvas3d.requestCameraReset({ durationMs: 300 });
-          console.log("✓ Camera reset");
+          logger.log("✓ Camera reset");
         }
 
         const structInfo: StructureInfo = {
@@ -253,11 +254,11 @@ export function useStructure(
         // 이벤트 발행
         bus.emit("structure:loaded", structInfo);
 
-        console.log(`✅ Structure loaded and rendered (${format})`);
+        logger.log(`✅ Structure loaded and rendered (${format})`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         setError(msg);
-        console.error("Structure load error:", err);
+        logger.error("Structure load error:", err);
       } finally {
         setLoading(false);
       }

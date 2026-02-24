@@ -62,18 +62,6 @@ function AppContent(): React.JSX.Element {
 }
 
 function App(): React.JSX.Element {
-  // MSW disabled - not needed for current development
-  // useEffect(() => {
-  //   if (import.meta.env.DEV) {
-  //     import("./mocks/browser").then(({ worker }) => {
-  //       worker.start({
-  //         onUnhandledRequest: "bypass"
-  //       });
-  //       console.log("[MSW] Mock service worker started");
-  //     });
-  //   }
-  // }, []);
-
   return (
     <JotaiProvider>
       <QueryClientProvider client={queryClient}>

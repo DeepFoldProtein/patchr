@@ -3,6 +3,7 @@ import { useAtom } from "jotai";
 import type { PluginContext } from "molstar/lib/mol-plugin/context";
 import { previewStateAtom } from "../../store/mol-viewer-atoms";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 import type { PreviewFrame, InpaintParams, PreviewState } from "../../types";
 
 /**
@@ -33,7 +34,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
   const parseFrame = useCallback((buffer: ArrayBuffer): PreviewFrame | null => {
     try {
       if (buffer.byteLength < 256) {
-        console.warn("Frame too small:", buffer.byteLength);
+        logger.warn("Frame too small:", buffer.byteLength);
         return null;
       }
 
@@ -59,7 +60,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
 
       return frame;
     } catch (error) {
-      console.error("Failed to parse frame:", error);
+      logger.error("Failed to parse frame:", error);
       return null;
     }
   }, []);
@@ -135,7 +136,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
           break;
 
         default:
-          console.warn("Unknown message type:", msg.type);
+          logger.warn("Unknown message type:", msg.type);
       }
     },
     [setPreviewState]
@@ -156,9 +157,9 @@ export function usePreviewManager(plugin: PluginContext | null): {
 
         bus.emit("preview:frameUpdated", frame);
 
-        // TODO: Load structure into Mol* viewer
+        // Structure loading into Mol* viewer -- not yet implemented
         if (plugin) {
-          console.log(
+          logger.log(
             `Frame ${frame.frameIndex + 1}/${frame.totalFrames} received (pLDDT: ${frame.plddt_mean?.toFixed(1)})`
           );
         }
@@ -173,7 +174,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
   const startPreview = useCallback(
     async (params: InpaintParams): Promise<void> => {
       if (!plugin) {
-        console.warn("Plugin not initialized");
+        logger.warn("Plugin not initialized");
         return;
       }
 
@@ -192,7 +193,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log("Preview WebSocket connected");
+          logger.log("Preview WebSocket connected");
 
           // Send request
           ws.send(
@@ -202,7 +203,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
               temperature: params.temperature,
               confidence_threshold: params.confidence_threshold,
               mask: {
-                /* TODO: get from mask atom */
+                /* mask data -- not yet wired */
               }
             })
           );
@@ -227,7 +228,7 @@ export function usePreviewManager(plugin: PluginContext | null): {
               const msg = JSON.parse(event.data);
               handleMessage(msg);
             } catch (err) {
-              console.error("Failed to parse JSON message:", err);
+              logger.error("Failed to parse JSON message:", err);
             }
           } else if (event.data instanceof ArrayBuffer) {
             // Binary frame
@@ -236,13 +237,13 @@ export function usePreviewManager(plugin: PluginContext | null): {
         };
 
         ws.onerror = error => {
-          console.error("WebSocket error:", error);
+          logger.error("WebSocket error:", error);
 
           // Retry connection immediately (no delay)
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
 
-            console.log(
+            logger.log(
               `Reconnecting immediately (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`
             );
 
@@ -260,14 +261,14 @@ export function usePreviewManager(plugin: PluginContext | null): {
         };
 
         ws.onclose = () => {
-          console.log("Preview WebSocket closed");
+          logger.log("Preview WebSocket closed");
           setPreviewState(prev => ({
             ...prev,
             isRunning: false
           }));
         };
       } catch (error) {
-        console.error("Failed to start preview:", error);
+        logger.error("Failed to start preview:", error);
         setPreviewState(prev => ({
           ...prev,
           isRunning: false,

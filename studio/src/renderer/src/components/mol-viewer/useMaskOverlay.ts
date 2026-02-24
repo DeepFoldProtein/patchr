@@ -2,6 +2,7 @@ import { useEffect, useCallback } from "react";
 import type { PluginContext } from "molstar/lib/mol-plugin/context";
 import type { MaskSpec } from "../../types/mol-viewer";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 
 /**
  * Visualize mask regions as colored overlays on the structure
@@ -19,11 +20,11 @@ export function useMaskOverlay(
       if (!plugin || !structureRef) return;
 
       try {
-        // TODO: Implement mask overlay using Mol* Shape API
-        console.log("Applying mask:", mask);
+        // Mask overlay via Mol* Shape API -- not yet implemented
+        logger.log("Applying mask:", mask);
         bus.emit("mask:overlayed", mask);
       } catch (error) {
-        console.error("Failed to apply mask overlay:", error);
+        logger.error("Failed to apply mask overlay:", error);
         throw error;
       }
     },
@@ -34,11 +35,11 @@ export function useMaskOverlay(
     if (!plugin) return;
 
     try {
-      // TODO: Implement mask clearing
-      console.log("Clearing mask");
+      // Mask clearing -- not yet implemented
+      logger.log("Clearing mask");
       bus.emit("mask:cleared");
     } catch (error) {
-      console.error("Failed to clear mask overlay:", error);
+      logger.error("Failed to clear mask overlay:", error);
     }
   }, [plugin]);
 

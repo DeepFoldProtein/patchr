@@ -29,7 +29,7 @@ export const viewerSettingsAtom = atom<{
 }>({
   colorScheme: "chain-id",
   representation: "cartoon",
-  backgroundColor: "#0f172a"
+  backgroundColor: "#0f172a" // slate-950
 });
 
 // 카메라 상태
