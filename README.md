@@ -1,7 +1,7 @@
 <div align="center">
   <div>&nbsp;</div>
 
-<video src="docs/e2e_demo_1080p.mp4" width="700" controls></video>
+<img src="docs/e2e_demo.gif" width="480"/>
 
 [Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
 
