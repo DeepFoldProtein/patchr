@@ -10,20 +10,17 @@ from torchmetrics import MeanMetric
 
 import boltz.model.layers.initialize as init
 from boltz.data import const
-from boltz.data.mol import (
-    minimum_lddt_symmetry_coords,
-)
+from boltz.data.mol import minimum_lddt_symmetry_coords
 from boltz.model.layers.pairformer import PairformerModule
 from boltz.model.loss.bfactor import bfactor_loss_fn
-from boltz.model.loss.confidencev2 import (
-    confidence_loss,
-)
+from boltz.model.loss.confidencev2 import confidence_loss
 from boltz.model.loss.distogramv2 import distogram_loss
 from boltz.model.modules.affinity import AffinityModule
 from boltz.model.modules.confidencev2 import ConfidenceModule
 from boltz.model.modules.diffusion_conditioning import DiffusionConditioning
 from boltz.model.modules.diffusionv2 import AtomDiffusion
 from boltz.model.modules.encodersv2 import RelativePositionEncoder
+from boltz.model.modules.utils import center
 from boltz.model.modules.trunkv2 import (
     BFactorModule,
     ContactConditioning,
@@ -104,6 +101,7 @@ class Boltz2(LightningModule):
         checkpoint_diffusion_conditioning: bool = False,
         use_templates_v2: bool = False,
         use_kernels: bool = False,
+        enable_inpainting: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -113,7 +111,9 @@ class Boltz2(LightningModule):
 
         if validate_structure:
             # Late init at setup time
-            self.val_group_mapper = {}  # maps a dataset index to a validation group name
+            self.val_group_mapper = (
+                {}
+            )  # maps a dataset index to a validation group name
             self.validator_mapper = {}  # maps a dataset index to a validator
 
             # Validators for each dataset keep track of all metrics,
@@ -133,6 +133,9 @@ class Boltz2(LightningModule):
         self.diffusion_loss_args = diffusion_loss_args
         self.predict_args = predict_args
         self.steering_args = steering_args
+
+        # Inpainting configuration
+        self.enable_inpainting = enable_inpainting
 
         # Training metrics
         if validate_structure:
@@ -361,7 +364,8 @@ class Boltz2(LightningModule):
         """Set the model for training, validation and inference."""
         if stage == "predict" and not (
             torch.cuda.is_available()
-            and torch.cuda.get_device_properties(torch.device("cuda")).major >= 8.0  # noqa: PLR2004
+            and torch.cuda.get_device_properties(torch.device("cuda")).major
+            >= 8.0  # noqa: PLR2004
         ):
             self.use_kernels = False
 
@@ -398,6 +402,17 @@ class Boltz2(LightningModule):
                 x["label"] for x in self.val_group_mapper.values()
             }, msg
 
+    def _get_progress_tracker(self):
+        """Get ProgressTracker from trainer callbacks if available."""
+        if hasattr(self, "trainer") and self.trainer is not None:
+            for callback in self.trainer.callbacks:
+                # Check if it's a ProgressTracker (from server.py)
+                if hasattr(callback, "update_base_progress") and hasattr(
+                    callback, "update_diffusion_progress"
+                ):
+                    return callback
+        return None
+
     def forward(
         self,
         feats: dict[str, Tensor],
@@ -408,6 +423,15 @@ class Boltz2(LightningModule):
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
     ) -> dict[str, Tensor]:
+        # Inpainting mode: validate and prepare template coordinates
+        if self.enable_inpainting:
+            self._validate_and_prepare_inpainting(feats)
+
+        # Update progress: pre-diffusion phase (0-40%)
+        progress_tracker = self._get_progress_tracker()
+        if progress_tracker:
+            progress_tracker.update_base_progress("Initializing embeddings", 5)
+
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
         ):
@@ -435,8 +459,24 @@ class Boltz2(LightningModule):
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
+            template_output = None  # Initialize template_output
+
+            # Update progress: trunk processing
+            if progress_tracker:
+                progress_tracker.update_base_progress("Running trunk processing", 20)
+
             if self.run_trunk_and_structure:
                 for i in range(recycling_steps + 1):
+                    # Update progress during recycling
+                    if progress_tracker and recycling_steps > 0:
+                        recycling_progress = 20 + int(
+                            (i / (recycling_steps + 1)) * 10
+                        )  # 20-30%
+                        progress_tracker.update_base_progress(
+                            f"Recycling step {i + 1}/{recycling_steps + 1}",
+                            recycling_progress,
+                        )
+
                     with torch.set_grad_enabled(
                         self.training
                         and self.structure_prediction_training
@@ -457,13 +497,16 @@ class Boltz2(LightningModule):
                         # Compute pairwise stack
                         if self.use_templates:
                             if self.is_template_compiled and not self.training:
-                                template_module = self.template_module._orig_mod  # noqa: SLF001
+                                template_module = (
+                                    self.template_module._orig_mod
+                                )  # noqa: SLF001
                             else:
                                 template_module = self.template_module
 
-                            z = z + template_module(
+                            template_output = template_module(
                                 z, feats, pair_mask, use_kernels=self.use_kernels
                             )
+                            z = z + template_output
 
                         if self.is_msa_compiled and not self.training:
                             msa_module = self.msa_module._orig_mod  # noqa: SLF001
@@ -476,7 +519,9 @@ class Boltz2(LightningModule):
 
                         # Revert to uncompiled version for validation
                         if self.is_pairformer_compiled and not self.training:
-                            pairformer_module = self.pairformer_module._orig_mod  # noqa: SLF001
+                            pairformer_module = (
+                                self.pairformer_module._orig_mod
+                            )  # noqa: SLF001
                         else:
                             pairformer_module = self.pairformer_module
 
@@ -494,6 +539,9 @@ class Boltz2(LightningModule):
                 "s": s,
                 "z": z,
             }
+            # Store template_output for visualization if templates are used
+            if self.use_templates and template_output is not None:
+                dict_out["template_output"] = template_output
 
             if (
                 self.run_trunk_and_structure
@@ -529,7 +577,18 @@ class Boltz2(LightningModule):
                     "token_trans_bias": token_trans_bias,
                 }
 
+                # Update progress: diffusion conditioning ready, starting diffusion
+                if progress_tracker:
+                    progress_tracker.update_base_progress("Preparing diffusion", 40)
+
                 with torch.autocast("cuda", enabled=False):
+                    # Get boundary refinement setting from predict_args if available
+                    boundary_refinement_enabled = None
+                    if self.predict_args is not None:
+                        boundary_refinement_enabled = self.predict_args.get(
+                            "boundary_refinement_enabled", None
+                        )
+
                     struct_out = self.structure_module.sample(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),
@@ -540,6 +599,8 @@ class Boltz2(LightningModule):
                         max_parallel_samples=max_parallel_samples,
                         steering_args=self.steering_args,
                         diffusion_conditioning=diffusion_conditioning,
+                        progress_tracker=progress_tracker,  # Pass progress tracker
+                        boundary_refinement_enabled=boundary_refinement_enabled,
                     )
                     dict_out.update(struct_out)
 
@@ -549,9 +610,9 @@ class Boltz2(LightningModule):
 
             if self.training and self.confidence_prediction:
                 assert len(feats["coords"].shape) == 4
-                assert feats["coords"].shape[1] == 1, (
-                    "Only one conformation is supported for confidence"
-                )
+                assert (
+                    feats["coords"].shape[1] == 1
+                ), "Only one conformation is supported for confidence"
 
             # Compute structure module
             if self.training and self.structure_prediction_training:
@@ -719,6 +780,10 @@ class Boltz2(LightningModule):
                         }
                     )
 
+        # Store inpainting metadata in output dict for JSON export
+        if "inpainting_metadata" in feats:
+            dict_out["inpainting_metadata"] = feats["inpainting_metadata"]
+
         return dict_out
 
     def get_true_coordinates(
@@ -735,9 +800,9 @@ class Boltz2(LightningModule):
 
         return_dict = {}
 
-        assert batch["coords"].shape[0] == 1, (
-            f"Validation is not supported for batch sizes={batch['coords'].shape[0]}"
-        )
+        assert (
+            batch["coords"].shape[0] == 1
+        ), f"Validation is not supported for batch sizes={batch['coords'].shape[0]}"
 
         if symmetry_correction:
             true_coords = []
@@ -863,9 +928,9 @@ class Boltz2(LightningModule):
 
             # TODO remove once multiple conformers are supported
             K = true_coords.shape[1]
-            assert K == 1, (
-                f"Confidence_prediction is not supported for num_ensembles_val={K}."
-            )
+            assert (
+                K == 1
+            ), f"Confidence_prediction is not supported for num_ensembles_val={K}."
 
             # For now, just take the only conformer.
             true_coords = true_coords.squeeze(1)  # (S, L, 3)
@@ -984,8 +1049,14 @@ class Boltz2(LightningModule):
             if p.requires_grad and p.grad is not None
         ]
         if len(parameters) == 0:
+            # Mac GPU support: device selection (from https://github.com/fnachon/boltz)
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0,
+                device=torch.device(
+                    "mps"
+                    if torch.backends.mps.is_available()
+                    else "cuda" if torch.cuda.is_available() else "cpu"
+                ),
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -993,8 +1064,14 @@ class Boltz2(LightningModule):
     def parameter_norm(self, module):
         parameters = [p.norm(p=2) ** 2 for p in module.parameters() if p.requires_grad]
         if len(parameters) == 0:
+            # Mac GPU support: device selection (from https://github.com/fnachon/boltz)
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0,
+                device=torch.device(
+                    "mps"
+                    if torch.backends.mps.is_available()
+                    else "cuda" if torch.cuda.is_available() else "cpu"
+                ),
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -1022,7 +1099,11 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    # Mac GPU support: MPS cache clearing (from https://github.com/fnachon/boltz)
+                    if torch.backends.mps.is_available():
+                        torch.backends.mps.empty_cache()
                     gc.collect()
                     return
                 raise e
@@ -1042,7 +1123,11 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    # Mac GPU support: MPS cache clearing (from https://github.com/fnachon/boltz)
+                    if torch.backends.mps.is_available():
+                        torch.backends.mps.empty_cache()
                     gc.collect()
                     return
                 raise e
@@ -1078,6 +1163,13 @@ class Boltz2(LightningModule):
                 for key in self.predict_args["keys_dict_out"]:
                     pred_dict[key] = out[key]
             pred_dict["coords"] = out["sample_atom_coords"]
+            # Store template_output for visualization if available
+            if "template_output" in out:
+                pred_dict["template_output"] = out["template_output"]
+
+            # Store inpainting metadata if available (for JSON export)
+            if "inpainting_metadata" in out:
+                pred_dict["inpainting_metadata"] = out["inpainting_metadata"]
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
                 pred_dict["pde"] = out["pde"]
@@ -1123,7 +1215,11 @@ class Boltz2(LightningModule):
         except RuntimeError as e:  # catch out of memory exceptions
             if "out of memory" in str(e):
                 print("| WARNING: ran out of memory, skipping batch")
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                # Mac GPU support: MPS cache clearing (from https://github.com/fnachon/boltz)
+                if torch.backends.mps.is_available():
+                    torch.backends.mps.empty_cache()
                 gc.collect()
                 return {"exception": True}
             else:
@@ -1236,12 +1332,12 @@ class Boltz2(LightningModule):
             checkpoint["hyper_parameters"]["training_args"][
                 "diffusion_multiplicity"
             ] = self.training_args.diffusion_multiplicity
-            checkpoint["hyper_parameters"]["training_args"]["recycling_steps"] = (
-                self.training_args.recycling_steps
-            )
-            checkpoint["hyper_parameters"]["training_args"]["weight_decay"] = (
-                self.training_args.weight_decay
-            )
+            checkpoint["hyper_parameters"]["training_args"][
+                "recycling_steps"
+            ] = self.training_args.recycling_steps
+            checkpoint["hyper_parameters"]["training_args"][
+                "weight_decay"
+            ] = self.training_args.weight_decay
 
     def configure_callbacks(self) -> list[Callback]:
         """Configure model callbacks.
@@ -1253,3 +1349,483 @@ class Boltz2(LightningModule):
 
         """
         return [EMA(self.ema_decay)] if self.use_ema else []
+
+    def _format_residue_ranges(self, residue_list: list[int]) -> str:
+        """Convert a list of residue numbers into range format (e.g., [1,2,3,5,6,7] -> '1-3, 5-7').
+
+        Args:
+            residue_list: List of residue numbers (1-indexed)
+
+        Returns:
+            String with ranges formatted as 'start-end' separated by commas
+        """
+        if not residue_list:
+            return ""
+
+        residue_list = sorted(residue_list)
+        ranges = []
+        start = residue_list[0]
+        end = residue_list[0]
+
+        for i in range(1, len(residue_list)):
+            if residue_list[i] == end + 1:
+                # Consecutive, extend range
+                end = residue_list[i]
+            else:
+                # Gap found, save current range
+                if start == end:
+                    ranges.append(str(start))
+                else:
+                    ranges.append(f"{start} - {end}")
+                start = residue_list[i]
+                end = residue_list[i]
+
+        # Add last range
+        if start == end:
+            ranges.append(str(start))
+        else:
+            ranges.append(f"{start} - {end}")
+
+        return ", ".join(ranges)
+
+    def _validate_and_prepare_inpainting(self, feats: dict[str, Tensor]) -> None:
+        """Validate FASTA/structure sequence consistency and prepare template coordinates for inpainting.
+
+        This method:
+        1. Validates that FASTA sequence matches structure sequence
+        2. Extracts template coordinates from template features (supports multimer by merging all templates)
+        3. Creates atom-level template mask (True = has structure, False = needs inpainting)
+        4. Prints which residues have structure and which need to be inpainted (per chain for multimer)
+        5. Adds inpainting info to feats dictionary
+
+        Args:
+            feats: Feature dictionary that will be modified in-place
+        """
+        # Check if atom-level template information is available
+        if "template_atom_coords" not in feats or feats["template_atom_coords"] is None:
+            print(
+                "[Inpainting] Warning: No template_atom_coords found, inpainting will not be applied"
+            )
+            feats["inpainting_template_coords"] = None
+            feats["inpainting_template_mask"] = None
+            return
+
+        template_atom_coords = feats[
+            "template_atom_coords"
+        ]  # (batch, num_templates, atoms, 3)
+        template_atom_mask = feats.get(
+            "template_atom_mask", None
+        )  # (batch, num_templates, atoms)
+
+        if template_atom_mask is None:
+            print(
+                "[Inpainting] Warning: No template_atom_mask found, inpainting will not be applied"
+            )
+            feats["inpainting_template_coords"] = None
+            feats["inpainting_template_mask"] = None
+            return
+
+        # Debug: Show template mask statistics
+        print(
+            f"[DEBUG boltz2] template_atom_coords shape: {template_atom_coords.shape}"
+        )
+        print(f"[DEBUG boltz2] template_atom_mask shape: {template_atom_mask.shape}")
+        for template_idx in range(template_atom_mask.shape[1]):
+            mask_sum = template_atom_mask[0, template_idx].sum().item()
+            print(
+                f"[DEBUG boltz2]   Template {template_idx}: {mask_sum} atoms with structure"
+            )
+
+        # Use the first batch and merge all templates for multimer support
+        # template_atom_coords shape: (batch, num_templates, atoms, 3)
+        # template_atom_mask shape: (batch, num_templates, atoms)
+        batch_idx = 0
+        num_templates = template_atom_coords.shape[1]
+
+        # Merge all templates: if multiple templates provide info for the same atom,
+        # use the first template that has valid coordinates
+        template_coords = template_atom_coords[batch_idx, 0].clone()  # (atoms, 3)
+        template_mask = template_atom_mask[batch_idx, 0].clone()  # (atoms,)
+
+        # Merge additional templates: fill in atoms that weren't covered by the first template
+        for template_idx in range(1, num_templates):
+            template_coords_t = template_atom_coords[
+                batch_idx, template_idx
+            ]  # (atoms, 3)
+            template_mask_t = template_atom_mask[batch_idx, template_idx]  # (atoms,)
+
+            # For atoms that don't have structure in current mask but do in this template, add them
+            new_atoms = (~template_mask.bool()) & template_mask_t.bool()
+            template_coords[new_atoms] = template_coords_t[new_atoms]
+            template_mask[new_atoms] = template_mask_t[new_atoms]
+
+        if num_templates > 1:
+            print(f"[Inpainting] Merged {num_templates} templates for multimer support")
+
+        # Get the expected atom dimension from atom_to_token if available
+        atom_to_token = feats.get("atom_to_token", None)
+        if atom_to_token is not None:
+            expected_num_atoms = atom_to_token.shape[1]  # (batch, atoms, tokens)
+            current_num_atoms = template_mask.shape[0]
+
+            # Pad template_mask and template_coords if necessary
+            if current_num_atoms < expected_num_atoms:
+                padding_size = expected_num_atoms - current_num_atoms
+                # Pad template_mask with False (no structure)
+                template_mask = torch.nn.functional.pad(
+                    template_mask, (0, padding_size), mode="constant", value=0
+                )
+                # Pad template_coords with zeros
+                template_coords = torch.nn.functional.pad(
+                    template_coords, (0, 0, 0, padding_size), mode="constant", value=0
+                )
+            elif current_num_atoms > expected_num_atoms:
+                # Truncate if template has more atoms than expected
+                template_mask = template_mask[:expected_num_atoms]
+                template_coords = template_coords[:expected_num_atoms]
+
+        # Add batch dimension for consistency
+        template_coords = template_coords.unsqueeze(0)  # (1, atoms, 3)
+        template_mask = template_mask.unsqueeze(0)  # (1, atoms)
+
+        num_atoms = template_coords.shape[1]
+        device = template_coords.device
+
+        # Convert mask to boolean
+        template_mask_bool = template_mask.bool()
+
+        # Count atoms with and without structure
+        num_template_atoms = template_mask_bool.sum().item()
+        num_inpaint_atoms = num_atoms - num_template_atoms
+
+        # Report per-residue statistics using atom-to-token mapping (already retrieved above)
+        if atom_to_token is not None:
+            # atom_to_token is one-hot encoded with shape (batch, atoms, tokens)
+            num_tokens = atom_to_token.shape[2]
+
+            # Get chain information for multimer support
+            asym_id = feats.get("asym_id", None)  # (batch, tokens) or (tokens,)
+            mol_type = feats.get("mol_type", None)  # (batch, tokens) or (tokens,)
+
+            if asym_id is not None:
+                if asym_id.dim() > 1:
+                    asym_id = asym_id[0]  # Get first batch
+                # Convert to numpy for easier processing
+                asym_id_np = (
+                    asym_id.cpu().numpy()
+                    if isinstance(asym_id, torch.Tensor)
+                    else asym_id
+                )
+            else:
+                asym_id_np = None
+
+            if mol_type is not None:
+                if mol_type.dim() > 1:
+                    mol_type = mol_type[0]  # Get first batch
+                mol_type_np = (
+                    mol_type.cpu().numpy()
+                    if isinstance(mol_type, torch.Tensor)
+                    else mol_type
+                )
+            else:
+                mol_type_np = None
+
+            # Build asym_id (chain index) -> chain_id (chain name, e.g. "A", "B") for display and metadata
+            asym_id_to_chain_name = {}
+            if "record" in feats:
+                record = feats["record"]
+                if isinstance(record, list):
+                    record = record[0] if record else None
+                if record is not None and hasattr(record, "chains"):
+                    for c in record.chains:
+                        asym_id_to_chain_name[c.chain_id] = c.chain_name
+
+            def _chain_display(asym_id_val: int) -> str:
+                """Return chain ID (name) for display, fallback to index string if no mapping."""
+                return asym_id_to_chain_name.get(asym_id_val, str(asym_id_val))
+
+            # Count residues with different levels of structure
+            residues_fully_fixed = []
+            residues_partially_fixed = []
+            residues_fully_inpainted = []
+
+            # For multimer: group by chain
+            chain_residues = (
+                {}
+            )  # chain_id -> {fully_fixed: [], partially_fixed: [], fully_inpainted: []}
+
+            for token_idx in range(num_tokens):
+                # Get atoms belonging to this token
+                token_atoms = atom_to_token[0, :, token_idx].bool()
+                token_atom_mask = token_atoms & template_mask_bool[0]
+
+                # Count atoms in this residue
+                total_atoms_in_residue = token_atoms.sum().item()
+                template_atoms_in_residue = token_atom_mask.sum().item()
+
+                if total_atoms_in_residue == 0:
+                    continue  # Skip empty residues
+
+                # Get chain ID for this token (if available)
+                chain_id = None
+                if asym_id_np is not None and token_idx < len(asym_id_np):
+                    chain_id = int(asym_id_np[token_idx])
+                    if chain_id not in chain_residues:
+                        chain_residues[chain_id] = {
+                            "fully_fixed": [],
+                            "partially_fixed": [],
+                            "fully_inpainted": [],
+                        }
+
+                residue_info = (
+                    token_idx + 1,  # 1-indexed
+                    template_atoms_in_residue,
+                    total_atoms_in_residue,
+                    chain_id,
+                )
+
+                if template_atoms_in_residue == total_atoms_in_residue:
+                    # All atoms have structure
+                    residues_fully_fixed.append(residue_info)
+                    if chain_id is not None:
+                        chain_residues[chain_id]["fully_fixed"].append(token_idx + 1)
+                elif template_atoms_in_residue > 0:
+                    # Some atoms have structure
+                    residues_partially_fixed.append(residue_info)
+                    if chain_id is not None:
+                        chain_residues[chain_id]["partially_fixed"].append(
+                            (
+                                token_idx + 1,
+                                template_atoms_in_residue,
+                                total_atoms_in_residue,
+                            )
+                        )
+                else:
+                    # No atoms have structure
+                    residues_fully_inpainted.append(residue_info)
+                    if chain_id is not None:
+                        chain_residues[chain_id]["fully_inpainted"].append(
+                            token_idx + 1
+                        )
+
+            # Print summary
+            print(f"\n[Inpainting] Batch 0 validation:")
+            print(f"  Total residues: {num_tokens}")
+
+            # Print chain-specific information for multimer
+            if chain_residues:
+                print(f"  Number of chains: {len(chain_residues)}")
+
+                # Find the first token_idx for each chain to convert to chain-local residue numbering
+                chain_first_token = {}  # chain_id -> first token_idx (0-indexed)
+                chain_is_nonpolymer = {}  # chain_id -> is NONPOLYMER
+                for token_idx in range(num_tokens):
+                    if asym_id_np is not None and token_idx < len(asym_id_np):
+                        chain_id = int(asym_id_np[token_idx])
+                        if chain_id not in chain_first_token:
+                            chain_first_token[chain_id] = token_idx
+                            # Check if this chain is NONPOLYMER (ligand)
+                            if mol_type_np is not None and token_idx < len(mol_type_np):
+                                chain_is_nonpolymer[chain_id] = (
+                                    int(mol_type_np[token_idx])
+                                    == const.chain_type_ids["NONPOLYMER"]
+                                )
+                            else:
+                                chain_is_nonpolymer[chain_id] = False
+
+                for chain_id in sorted(chain_residues.keys()):
+                    chain_info = chain_residues[chain_id]
+                    # Get the first token_idx for this chain to convert to chain-local numbering
+                    chain_offset = chain_first_token.get(chain_id, 0)
+                    is_ligand = chain_is_nonpolymer.get(chain_id, False)
+
+                    chain_type_label = "LIGAND" if is_ligand else "POLYMER"
+                    print(f"\n  Chain {_chain_display(chain_id)} ({chain_type_label}):")
+
+                    if is_ligand:
+                        # For ligands, show total atoms instead of residue ranges
+                        total_residues = (
+                            len(chain_info["fully_fixed"])
+                            + len(chain_info["partially_fixed"])
+                            + len(chain_info["fully_inpainted"])
+                        )
+                        print(f"    Total residues: {total_residues}")
+                        print(
+                            f"    Fully fixed residues: {len(chain_info['fully_fixed'])}"
+                        )
+                        if chain_info["partially_fixed"]:
+                            print(
+                                f"    Partially fixed residues: {len(chain_info['partially_fixed'])}"
+                            )
+                            for res_idx, fixed_atoms, total_atoms in chain_info[
+                                "partially_fixed"
+                            ]:
+                                chain_local_res_idx = res_idx - chain_offset
+                                print(
+                                    f"      Residue {chain_local_res_idx}: {fixed_atoms}/{total_atoms} atoms fixed"
+                                )
+                        print(
+                            f"    Fully inpainted residues: {len(chain_info['fully_inpainted'])}"
+                        )
+                    else:
+                        # For polymers, show residue ranges as before
+                        print(
+                            f"    Fully fixed residues: {len(chain_info['fully_fixed'])}"
+                        )
+                        if chain_info["fully_fixed"]:
+                            # Convert global residue numbers to chain-local (1-indexed within chain)
+                            chain_local_fixed = [
+                                res_idx - chain_offset
+                                for res_idx in chain_info["fully_fixed"]
+                            ]
+                            fully_fixed_ranges = self._format_residue_ranges(
+                                chain_local_fixed
+                            )
+                            print(f"      Residues: {fully_fixed_ranges}")
+                        print(
+                            f"    Partially fixed residues: {len(chain_info['partially_fixed'])}"
+                        )
+                        if chain_info["partially_fixed"]:
+                            for res_idx, fixed_atoms, total_atoms in chain_info[
+                                "partially_fixed"
+                            ]:
+                                # Convert to chain-local residue number
+                                chain_local_res_idx = res_idx - chain_offset
+                                print(
+                                    f"      Residue {chain_local_res_idx}: {fixed_atoms}/{total_atoms} atoms fixed"
+                                )
+                        print(
+                            f"    Fully inpainted residues: {len(chain_info['fully_inpainted'])}"
+                        )
+                        if chain_info["fully_inpainted"]:
+                            # Convert global residue numbers to chain-local (1-indexed within chain)
+                            chain_local_inpainted = [
+                                res_idx - chain_offset
+                                for res_idx in chain_info["fully_inpainted"]
+                            ]
+                            fully_inpainted_ranges = self._format_residue_ranges(
+                                chain_local_inpainted
+                            )
+                            print(f"      Residues: {fully_inpainted_ranges}")
+
+            # Print overall summary
+            print(f"\n  Overall summary:")
+            print(
+                f"  Residues FULLY FIXED (all atoms have structure): {len(residues_fully_fixed)}"
+            )
+            if residues_fully_fixed:
+                fully_fixed_ranges = self._format_residue_ranges(
+                    [r[0] for r in residues_fully_fixed]
+                )
+                print(f"    Residues: {fully_fixed_ranges}")
+            else:
+                print("    Residues: (none)")
+
+            print(
+                f"  Residues PARTIALLY FIXED (some atoms have structure, some need inpainting): {len(residues_partially_fixed)}"
+            )
+            if residues_partially_fixed:
+                for res_info in residues_partially_fixed:
+                    res_idx, fixed_atoms, total_atoms, chain_id = res_info
+                    chain_str = (
+                        f" (Chain {_chain_display(chain_id)})"
+                        if chain_id is not None
+                        else ""
+                    )
+                    print(
+                        f"    Residue {res_idx}{chain_str}: {fixed_atoms}/{total_atoms} atoms fixed"
+                    )
+            else:
+                print("    Residues: (none)")
+
+            print(
+                f"  Residues FULLY INPAINTED (no atoms have structure): {len(residues_fully_inpainted)}"
+            )
+            if residues_fully_inpainted:
+                fully_inpainted_ranges = self._format_residue_ranges(
+                    [r[0] for r in residues_fully_inpainted]
+                )
+                print(f"    Residues: {fully_inpainted_ranges}")
+            else:
+                print("    Residues: (none)")
+
+        print(
+            f"  Total atoms WITH template structure: {num_template_atoms} / {num_atoms}"
+        )
+        print(f"  Total atoms to be INPAINTED: {num_inpaint_atoms} / {num_atoms}")
+
+        # Center template coordinates to avoid issues with large absolute coordinate values
+        # This ensures that r_to_q_trans receives coordinates in a similar distribution to training
+        # Log mean before centering
+        mean_before_centering = template_coords[0][template_mask_bool[0]].mean(dim=0)
+        print(
+            f"[Inpainting] Template coordinates before centering (mean: {mean_before_centering.norm().item():.6f}, "
+            f"values: [{mean_before_centering[0].item():.3f}, {mean_before_centering[1].item():.3f}, {mean_before_centering[2].item():.3f}])"
+        )
+
+        template_coords_centered = center(template_coords, template_mask_bool)
+
+        # Verify centering worked (mean should be close to zero)
+        mean_after_centering = template_coords_centered[0][template_mask_bool[0]].mean(
+            dim=0
+        )
+        print(
+            f"[Inpainting] Template coordinates after centering (mean: {mean_after_centering.norm().item():.6f}, "
+            f"values: [{mean_after_centering[0].item():.3f}, {mean_after_centering[1].item():.3f}, {mean_after_centering[2].item():.3f}])"
+        )
+        template_coords = template_coords_centered
+
+        # Store inpainting information in feats
+        feats["inpainting_template_coords"] = template_coords
+        feats["inpainting_template_mask"] = template_mask_bool
+
+        # Store inpainting metadata for JSON export (chain-based only)
+        # Use chain ID (chain name, e.g. "A", "B") as key when available from record; else "chain_{index}"
+        # Convert global residue indices to chain-local indices (starting from 1 for each chain)
+        inpainting_metadata = {}
+        if atom_to_token is not None and chain_residues:
+            # Find the first token_idx for each chain to convert to chain-local residue numbering
+            chain_first_token = {}  # chain_id -> first token_idx (0-indexed)
+            if asym_id_np is not None:
+                for token_idx in range(num_tokens):
+                    if token_idx < len(asym_id_np):
+                        chain_id = int(asym_id_np[token_idx])
+                        if chain_id not in chain_first_token:
+                            chain_first_token[chain_id] = token_idx
+
+            inpainting_metadata["chains"] = {}
+            for chain_id, info in chain_residues.items():
+                # Use chain name (e.g. "A", "B") as key when available
+                chain_key = (
+                    asym_id_to_chain_name.get(chain_id, f"chain_{chain_id}")
+                    if asym_id_to_chain_name
+                    else f"chain_{chain_id}"
+                )
+                # Get the chain offset (first token_idx for this chain)
+                chain_offset = chain_first_token.get(chain_id, 0)
+
+                # Convert global residue indices to chain-local (1-indexed within chain)
+                fully_fixed_local = [int(r) - chain_offset for r in info["fully_fixed"]]
+                partially_fixed_local = [
+                    {
+                        "residue": int(r[0]) - chain_offset,
+                        "fixed_atoms": int(r[1]),
+                        "total_atoms": int(r[2]),
+                    }
+                    for r in info["partially_fixed"]
+                ]
+                fully_inpainted_local = [
+                    int(r) - chain_offset for r in info["fully_inpainted"]
+                ]
+
+                inpainting_metadata["chains"][chain_key] = {
+                    "fully_fixed_residues": fully_fixed_local,
+                    "partially_fixed_residues": partially_fixed_local,
+                    "fully_inpainted_residues": fully_inpainted_local,
+                }
+        else:
+            inpainting_metadata["chains"] = {}
+
+        feats["inpainting_metadata"] = inpainting_metadata
+
+        print(f"\n[Inpainting] Validation complete. Template coordinates prepared.\n")

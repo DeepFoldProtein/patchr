@@ -1,0 +1,36 @@
+version: 1
+
+sequences:
+  - protein:
+      id: A
+      sequence: MKPHPWFFGKIPRAKAEEMLSKQRHDGAFLIRESESAPGDFSLSVKFGNDVQHFKVLRDGAGKYFLWVVKFNSLNELVDYHRSTSVSRNQQIFLRDIE
+      msa: empty
+
+  - protein:
+      id: D
+      sequence: XVNVX
+      msa: empty
+      modifications:
+        - position: 1
+          ccd: 'PTR'
+        - position: 5
+          ccd: '011'
+
+  - protein:
+      id: A_op2
+      sequence: MKPHPWFFGKIPRAKAEEMLSKQRHDGAFLIRESESAPGDFSLSVKFGNDVQHFKVLRDGAGKYFLWVVKFNSLNELVDYHRSTSVSRNQQIFLRDIE
+      msa: empty
+
+  - protein:
+      id: D_op2
+      sequence: XVNVX
+      msa: empty
+      modifications:
+        - position: 1
+          ccd: 'PTR'
+        - position: 5
+          ccd: '011'
+
+templates:
+  - cif: examples/inpainting/3N7Y_chainADA_op2D_op2.cif
+    chain_id: ['A', 'D', 'A_op2', 'D_op2']

@@ -9,6 +9,22 @@ Once `boltz` is installed, you can run predictions with:
 * If you include `--use_potentials`, Boltz will apply inference-time potentials to improve the physical plausibility of the predicted poses.
 * Without the `--override` options, Boltz will try to use the cached preprocessed files and existing predictions, if any are present in your output directory (name of your input by default). Add the `--override` flag to run the prediction from scratch, e.g. if you change some parameters or complex details without changing the output directory.
 
+### Inpainting with templates (Boltz-2)
+
+If your input has known structure for some residues (via `templates:` in the YAML) and missing parts elsewhere, you can inpaint the missing regions while keeping templated residues anchored by using the inpainting variant of Boltz-2:
+
+```bash
+boltz predict \
+  ./path/to/input.yaml \
+  --model boltz2_inpaint \
+  --accelerator gpu --devices 1
+```
+
+Notes:
+- Provide templates under `templates:` in the YAML (CIF or PDB). Boltz will process them and pass template features to the model.
+- The inpainting variant enables template integration and contact-guided updates so templated regions remain close to the template while non-templated regions are generated via diffusion.
+- All other CLI flags and I/O remain the same as standard Boltz-2.
+
 
 ## Input format
 

@@ -1,0 +1,613 @@
+"""StructureProcessor: main class that composes all Mixin capabilities."""
+import os
+import sys
+from io import StringIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+from .. import cif_writer, yaml_writer
+from ..ccd_utils import load_ccd_dict, get_non_standard_parent_from_ccd
+from ..constants import (
+    get_boltz_cache,
+    get_default_ccd_path,
+    STANDARD_AA_CODES,
+    STANDARD_AA_THREE_LETTER,
+    STANDARD_NUCLEOTIDE_CODES,
+    ref_atoms,
+)
+
+from .cif_io import CifIOMixin
+from .chain_mapping import ChainMappingMixin
+from .chain_discovery import ChainDiscoveryMixin
+from .modifications import ModificationsMixin
+from .sequence_fetch import SequenceFetchMixin
+from .sequence_extract import SequenceExtractMixin
+from .atom_parse import AtomParseMixin
+from .alignment import AlignmentMixin
+from .validation import ValidationMixin
+from .assembly import AssemblyMixin
+
+
+class StructureProcessor(
+    CifIOMixin,
+    ChainMappingMixin,
+    ChainDiscoveryMixin,
+    ModificationsMixin,
+    SequenceFetchMixin,
+    SequenceExtractMixin,
+    AtomParseMixin,
+    AlignmentMixin,
+    ValidationMixin,
+    AssemblyMixin,
+):
+    """Orchestrates PDB structure processing for inpainting template generation."""
+
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False):
+        # Check if pdb_id is a file path
+        self.is_local_file = False
+        self.cif_file_path = cif_file_path
+        self.cache_dir = cache_dir  # for ccd.pkl (BOLTZ_CACHE or ~/.boltz)
+        self.include_solvent = include_solvent
+        self.include_ligands = include_ligands
+        
+        if cif_file_path:
+            # Explicit file path provided
+            self.is_local_file = True
+            self.pdb_id = Path(cif_file_path).stem.upper()  # Use filename without extension as PDB ID
+        elif os.path.exists(pdb_id):
+            # pdb_id is actually a file path
+            self.is_local_file = True
+            self.cif_file_path = pdb_id
+            self.pdb_id = Path(pdb_id).stem.upper()
+        else:
+            # pdb_id is a PDB ID
+            self.pdb_id = pdb_id.upper()
+        
+        # Normalize chain_ids to list (preserve case for chain IDs)
+        if isinstance(chain_ids, str):
+            # Support comma-separated string like "A,B" or single "A", or "all"/"all-copies"
+            chain_ids_stripped = chain_ids.strip()
+            chain_ids_upper = chain_ids_stripped.upper()
+            if chain_ids_upper == 'ALL':
+                chain_ids = ['ALL']  # Will be resolved after loading CIF (all polymer chains, e.g. A,B,C,D for 1A1B)
+            elif chain_ids_upper == 'ALL-COPIES':
+                chain_ids = ['ALL-COPIES']  # Same as ALL: all polymer chains
+            else:
+                chain_ids = [c.strip() for c in chain_ids.split(',')]  # Preserve case
+        self.chain_ids = list(chain_ids)  # Preserve case
+        self.uniprot_mode = uniprot_mode
+        self.interactive_sequence = interactive_sequence
+        self.cif_content = None
+        # Per-chain data
+        self.chain_data = {}  # chain_id -> {sequence, seqres_sequence, uniprot_id, ...}
+        self.chain_entity_types = {}  # chain_id -> 'protein', 'dna', or 'rna'
+        self.manual_sequences = custom_sequences or {}  # chain_id -> custom sequence (from CLI or interactive)
+        # Chain ID mapping (auth_asym_id <-> label_asym_id)
+        self.auth_to_label = {}  # e.g., 'X' -> 'A'
+        self.label_to_auth = {}  # e.g., 'A' -> 'X'
+        # Author chain IDs for output (YAML, CIF file names, etc.)
+        self.author_chain_ids = {}  # label_id -> author_id (for output files)
+        # Non-standard residue information (e.g. ACE, TPO, NH2)
+        # chain_id -> {seq_id: {'ccd': CCD_CODE, 'parent': PARENT_CODE, 'parent_one': ONE_LETTER}}
+        self.non_standard_residues = {}
+        # Cached CIF dict to avoid re-parsing the same CIF many times per chain (major speedup)
+        self._cif_dict = None
+        # When True, print DEBUG and per-chain blocks (set BOLTZ_VERBOSE=1 for interactive use)
+        self.verbose = os.environ.get("BOLTZ_VERBOSE", "").strip().lower() in ("1", "true", "yes")
+        # Assembly selection
+        self.assembly_id = assembly_id          # None / 'best' / str(N)
+        self.list_assemblies = list_assemblies
+        self._synthetic_atoms: Dict[str, List[Dict]] = {}  # synthetic chain atoms from non-identity symmetry ops
+        self._assembly_entity_types: Dict[str, str] = {}   # label_asym_id -> entity type for assembly chains
+
+
+    def generate_cif(self, all_chains_data: Dict[str, Dict], solvent_atoms: Optional[List[Dict]] = None) -> str:
+        """Generate complete CIF file for multiple chains (delegates to cif_writer)."""
+        return cif_writer.generate_cif(
+            self.pdb_id,
+            self.chain_ids,
+            all_chains_data,
+            solvent_atoms,
+            self.cif_content,
+            getattr(self, "_modifications_from_entity_poly", {}),
+        )
+
+
+    def generate_yaml(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict]) -> str:
+        """Generate YAML configuration (delegates to yaml_writer)."""
+        return yaml_writer.generate_yaml(self.chain_ids, all_chains_data, cif_path, output_dir)
+
+
+
+    def process(self, output_dir: Path):
+        """Main processing pipeline for multiple chains."""
+        chain_ids_str = ','.join(self.chain_ids)
+        print(f"\n{'='*60}")
+        print(f"Processing PDB: {self.pdb_id}, Chains: {chain_ids_str}")
+        print(f"UniProt mode: {'ON' if self.uniprot_mode else 'OFF'}")
+        print(f"{'='*60}\n")
+        
+        # Load CIF (from local file or download)
+        self.load_cif()
+
+        # Build authoritative entity type map from CIF tables (_entity_poly.type etc.)
+        # This is used as the primary source for entity type detection throughout.
+        self._assembly_entity_types = self._build_entity_type_map()
+
+        # ------------------------------------------------------------------
+        # Assembly selection (--assembly / --list-assemblies)
+        # Runs before chain normalization so that assembly chain IDs (which
+        # are label_asym_ids straight from the CIF) are used directly.
+        # ------------------------------------------------------------------
+        if self.list_assemblies or self.assembly_id is not None:
+            assembly_info = self.parse_assembly_info()
+            self._print_assembly_info(assembly_info)
+
+            if self.list_assemblies:
+                # Just listing — stop here
+                return
+
+            # Determine which assembly to use
+            if str(self.assembly_id).lower() == 'best':
+                selected_id = self.select_best_assembly(assembly_info)
+                if selected_id is None:
+                    print("WARNING: Could not determine best assembly; proceeding with original chains.")
+                else:
+                    print(f"Auto-selected assembly {selected_id} "
+                          f"({assembly_info['assemblies'].get(selected_id, {}).get('details', '?')}, "
+                          f"{assembly_info['assemblies'].get(selected_id, {}).get('oligomeric_details', '?')})")
+            else:
+                selected_id = str(self.assembly_id)
+                if selected_id not in assembly_info.get('assemblies', {}):
+                    print(f"WARNING: Assembly {selected_id} not found; "
+                          f"available: {list(assembly_info['assemblies'].keys())}. "
+                          "Proceeding with original chains.")
+                    selected_id = None
+
+            if selected_id is not None:
+                asm_chain_ids, synthetic_atoms = self.get_assembly_chains(selected_id, assembly_info)
+                if asm_chain_ids:
+                    print(f"\nAssembly {selected_id} chains: {', '.join(asm_chain_ids)}")
+                    # Override chain selection (assembly takes precedence over CLI chain IDs / ALL)
+                    self.chain_ids = asm_chain_ids
+                    self._synthetic_atoms = synthetic_atoms
+                    # Build author_chain_ids for assembly chains
+                    # Also store to self so UniProt mode / sequence_fetch can use label_to_auth
+                    auth_to_label, label_to_auth = self.build_auth_to_label_chain_mapping()
+                    self.auth_to_label = auth_to_label
+                    self.label_to_auth = label_to_auth
+                    for cid in asm_chain_ids:
+                        cid_upper = cid.upper()
+                        if cid_upper in label_to_auth:
+                            self.author_chain_ids[cid] = label_to_auth[cid_upper]
+                        else:
+                            self.author_chain_ids[cid] = cid
+                else:
+                    print("WARNING: Assembly produced no chains; proceeding with original chains.")
+
+        # Load CCD from ccd.pkl (same as mmcif.parse_mmcif mols / main.py)
+        ccd_path = (self.cache_dir or get_boltz_cache()) / "ccd.pkl"
+        ccd = load_ccd_dict(ccd_path)
+        # Parse non-standard residue info from CIF (uses ccd.pkl via ccd_utils)
+        self.parse_non_standard_residues(ccd=ccd)
+
+        # Modifications from _entity_poly_seq (same as generate_yaml.py) for correct ACE/PTR/DIP in YAML
+        self._modifications_from_entity_poly = self._get_modifications_from_entity_poly_seq()
+        # Modifications from _struct_conn (covale) e.g. NH2 at B 7 when entity_poly_seq has UNK
+        self._modifications_from_struct_conn = self._get_modifications_from_struct_conn()
+
+        # Normalize chain IDs: convert auth_asym_id (X, Y, Z) to label_asym_id (A, B, C)
+        # This handles the common case where users provide author chain IDs from PDB viewers
+        # (Skip if assembly already resolved chain IDs — they are already label_asym_ids)
+        if self.assembly_id is None:
+            self.normalize_chain_ids()
+
+        # If "ALL" or "ALL-COPIES" is specified, detect all polymer chains automatically.
+        # Skip this block when assembly selection already determined self.chain_ids.
+        if 'ALL' in self.chain_ids or 'ALL-COPIES' in self.chain_ids:
+            include_all_copies = True  # Always include all chains so ALL gives A,B,C,D for 1A1B
+            all_chains, chain_entity_types = self.get_all_polymer_chains(include_all_copies=include_all_copies)
+            if not all_chains:
+                print("ERROR: No polymer chains found in structure", file=sys.stderr)
+                sys.exit(1)
+            self.chain_ids = all_chains
+            self.chain_entity_types = chain_entity_types
+            
+            # Build author chain ID mapping for auto-detected chains
+            if hasattr(self, 'label_to_auth') and self.label_to_auth:
+                for chain_id in all_chains:
+                    chain_upper = chain_id.upper()
+                    if chain_upper in self.label_to_auth:
+                        self.author_chain_ids[chain_id] = self.label_to_auth[chain_upper]
+                    else:
+                        self.author_chain_ids[chain_id] = chain_id
+            else:
+                for chain_id in all_chains:
+                    self.author_chain_ids[chain_id] = chain_id
+            
+            type_summary = ', '.join([f"{chain_entity_types.get(c, '?')}" for c in all_chains])
+            print(f"Auto-detected {len(self.chain_ids)} polymer chain(s): {','.join(self.chain_ids)} ({type_summary})")
+            print()
+
+        # Ligand chain handling
+        if self.assembly_id is not None:
+            # Assembly mode: assembly_gen already includes ligand chains.
+            # If --exclude-ligands, remove them from the list now.
+            if not self.include_ligands:
+                # Use base chain ID for synthetic chains so ligand lookup works
+                real_ligand_chains = set(self.get_ligand_chain_ids())
+                before = list(self.chain_ids)
+                self.chain_ids = [
+                    c for c in self.chain_ids
+                    if self._base_chain_id(c) not in real_ligand_chains
+                ]
+                removed = [c for c in before if c not in self.chain_ids]
+                if removed:
+                    print(f"Excluded ligand chain(s) from assembly: {removed}")
+        else:
+            # Non-assembly mode: add ligand chains if include_ligands
+            if self.include_ligands:
+                ligand_chains = self.get_ligand_chain_ids()
+                added = [c for c in ligand_chains if c not in self.chain_ids]
+                for c in added:
+                    self.chain_ids = list(self.chain_ids) + [c]
+                    self.author_chain_ids[c] = c
+                if added:
+                    print(f"Include ligands: added chain(s) {added}")
+        
+        # Handle default sequence (single sequence for single chain)
+        if '_default_' in self.manual_sequences:
+            default_seq = self.manual_sequences.pop('_default_')
+            if len(self.chain_ids) == 1:
+                # Single chain - apply default sequence
+                self.manual_sequences[self.chain_ids[0]] = default_seq
+            else:
+                # Multiple chains - error
+                print("ERROR: Single sequence provided but multiple chains detected.", file=sys.stderr)
+                print(f"ERROR: Please specify sequences for each chain: --sequence A:SEQ1,B:SEQ2", file=sys.stderr)
+                print(f"ERROR: Detected chains: {','.join(self.chain_ids)}", file=sys.stderr)
+                sys.exit(1)
+        
+        # Deduplicate author_chain_ids: when multiple label chains share the same auth ID
+        # (e.g. assembly copies), append A/B/C... suffix to make them unique.
+        # E.g. three copies of auth "I" → "IA", "IB", "IC".
+        from collections import Counter
+        auth_counts = Counter(self.author_chain_ids.get(c, c) for c in self.chain_ids)
+        seen_auth: Dict[str, int] = {}
+        for cid in self.chain_ids:
+            auth_id = self.author_chain_ids.get(cid, cid)
+            if auth_counts[auth_id] > 1:
+                idx = seen_auth.get(auth_id, 0)
+                seen_auth[auth_id] = idx + 1
+                self.author_chain_ids[cid] = f"{auth_id}{chr(ord('A') + idx)}"
+
+        # Process each chain
+        all_chains_data = {}
+        entity_id = 1
+        
+        for chain_id in self.chain_ids:
+            if self.verbose:
+                print(f"\n{'='*60}")
+                print(f"Processing Chain: {chain_id}")
+                print(f"{'='*60}\n")
+            
+            # Get entity type for this chain (determined from actual atoms or CIF entity)
+            # First try to get from chain_entity_types (if already set from get_all_polymer_chains)
+            entity_type = self.chain_entity_types.get(chain_id)
+            if entity_type is None:
+                # For synthetic chains (e.g. A_op2), check the base chain's entity type first
+                base_id = self._base_chain_id(chain_id)
+                if base_id != chain_id:
+                    entity_type = self.chain_entity_types.get(base_id)
+            if entity_type is None:
+                # Chains added via include_ligands are non-polymer; treat as ligand
+                # (use base chain ID for synthetic chains)
+                real_ligand_set = set(self.get_ligand_chain_ids())
+                lookup_chain = self._base_chain_id(chain_id)
+                if lookup_chain in real_ligand_set:
+                    entity_type = 'ligand'
+                else:
+                    # Primary: use authoritative CIF entity type map (_entity_poly.type)
+                    entity_type = self._assembly_entity_types.get(lookup_chain)
+
+                    if entity_type is None or entity_type == 'water':
+                        # Fallback: determine from actual atoms for this chain
+                        cif_dict = self._get_cif_dict()
+                        if '_atom_site.label_asym_id' in cif_dict and '_atom_site.label_comp_id' in cif_dict:
+                            label_asym_ids = cif_dict['_atom_site.label_asym_id']
+                            label_comp_ids = cif_dict['_atom_site.label_comp_id']
+
+                            chain_residues = set()
+                            for i, chain in enumerate(label_asym_ids):
+                                if chain != lookup_chain:
+                                    continue
+                                if i < len(label_comp_ids):
+                                    chain_residues.add(label_comp_ids[i])
+
+                            dna_rna_residues = {'DA', 'DC', 'DG', 'DT', 'DI', 'A', 'C', 'G', 'T', 'U', 'I'}
+                            protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE',
+                                                'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
+                                                'THR', 'VAL', 'TRP', 'TYR'}
+                            has_dna_rna = bool(chain_residues & dna_rna_residues)
+                            has_protein = bool(chain_residues & protein_residues) or bool(
+                                chain_residues - STANDARD_AA_THREE_LETTER - dna_rna_residues - {'HOH', 'H2O', 'WAT'}
+                            )
+                            if has_dna_rna and not has_protein:
+                                if 'U' in chain_residues or any('R' in r for r in chain_residues if len(r) > 1 and 'R' in r):
+                                    entity_type = 'rna'
+                                else:
+                                    entity_type = 'dna'
+                            elif has_protein and not has_dna_rna:
+                                entity_type = 'protein'
+                            elif chain_residues:
+                                entity_type = 'ligand'
+                            else:
+                                entity_type = 'protein'  # Default
+                        else:
+                            entity_type = 'protein'  # Default
+
+                # Store for later use
+                self.chain_entity_types[chain_id] = entity_type
+            
+            # Ligand chain: no sequence, use CCD from atoms; include in CIF and YAML (docs/prediction.md)
+            if entity_type == 'ligand':
+                atoms = self.parse_atom_records(chain_id)
+                if not atoms:
+                    print(f"WARNING: No atoms for ligand chain {chain_id}, skipping")
+                    continue
+                ligand_ccd = (atoms[0].get('label_comp_id') or 'UNK').strip().upper()
+                author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+                for atom in atoms:
+                    atom['label_entity_id'] = str(entity_id)
+                    atom['label_seq_id'] = 1
+                    atom['auth_seq_id'] = atom.get('auth_seq_id') or 1
+                    atom['auth_asym_id'] = author_chain_id
+                all_chains_data[chain_id] = {
+                    'atoms': atoms,
+                    'sequence': '',
+                    'entity_id': entity_id,
+                    'uniprot_id': None,
+                    'entity_type': 'ligand',
+                    'monomer_ids': {1: ligand_ccd},
+                    'author_chain_id': author_chain_id,
+                    'modifications': [],
+                    'ccd': ligand_ccd,
+                }
+                print(f"Chain {chain_id}: ligand (ccd={ligand_ccd})")
+                entity_id += 1
+                continue
+            
+            # Extract sequence: try SEQRES first, but if entity_poly_seq type doesn't match
+            # actual atom type, extract from atoms instead
+            try:
+                seqres_sequence = self.extract_seqres_from_cif(chain_id)
+                # Verify sequence type matches entity type
+                if entity_type == 'protein':
+                    protein_residues = set('ACDEFGHIKLMNPQRSTVWY')
+                    if not all(c in protein_residues for c in seqres_sequence if c != 'X'):
+                        # SEQRES doesn't match, extract from atoms
+                        print(f"WARNING: SEQRES sequence type doesn't match protein atoms, extracting from atoms")
+                        seqres_sequence = self.extract_sequence_from_atoms(chain_id)
+                elif entity_type in ['dna', 'rna']:
+                    dna_rna_residues = set('ACGTUIN')
+                    if not all(c in dna_rna_residues for c in seqres_sequence if c != 'X' and c != 'N'):
+                        # SEQRES doesn't match, extract from atoms
+                        print(f"WARNING: SEQRES sequence type doesn't match {entity_type.upper()} atoms, extracting from atoms")
+                        seqres_sequence = self.extract_sequence_from_atoms(chain_id)
+            except Exception as e:
+                # If SEQRES extraction fails, extract from atoms
+                print(f"WARNING: Failed to extract SEQRES, extracting from atoms: {e}")
+                seqres_sequence = self.extract_sequence_from_atoms(chain_id)
+        
+            # Get final sequence to use
+            uniprot_id = None
+            
+            if self.verbose:
+                print(f"DEBUG: Checking sequence for chain {chain_id}:")
+                print(f"  - Available in manual_sequences: {chain_id in self.manual_sequences}")
+                print(f"  - manual_sequences keys: {list(self.manual_sequences.keys())}")
+                print(f"  - Entity type: {entity_type}")
+                print(f"  - SEQRES sequence length: {len(seqres_sequence)}")
+            
+            # Check if custom sequence is provided (CLI or interactive)
+            if chain_id in self.manual_sequences:
+                # Use custom sequence from CLI
+                final_sequence = self.manual_sequences[chain_id]
+                print(f"Using custom sequence for chain {chain_id} (length: {len(final_sequence)})")
+                print(f"DEBUG: Custom sequence preview: {final_sequence[:50]}...")
+            elif self.interactive_sequence:
+                # Prompt for manual sequence input
+                manual_seq = self.prompt_manual_sequence(chain_id, entity_type, seqres_sequence)
+                if manual_seq:
+                    final_sequence = manual_seq
+                    self.manual_sequences[chain_id] = manual_seq
+                    print(f"Using manually entered sequence for chain {chain_id} (length: {len(final_sequence)})")
+                else:
+                    print(f"Skipping chain {chain_id}")
+                    continue
+            elif self.uniprot_mode and entity_type == 'protein':
+                # UniProt only for proteins
+                uniprot_id = self.get_uniprot_id_from_pdb(chain_id)
+                if uniprot_id:
+                    uniprot_sequence = self.fetch_uniprot_sequence(uniprot_id)
+                    # Use UniProt sequence as the final sequence
+                    final_sequence = uniprot_sequence
+                else:
+                    print("WARNING: Falling back to SEQRES sequence")
+                    final_sequence = seqres_sequence
+            else:
+                # Use SEQRES sequence (for DNA/RNA or when UniProt mode is off)
+                if self.uniprot_mode and entity_type != 'protein':
+                    print(f"WARNING: UniProt mode is ON but chain {chain_id} is {entity_type.upper()}, using SEQRES sequence")
+                final_sequence = seqres_sequence
+            
+            # Parse atoms
+            atoms = self.parse_atom_records(chain_id)
+            
+            # Get residue mapping (for DNA/RNA, use simpler mapping based on structure order)
+            if entity_type in ['dna', 'rna']:
+                # For DNA/RNA, use simpler sequential mapping
+                # Map structure residues sequentially to sequence positions
+                residue_mapping = self.get_residue_mapping_dna_rna(atoms, seqres_sequence, final_sequence)
+            else:
+                # For proteins, use alignment-based mapping (pass chain_id so non-standard residues get parent_one)
+                residue_mapping = self.get_residue_mapping(atoms, seqres_sequence, final_sequence, chain_id=chain_id)
+            
+            # Filter atoms by target sequence (UniProt or manually entered) if applicable (only for proteins)
+            removed_residues = []
+            if (self.uniprot_mode or self.interactive_sequence) and entity_type == 'protein':
+                atoms, removed_residues = self.filter_atoms_by_uniprot_sequence(atoms, residue_mapping, final_sequence)
+                
+                if removed_residues:
+                    sequence_type = "manually entered sequence" if self.interactive_sequence else "UniProt sequence"
+                    print(f"\n{'='*60}")
+                    print(f"REMOVED RESIDUES (Chain {chain_id}, {sequence_type} mismatch):")
+                    print(f"{'='*60}")
+                    print(f"Total residues removed: {len(removed_residues)}")
+                    print("")
+                    for entry in removed_residues:
+                        pos_info = f"Position {entry['uniprot_pos']}" if entry['uniprot_pos'] else "Not mapped"
+                        target_aa_label = "Target" if self.interactive_sequence else "UniProt"
+                        print(f"  Residue {entry['residue']} ({pos_info}): "
+                              f"Structure={entry['struct_type']} ({entry['struct_aa']}), "
+                              f"{target_aa_label}={entry['uniprot_aa']}")
+                    print(f"{'='*60}\n")
+                    
+                    # Recalculate residue mapping after filtering
+                    residue_mapping = self.get_residue_mapping(atoms, seqres_sequence, final_sequence, chain_id=chain_id)
+                else:
+                    sequence_type = "manually entered sequence" if self.interactive_sequence else "UniProt sequence"
+                    print(f"\n{'='*60}")
+                    print(f"Sequence check (Chain {chain_id}, {sequence_type}):")
+                    print(f"{'='*60}")
+                    print(f"  All residues match {sequence_type}!")
+                    print(f"{'='*60}\n")
+            
+            # Check for missing atoms in residues (only for proteins)
+            if entity_type == 'protein':
+                self.check_missing_atoms(atoms, residue_mapping, final_sequence)
+            
+            # Determine inpainting region (only for proteins, DNA/RNA uses different logic)
+            if entity_type == 'protein':
+                self.determine_inpainting_region(atoms, residue_mapping, final_sequence)
+            
+            # Renumber atoms (update label_entity_id and label_asym_id for multimeric)
+            renumbered_atoms = self.renumber_atoms(atoms, residue_mapping)
+            
+            # Update entity_id and label_asym_id for multimeric support
+            # Use author chain ID for auth_asym_id (for output files)
+            author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+            for atom in renumbered_atoms:
+                atom['label_entity_id'] = str(entity_id)
+                atom['label_asym_id'] = chain_id  # Keep label_asym_id as internal ID
+                atom['auth_asym_id'] = author_chain_id  # Use author chain ID for output
+            
+            # Extract actual monomer IDs from atoms for each sequence position
+            # This is critical for non-standard residues like 3DR (abasic site)
+            seq_pos_to_monomer = {}
+            for atom in renumbered_atoms:
+                seq_id = atom.get('label_seq_id', '?')
+                if seq_id != '?' and str(seq_id).isdigit():
+                    pos = int(seq_id)
+                    comp_id = atom.get('label_comp_id', 'UNK')
+                    if pos not in seq_pos_to_monomer:
+                        seq_pos_to_monomer[pos] = comp_id
+            
+            # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
+            # For synthetic chains (e.g. D_op2), fall back to the base chain's modification data
+            _mod_key = self._base_chain_id(chain_id)
+            if _mod_key in self._modifications_from_entity_poly:
+                chain_modifications = [{'position': m['position'], 'ccd': m['ccd'], 'parent': None, 'parent_one': None}
+                                       for m in self._modifications_from_entity_poly[_mod_key]]
+            else:
+                chain_modifications = []
+            positions_added = {m['position'] for m in chain_modifications}
+            # Merge modifications from _struct_conn (e.g. NH2 at B 7 when entity_poly_seq has UNK)
+            _conn_key = self._base_chain_id(chain_id)
+            if _conn_key in getattr(self, '_modifications_from_struct_conn', {}):
+                for m in self._modifications_from_struct_conn[_conn_key]:
+                    if m['position'] not in positions_added:
+                        chain_modifications.append({'position': m['position'], 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
+                        positions_added.add(m['position'])
+            if _mod_key not in self._modifications_from_entity_poly:
+                _ns_key = self._base_chain_id(chain_id)
+                if _ns_key in self.non_standard_residues:
+                    for seq_pos, ns_info in sorted(self.non_standard_residues[_ns_key].items()):
+                        if seq_pos not in positions_added:
+                            chain_modifications.append({
+                                'position': seq_pos, 'ccd': ns_info['ccd'],
+                                'parent': ns_info['parent'], 'parent_one': ns_info['parent_one']
+                            })
+                            positions_added.add(seq_pos)
+                for pos, comp_id in sorted(seq_pos_to_monomer.items()):
+                    if comp_id not in STANDARD_AA_THREE_LETTER and comp_id not in STANDARD_NUCLEOTIDE_CODES and pos not in positions_added:
+                        chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
+                        positions_added.add(pos)
+            chain_modifications.sort(key=lambda m: m['position'])
+            # Modification positions: set X for non-standard residues only (e.g. PTR, TPO); keep standard AA (e.g. ASN) as is
+            output_sequence = final_sequence
+            for mod in chain_modifications:
+                pos = mod.get('position')
+                ccd = mod.get('ccd', '')
+                if pos and 1 <= pos <= len(output_sequence) and ccd not in STANDARD_AA_THREE_LETTER and ccd not in STANDARD_NUCLEOTIDE_CODES:
+                    # Set X only for non-standard modifications (standard AA/nucleotide residues stay as-is)
+                    seq_list = list(output_sequence)
+                    seq_list[pos - 1] = 'X'
+                    output_sequence = ''.join(seq_list)
+            if chain_modifications:
+                print(f"Chain {chain_id} has {len(chain_modifications)} modification(s):")
+                for mod in chain_modifications:
+                    parent = mod.get('parent') or '-'
+                    print(f"  - Position {mod['position']}: {mod['ccd']} (parent: {parent})")
+            
+            # Store chain data (include author chain ID for output files)
+            author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+            all_chains_data[chain_id] = {
+                'atoms': renumbered_atoms,
+                'sequence': output_sequence,
+                'entity_id': entity_id,
+                'uniprot_id': uniprot_id,
+                'entity_type': entity_type,
+                'monomer_ids': seq_pos_to_monomer,  # Actual 3-letter codes from atoms (e.g., 3DR)
+                'author_chain_id': author_chain_id,  # Author chain ID for output files
+                'modifications': chain_modifications  # modifications for YAML output
+            }
+            
+            entity_id += 1
+        
+        # Generate output files
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # File naming: use label chain IDs so names are unique (e.g. ABC not ABA when ligand C has auth A)
+        # Keep filename under 255 chars (filesystem limit): abbreviate when too many chains
+        suffix = "_uniprot" if self.uniprot_mode else ""
+        chain_ids_str_short: str = ''.join(self.chain_ids)
+        max_chain_chars = 15  # leave room for pdb_id, _chain, suffix, .cif
+        if len(chain_ids_str_short) > max_chain_chars:
+            chain_ids_str_short = f"ALL_{len(self.chain_ids)}chains"
+        cif_filename = f"{self.pdb_id}_chain{chain_ids_str_short}{suffix}.cif"
+        yaml_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.yaml"
+        
+        cif_path = output_dir / cif_filename
+        yaml_path = output_dir / yaml_filename
+        
+        # Optional: include solvent (water) atoms for full structure transfer
+        solvent_atoms = self._extract_solvent_atoms() if self.include_solvent else None
+        
+        # Generate and save CIF
+        cif_content = self.generate_cif(all_chains_data, solvent_atoms=solvent_atoms)
+        with open(cif_path, 'w') as f:
+            f.write(cif_content)
+        print(f"Saved CIF file: {cif_path.absolute()}")
+        
+        # Generate and save YAML (with relative path to CIF from script execution directory)
+        yaml_content = self.generate_yaml(cif_path, output_dir, all_chains_data)
+        with open(yaml_path, 'w') as f:
+            f.write(yaml_content)
+        print(f"Saved YAML file: {yaml_path.absolute()}")
+        
+        print(f"\n{'='*60}")
+        print("Processing complete!")
+        print(f"{'='*60}\n")
+
+

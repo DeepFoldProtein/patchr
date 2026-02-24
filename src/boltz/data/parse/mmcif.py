@@ -295,14 +295,19 @@ def compute_covalent_ligands(
         chain_1_name = connection.partner1.chain_name
         chain_2_name = connection.partner2.chain_name
 
-        res_1_id = connection.partner1.res_id.seqid
-        res_1_id = str(res_1_id.num) + str(res_1_id.icode).strip()
+        seq_1 = connection.partner1.res_id.seqid
+        res_1_id = str(seq_1.num) + str(seq_1.icode).strip()
+        res_1_id_num_only = str(seq_1.num)
 
-        res_2_id = connection.partner2.res_id.seqid
-        res_2_id = str(res_2_id.num) + str(res_2_id.icode).strip()
+        seq_2 = connection.partner2.res_id.seqid
+        res_2_id = str(seq_2.num) + str(seq_2.icode).strip()
+        res_2_id_num_only = str(seq_2.num)
 
-        subchain_1 = subchain_map[(chain_1_name, res_1_id)]
-        subchain_2 = subchain_map[(chain_2_name, res_2_id)]
+        # Residue may be in subchain_map with or without insertion code (e.g. renumbered CIF has '53' not '53G')
+        subchain_1 = subchain_map.get((chain_1_name, res_1_id)) or subchain_map.get((chain_1_name, res_1_id_num_only))
+        subchain_2 = subchain_map.get((chain_2_name, res_2_id)) or subchain_map.get((chain_2_name, res_2_id_num_only))
+        if subchain_1 is None or subchain_2 is None:
+            continue
 
         # If non-polymer or branched, add to set
         entity_1 = entities[subchain_1].entity_type.name
@@ -579,11 +584,27 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
         gemmi.AlignmentScoring(),
     )
 
+    # Debug: Check alignment result lengths
+    if len(result.match_string) != len(sequence):
+        print(f"[WARNING] Alignment mismatch for chain {chain_id}:")
+        print(f"  Sequence length: {len(sequence)}")
+        print(f"  Match string length: {len(result.match_string)}")
+        print(f"  Polymer residues: {len(list(polymer))}")
+        print(f"  Will process up to min(match_string, sequence) length")
+
     # Get coordinates and masks
-    i = 0
+    i = 0  # polymer index
     ref_res = set(const.tokens)
     parsed = []
+    
+    # Process alignment: iterate through sequence positions
+    # Note: match_string length may differ from sequence length due to gaps
     for j, match in enumerate(result.match_string):
+        # Safety check: ensure we don't exceed sequence length
+        if j >= len(sequence):
+            print(f"[WARNING] Stopping at position {j}/{len(result.match_string)} due to sequence length")
+            break
+        
         # Get residue name from sequence
         res_name = sequence[j]
 
@@ -598,7 +619,7 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
 
             # Double check the match
             if res.name != res_name:
-                msg = "Alignment mismatch!"
+                msg = f"Alignment mismatch! Chain {chain_id}, position {j}: sequence expects '{res_name}' but structure has '{res.name}'"
                 raise ValueError(msg)
 
             # Increment polymer index

@@ -550,6 +550,42 @@ def get_template_records_from_search(
     threshold: Optional[float] = None,
 ) -> list[TemplateInfo]:
     """Get template records from an alignment."""
+    # For inpainting: if chain_ids and template_chain_ids have the same length and order,
+    # and all sequences are identical (homo-oligomer), preserve the order instead of using
+    # linear_sum_assignment which might swap chains
+    preserve_order = False
+    if len(chain_ids) == len(template_chain_ids):
+        # Check if all query sequences are identical (homo-oligomer)
+        query_seqs = [sequences[cid] for cid in chain_ids]
+        template_seqs = [template_sequences[tid] for tid in template_chain_ids]
+        if len(set(query_seqs)) == 1 and len(set(template_seqs)) == 1:
+            # Check if chain_ids and template_chain_ids match in order
+            if chain_ids == template_chain_ids:
+                preserve_order = True
+
+    if preserve_order:
+        # For homo-oligomers with matching chain order, preserve YAML order
+        template_records = []
+        for chain_id, template_chain_id in zip(chain_ids, template_chain_ids):
+            chain_seq = sequences[chain_id]
+            template_seq = template_sequences[template_chain_id]
+            alignments = get_local_alignments(chain_seq, template_seq)
+            for alignment in alignments:
+                template_record = TemplateInfo(
+                    name=template_id,
+                    query_chain=chain_id,
+                    query_st=alignment.query_st,
+                    query_en=alignment.query_en,
+                    template_chain=template_chain_id,
+                    template_st=alignment.template_st,
+                    template_en=alignment.template_en,
+                    force=force,
+                    threshold=threshold,
+                )
+                template_records.append(template_record)
+        return template_records
+
+    # Original logic: use linear_sum_assignment for optimal matching
     # Compute pairwise scores
     score_matrix = []
     for chain_id in chain_ids:
@@ -944,6 +980,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     ccd: Mapping[str, Mol],
     mol_dir: Optional[Path] = None,
     boltz_2: bool = False,
+    schema_path: Optional[Path] = None,
 ) -> Target:
     """Parse a Boltz input yaml / json.
 
@@ -1014,6 +1051,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     # First group items that have the same type, sequence and modifications
     items_to_group = {}
     chain_name_to_entity_type = {}
+    chain_order = []  # Track the original order of chain IDs from YAML sequences
 
     for item in schema["sequences"]:
         # Get entity type
@@ -1036,11 +1074,12 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Group items by entity
         items_to_group.setdefault((entity_type, seq), []).append(item)
 
-        # Map chain names to entity types
+        # Map chain names to entity types and track order
         chain_names = item[entity_type]["id"]
         chain_names = [chain_names] if isinstance(chain_names, str) else chain_names
         for chain_name in chain_names:
             chain_name_to_entity_type[chain_name] = entity_type
+            chain_order.append(chain_name)  # Preserve YAML sequences order
 
     # Check if any affinity ligand is present
     affinity_ligands = set()
@@ -1203,12 +1242,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
                     # Add error and warning messaging when computing affinity with ligands too large
                     if ref_mol.GetNumAtoms() > 128:
-                        msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not " \
-                              f"supported in the affinity prediction module"
+                        msg = (
+                            f"The ligand for affinity is too large, ligands with more than 128 atoms are not "
+                            f"supported in the affinity prediction module"
+                        )
                         raise ValueError(msg)
                     elif ref_mol.GetNumAtoms() > 56:
-                        print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
-                              "was the maximum during training, therefore the affinity output might be inaccurate.")
+                        print(
+                            "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
+                            "was the maximum during training, therefore the affinity output might be inaccurate."
+                        )
 
                 # Parse residue
                 residue = parse_ccd_residue(
@@ -1229,9 +1272,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get("cyclic", False), (
-                "Cyclic flag is not supported for ligands"
-            )
+            assert not items[0][entity_type].get(
+                "cyclic", False
+            ), "Cyclic flag is not supported for ligands"
 
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
@@ -1268,8 +1311,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not supported in the affinity prediction module"
                     raise ValueError(msg)
                 elif mol_no_h.GetNumAtoms() > 56:
-                    print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
-                          "which was the maximum during training, therefore the affinity output might be inaccurate.")
+                    print(
+                        "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
+                        "which was the maximum during training, therefore the affinity output might be inaccurate."
+                    )
 
             affinity_mw = AllChem.Descriptors.MolWt(mol_no_h) if affinity else None
             extra_mols[f"LIG{ligand_id}"] = mol_no_h
@@ -1290,9 +1335,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get("cyclic", False), (
-                "Cyclic flag is not supported for ligands"
-            )
+            assert not items[0][entity_type].get(
+                "cyclic", False
+            ), "Cyclic flag is not supported for ligands"
 
         else:
             msg = f"Invalid entity type: {entity_type}"
@@ -1317,12 +1362,20 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         msg = "No chains parsed!"
         raise ValueError(msg)
 
+    # Reorder chains dict to match the original YAML sequences order
+    # This ensures asym_id assignment follows the user-specified chain order
+    chains = {chain_name: chains[chain_name] for chain_name in chain_order if chain_name in chains}
+    chain_to_msa = {chain_name: chain_to_msa[chain_name] for chain_name in chain_order if chain_name in chain_to_msa}
+
     # Create tables
     atom_data = []
     bond_data = []
     res_data = []
     chain_data = []
     protein_chains = set()
+    polymer_chains = (
+        set()
+    )  # All polymer chains (protein, DNA, RNA) for template validation
     affinity_info = None
 
     rdkit_bounds_constraint_data = []
@@ -1350,6 +1403,14 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Save protein chains for later
         if chain.type == const.chain_type_ids["PROTEIN"]:
             protein_chains.add(chain_name)
+
+        # Save all polymer chains (protein, DNA, RNA) for template validation
+        if chain.type in [
+            const.chain_type_ids["PROTEIN"],
+            const.chain_type_ids["DNA"],
+            const.chain_type_ids["RNA"],
+        ]:
+            polymer_chains.add(chain_name)
 
         # Add affinity info
         if chain.affinity and affinity_info is not None:
@@ -1596,8 +1657,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             msg = f"Invalid constraint: {constraint}"
             raise ValueError(msg)
 
-    # Get protein sequences in this YAML
-    protein_seqs = {name: chains[name].sequence for name in protein_chains}
+    # Get polymer sequences (protein, DNA, RNA) in this YAML
+    polymer_seqs = {name: chains[name].sequence for name in polymer_chains}
+    protein_seqs = {
+        name: chains[name].sequence for name in protein_chains
+    }  # Keep for backward compatibility
 
     # Parse templates
     template_schema = schema.get("templates", [])
@@ -1607,6 +1671,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     templates = {}
     template_records = []
+    template_cif_path_resolved: Optional[str] = None  # For inpainting: merge struct_conn etc. into output
     for template in template_schema:
         if "cif" in template:
             path = template["cif"]
@@ -1618,6 +1683,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             msg = "Template was not properly specified, missing CIF or PDB path!"
             raise ValueError(msg)
 
+        # Template CIF path: resolve relative to cwd (YAML paths are cwd-relative at process time)
+        if not pdb and template_cif_path_resolved is None:
+            template_cif_path_resolved = str(Path(path).resolve())
+
         template_id = Path(path).stem
         chain_ids = template.get("chain_id", None)
         template_chain_ids = template.get("template_id", None)
@@ -1626,34 +1695,39 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         matched = False
 
         if chain_ids is not None and not isinstance(chain_ids, list):
-            chain_ids = [chain_ids]
+            # Support abbreviated multi-chain notation: "ABCDE" -> ["A","B","C","D","E"]
+            if isinstance(chain_ids, str) and len(chain_ids) > 1:
+                chain_ids = list(chain_ids)
+            else:
+                chain_ids = [chain_ids]
         if template_chain_ids is not None and not isinstance(template_chain_ids, list):
-            template_chain_ids = [template_chain_ids]
+            if isinstance(template_chain_ids, str) and len(template_chain_ids) > 1:
+                template_chain_ids = list(template_chain_ids)
+            else:
+                template_chain_ids = [template_chain_ids]
 
-        if (
-            template_chain_ids is not None
-            and chain_ids is not None
-        ):
-           
-                if len(template_chain_ids) == len(chain_ids):
-                     if len(template_chain_ids) > 0 and len(chain_ids) > 0:
-                        matched = True
-                else:
-                    msg = (
-                        "When providing both the chain_id and template_id, the number of"
-                        "template_ids provided must match the number of chain_ids!"
-                    )
-                    raise ValueError(msg)
+        if template_chain_ids is not None and chain_ids is not None:
 
-        # Get relevant chains ids
+            if len(template_chain_ids) == len(chain_ids):
+                if len(template_chain_ids) > 0 and len(chain_ids) > 0:
+                    matched = True
+            else:
+                msg = (
+                    "When providing both the chain_id and template_id, the number of"
+                    "template_ids provided must match the number of chain_ids!"
+                )
+                raise ValueError(msg)
+
+        # Get relevant chains ids (allow all chains from YAML, including ligands, for inpainting)
+        all_chain_ids = set(chains.keys())
         if chain_ids is None:
-            chain_ids = list(protein_chains)
+            chain_ids = list(polymer_chains)
 
         for chain_id in chain_ids:
-            if chain_id not in protein_chains:
+            if chain_id not in all_chain_ids:
                 msg = (
                     f"Chain {chain_id} assigned for template"
-                    f"{template_id} is not one of the protein chains!"
+                    f"{template_id} is not present in the schema!"
                 )
                 raise ValueError(msg)
 
@@ -1674,19 +1748,34 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 use_assembly=False,
                 compute_interfaces=False,
             )
-        template_proteins = {
+        template_all_chains = {str(c["name"]) for c in parsed_template.data.chains}
+        template_polymers = {
             str(c["name"])
             for c in parsed_template.data.chains
-            if c["mol_type"] == const.chain_type_ids["PROTEIN"]
+            if c["mol_type"]
+            in [
+                const.chain_type_ids["PROTEIN"],
+                const.chain_type_ids["DNA"],
+                const.chain_type_ids["RNA"],
+            ]
         }
         if template_chain_ids is None:
-            template_chain_ids = list(template_proteins)
+            # For inpainting: preserve YAML chain_id order; include all chains in template (polymers + ligands)
+            if chain_ids is not None:
+                template_chain_ids = [
+                    cid for cid in chain_ids if cid in template_all_chains
+                ]
+                remaining = template_all_chains - set(template_chain_ids)
+                if remaining:
+                    template_chain_ids.extend(sorted(remaining))
+            else:
+                template_chain_ids = sorted(template_all_chains)
 
         for chain_id in template_chain_ids:
-            if chain_id not in template_proteins:
+            if chain_id not in template_all_chains:
                 msg = (
                     f"Template chain {chain_id} assigned for template"
-                    f"{template_id} is not one of the protein chains!"
+                    f"{template_id} is not present in the template CIF!"
                 )
                 raise ValueError(msg)
 
@@ -1699,32 +1788,61 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 raise ValueError(msg)
         else:
             threshold = float("inf")
-        # Compute template records
+        # Compute template records for polymer chains
+        chain_ids_polymer = [c for c in chain_ids if c in polymer_chains]
+        template_chain_ids_polymer = [
+            c for c in template_chain_ids if c in template_polymers
+        ]
 
-        if matched:
+        if matched and len(chain_ids_polymer) == len(template_chain_ids_polymer):
             template_records.extend(
                 get_template_records_from_matching(
                     template_id=template_id,
-                    chain_ids=chain_ids,
-                    sequences=protein_seqs,
-                    template_chain_ids=template_chain_ids,
+                    chain_ids=chain_ids_polymer,
+                    sequences=polymer_seqs,
+                    template_chain_ids=template_chain_ids_polymer,
                     template_sequences=parsed_template.sequences,
                     force=force,
                     threshold=threshold,
                 )
             )
-        else:
+        elif chain_ids_polymer and template_chain_ids_polymer:
             template_records.extend(
                 get_template_records_from_search(
                     template_id=template_id,
-                    chain_ids=chain_ids,
-                    sequences=protein_seqs,
-                    template_chain_ids=template_chain_ids,
+                    chain_ids=chain_ids_polymer,
+                    sequences=polymer_seqs,
+                    template_chain_ids=template_chain_ids_polymer,
                     template_sequences=parsed_template.sequences,
                     force=force,
                     threshold=threshold,
                 )
             )
+
+        # Add template records for ligand chains (for inpainting)
+        # Ligands are matched by chain name directly (no sequence alignment)
+        chain_ids_ligand = [c for c in chain_ids if c not in polymer_chains]
+        template_chain_ids_ligand = [
+            c for c in template_chain_ids if c not in template_polymers
+        ]
+
+        # Match ligands by chain name if they appear in both query and template
+        for chain_id in chain_ids_ligand:
+            if chain_id in template_chain_ids_ligand:
+                # For ligands, create a template record with full coverage
+                # Ligands typically have a single residue (res_idx=0)
+                template_record = TemplateInfo(
+                    name=template_id,
+                    query_chain=chain_id,
+                    query_st=0,
+                    query_en=1,  # Single residue
+                    template_chain=chain_id,
+                    template_st=0,
+                    template_en=1,  # Single residue
+                    force=force,
+                    threshold=threshold,
+                )
+                template_records.append(template_record)
         # Save template
         templates[template_id] = parsed_template.data
 
@@ -1814,6 +1932,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         inference_options=options,
         templates=template_records,
         affinity=affinity_info,
+        template_cif_path=template_cif_path_resolved,
     )
 
     residue_constraints = ResidueConstraints(

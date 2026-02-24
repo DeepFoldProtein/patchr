@@ -155,6 +155,7 @@ class BoltzSteeringParams:
     physical_guidance_update: bool = False
     contact_guidance_update: bool = True
     num_gd_steps: int = 20
+    inpainting: bool = False
 
 
 @rank_zero_only
@@ -450,22 +451,19 @@ def compute_msa(
     click.echo(f"Calling MSA server for target {target_id} with {len(data)} sequences")
     click.echo(f"MSA server URL: {msa_server_url}")
     click.echo(f"MSA pairing strategy: {msa_pairing_strategy}")
-    
+
     # Construct auth headers if API key header/value is provided
     auth_headers = None
     if api_key_value:
         key = api_key_header if api_key_header else "X-API-Key"
         value = api_key_value
-        auth_headers = {
-            "Content-Type": "application/json",
-            key: value
-        }
+        auth_headers = {"Content-Type": "application/json", key: value}
         click.echo(f"Using API key authentication for MSA server (header: {key})")
     elif msa_server_username and msa_server_password:
         click.echo("Using basic authentication for MSA server")
     else:
         click.echo("No authentication provided for MSA server")
-    
+
     if len(data) > 1:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -542,6 +540,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     processed_mols_dir: Path,
     structure_dir: Path,
     records_dir: Path,
+    override: bool = False,
 ) -> None:
     try:
         # Parse data
@@ -610,7 +609,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
             # Dump processed MSA
             processed = processed_msa_dir / f"{target_id}_{msa_idx}.npz"
             msa_id_map[msa_id] = f"{target_id}_{msa_idx}"
-            if not processed.exists():
+            if not processed.exists() or override:
                 # Parse A3M
                 if msa_path.suffix == ".a3m":
                     msa: MSA = parse_a3m(
@@ -677,6 +676,7 @@ def process_inputs(
     api_key_value: Optional[str] = None,
     boltz2: bool = False,
     preprocessing_threads: int = 1,
+    override: bool = False,
 ) -> Manifest:
     """Process the input data and output directory.
 
@@ -704,6 +704,8 @@ def process_inputs(
         Whether to use Boltz2, by default False.
     preprocessing_threads: int, optional
         The number of threads to use for preprocessing, by default 1.
+    override: bool, optional
+        Whether to override existing processed inputs, by default False.
 
     Returns
     -------
@@ -714,7 +716,7 @@ def process_inputs(
     # Validate mutually exclusive authentication methods
     has_basic_auth = msa_server_username and msa_server_password
     has_api_key = api_key_value is not None
-    
+
     if has_basic_auth and has_api_key:
         raise ValueError(
             "Cannot use both basic authentication (--msa_server_username/--msa_server_password) "
@@ -723,7 +725,7 @@ def process_inputs(
 
     # Check if records exist at output path
     records_dir = out_dir / "processed" / "records"
-    if records_dir.exists():
+    if records_dir.exists() and not override:
         # Load existing records
         existing = [Record.load(p) for p in records_dir.glob("*.json")]
         processed_ids = {record.id for record in existing}
@@ -740,6 +742,10 @@ def process_inputs(
             click.echo("All inputs are already processed.")
             updated_manifest = Manifest(existing)
             updated_manifest.dump(out_dir / "processed" / "manifest.json")
+    elif records_dir.exists() and override:
+        click.echo(
+            f"Found existing processed inputs, will override and reprocess them."
+        )
 
     # Create output directories
     msa_dir = out_dir / "msa"
@@ -789,6 +795,7 @@ def process_inputs(
         processed_mols_dir=processed_mols_dir,
         structure_dir=structure_dir,
         records_dir=records_dir,
+        override=override,
     )
 
     # Parse input data
@@ -973,7 +980,7 @@ def cli() -> None:
 @click.option(
     "--model",
     default="boltz2",
-    type=click.Choice(["boltz1", "boltz2"]),
+    type=click.Choice(["boltz1", "boltz2", "boltz2_inpaint"]),
     help="The model to use for prediction. Default is boltz2.",
 )
 @click.option(
@@ -1039,6 +1046,11 @@ def cli() -> None:
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
 )
+@click.option(
+    "--disable_boundary_refinement",
+    is_flag=True,
+    help="Disable boundary refinement for inpainting. Default is False (refinement enabled).",
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -1077,6 +1089,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    disable_boundary_refinement: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1119,7 +1132,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_server_password = os.environ.get("BOLTZ_MSA_PASSWORD")
         if api_key_value is None:
             api_key_value = os.environ.get("MSA_API_KEY_VALUE")
-        
+
         click.echo(f"MSA server enabled: {msa_server_url}")
         if api_key_value:
             click.echo("MSA server authentication: using API key header")
@@ -1137,11 +1150,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     # Download necessary data and model
     if model == "boltz1":
         download_boltz1(cache)
-    elif model == "boltz2":
+    elif model in ("boltz2", "boltz2_inpaint"):
         download_boltz2(cache)
     else:
-        msg = f"Model {model} not supported. Supported: boltz1, boltz2."
-        raise ValueError(f"Model {model} not supported.")
+        msg = f"Model {model} not supported. Supported: boltz1, boltz2, boltz2_inpaint."
+        raise ValueError(msg)
 
     # Validate inputs
     data = check_inputs(data)
@@ -1171,9 +1184,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         msa_server_password=msa_server_password,
         api_key_header=api_key_header,
         api_key_value=api_key_value,
-        boltz2=model == "boltz2",
+        boltz2=model in ("boltz2", "boltz2_inpaint"),
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
+        override=override,
     )
 
     # Load manifest
@@ -1209,24 +1223,34 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Set up trainer
     strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
-    ):
-        start_method = "fork" if platform.system() != "win32" and platform.system() != "Windows" else "spawn"
-        strategy = DDPStrategy(start_method=start_method)
-        if len(filtered_manifest.records) < devices:
-            msg = (
-                "Number of requested devices is greater "
-                "than the number of predictions, taking the minimum."
+    # Mac GPU support: Don't use DDP on macOS with MPS (from https://github.com/fnachon/boltz)
+    if torch.backends.mps.is_available():
+        strategy = "auto"
+        devices = 1  # Force single-device for MPS
+        num_workers = 0  # MPS does not support multiple workers
+    else:
+        if (isinstance(devices, int) and devices > 1) or (
+            isinstance(devices, list) and len(devices) > 1
+        ):
+            start_method = (
+                "fork"
+                if platform.system() != "win32" and platform.system() != "Windows"
+                else "spawn"
             )
-            click.echo(msg)
-            if isinstance(devices, list):
-                devices = devices[: max(1, len(filtered_manifest.records))]
-            else:
-                devices = max(1, min(len(filtered_manifest.records), devices))
+            strategy = DDPStrategy(start_method=start_method)
+            if len(filtered_manifest.records) < devices:
+                msg = (
+                    "Number of requested devices is greater "
+                    "than the number of predictions, taking the minimum."
+                )
+                click.echo(msg)
+                if isinstance(devices, list):
+                    devices = devices[: max(1, len(filtered_manifest.records))]
+                else:
+                    devices = max(1, min(len(filtered_manifest.records), devices))
 
     # Set up model parameters
-    if model == "boltz2":
+    if model in ("boltz2", "boltz2_inpaint"):
         diffusion_params = Boltz2DiffusionParams()
         step_scale = 1.5 if step_scale is None else step_scale
         diffusion_params.step_scale = step_scale
@@ -1240,7 +1264,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     msa_args = MSAModuleArgs(
         subsample_msa=subsample_msa,
         num_subsampled_msa=num_subsampled_msa,
-        use_paired_feature=model == "boltz2",
+        use_paired_feature=model in ("boltz2", "boltz2_inpaint"),
     )
 
     # Create prediction writer
@@ -1248,7 +1272,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         data_dir=processed.targets_dir,
         output_dir=out_dir / "predictions",
         output_format=output_format,
-        boltz2=model == "boltz2",
+        boltz2=model in ("boltz2", "boltz2_inpaint"),
         write_embeddings=write_embeddings,
     )
 
@@ -1259,7 +1283,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         callbacks=[pred_writer],
         accelerator=accelerator,
         devices=devices,
-        precision=32 if model == "boltz1" else "bf16-mixed",
+        # Mac GPU support: MPS doesn't support bf16, use float32 (from https://github.com/fnachon/boltz)
+        precision=32 if (model == "boltz1" or torch.backends.mps.is_available()) else "bf16-mixed",
     )
 
     if filtered_manifest.records:
@@ -1268,7 +1293,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         click.echo(msg)
 
         # Create data module
-        if model == "boltz2":
+        if model in ("boltz2", "boltz2_inpaint"):
             data_module = Boltz2InferenceDataModule(
                 manifest=processed.manifest,
                 target_dir=processed.targets_dir,
@@ -1291,7 +1316,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
         # Load model
         if checkpoint is None:
-            if model == "boltz2":
+            if model in ("boltz2", "boltz2_inpaint"):
                 checkpoint = cache / "boltz2_conf.ckpt"
             else:
                 checkpoint = cache / "boltz1_conf.ckpt"
@@ -1304,13 +1329,26 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_confidence_summary": True,
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
+            "boundary_refinement_enabled": not disable_boundary_refinement,
         }
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = use_potentials
         steering_args.physical_guidance_update = use_potentials
+        steering_args.contact_guidance_update = use_potentials
 
-        model_cls = Boltz2 if model == "boltz2" else Boltz1
+        # Determine if inpainting mode is enabled
+        enable_inpainting = model == "boltz2_inpaint"
+        steering_args.inpainting = enable_inpainting
+
+        if model == "boltz2" or model == "boltz2_inpaint":
+            model_cls = Boltz2
+        else:
+            model_cls = Boltz1
+
+        # For inpainting, force-enable templates
+        # use_templates = enable_inpainting
+
         model_module = model_cls.load_from_checkpoint(
             checkpoint,
             strict=True,
@@ -1322,6 +1360,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
+            enable_inpainting=enable_inpainting,
         )
         model_module.eval()
 
@@ -1387,7 +1426,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         steering_args.fk_steering = False
         steering_args.physical_guidance_update = False
         steering_args.contact_guidance_update = False
-        
+
         model_module = Boltz2.load_from_checkpoint(
             affinity_checkpoint,
             strict=True,

@@ -3,6 +3,9 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Literal
 
+import matplotlib
+matplotlib.use("Agg")  # Use non-interactive backend
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pytorch_lightning import LightningModule, Trainer
@@ -10,6 +13,7 @@ from pytorch_lightning.callbacks import BasePredictionWriter
 from torch import Tensor
 
 from boltz.data.types import Coords, Interface, Record, Structure, StructureV2
+from boltz.data.write.merge_cif_blocks import merge_template_blocks_into_cif
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 
@@ -167,10 +171,20 @@ class BoltzWriter(BasePredictionWriter):
                         )
                 elif self.output_format == "mmcif":
                     path = struct_dir / f"{outname}.cif"
-                    with path.open("w") as f:
-                        f.write(
-                            to_mmcif(new_structure, plddts=plddts, boltz2=self.boltz2)
+                    cif_str = to_mmcif(
+                        new_structure, plddts=plddts, boltz2=self.boltz2
+                    )
+                    template_cif_path = getattr(
+                        record, "template_cif_path", None
+                    )
+                    if template_cif_path:
+                        cif_str = merge_template_blocks_into_cif(
+                            cif_str,
+                            template_cif_path,
+                            entry_id=record.id,
                         )
+                    with path.open("w") as f:
+                        f.write(cif_str)
                 else:
                     path = struct_dir / f"{outname}.npz"
                     np.savez_compressed(path, **asdict(new_structure))
@@ -245,8 +259,49 @@ class BoltzWriter(BasePredictionWriter):
                         / f"pde_{record.id}_model_{idx_to_rank[model_idx]}.npz"
                     )
                     np.savez_compressed(path, pde=pde.cpu().numpy())
+
+                # Save template_output visualization (only once per record, not per model)
+                if "template_output" in prediction and model_idx == 0:
+                    template_output = prediction["template_output"]
+                    # template_output shape: (B, L, L, token_z) or (L, L, token_z)
+                    if isinstance(template_output, torch.Tensor):
+                        template_output = template_output.cpu()
+                    
+                    if len(template_output.shape) == 4:
+                        # Take first batch and compute L2 norm across feature dimension
+                        template_output = template_output[0]  # (L, L, token_z)
+                    elif len(template_output.shape) == 3:
+                        # Already (L, L, token_z)
+                        pass
+                    else:
+                        # Unexpected shape, skip
+                        template_output = None
+                    
+                    if template_output is not None:
+                        # Convert to numpy if still tensor
+                        if isinstance(template_output, torch.Tensor):
+                            # Convert to float32 first to handle bfloat16 and other types
+                            template_output = template_output.float()
+                            # Compute L2 norm across feature dimension to get 2D matrix
+                            template_output_norm = torch.norm(template_output, dim=-1).cpu().numpy()
+                        else:
+                            # Already numpy, compute norm
+                            template_output_norm = np.linalg.norm(template_output, axis=-1)
+                        
+                        # Create visualization
+                        fig, ax = plt.subplots(figsize=(10, 10))
+                        im = ax.imshow(template_output_norm, cmap="viridis", aspect="equal")
+                        ax.set_xlabel("Token j")
+                        ax.set_ylabel("Token i")
+                        ax.set_title("Template Output (L2 Norm)")
+                        plt.colorbar(im, ax=ax, label="L2 Norm")
+                        
+                        # Save PNG (without model_idx since it's the same for all models)
+                        path = struct_dir / f"template_output_{record.id}.png"
+                        plt.savefig(path, dpi=150, bbox_inches="tight")
+                        plt.close(fig)
                 
-            # Save embeddings
+                # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
                 s = prediction["s"].cpu().numpy()
                 z = prediction["z"].cpu().numpy()
@@ -256,6 +311,48 @@ class BoltzWriter(BasePredictionWriter):
                     / f"embeddings_{record.id}.npz"
                 )
                 np.savez_compressed(path, s=s, z=z)
+            
+            # Save inpainting metadata (only once per record, not per model)
+            if "inpainting_metadata" in prediction and model_idx == 0:
+                inpainting_metadata = prediction["inpainting_metadata"]
+                
+                # Convert chain index (asym_id) to chain_id (chain_name) using record.chains
+                # Create mapping from chain_id (asym_id/index) to chain_name
+                chain_index_to_name = {}
+                for chain_info in record.chains:
+                    chain_index_to_name[chain_info.chain_id] = chain_info.chain_name
+                
+                # Convert chain-based metadata to use chain_name instead of chain index
+                # (model may already send chain names as keys; use as-is in that case)
+                converted_metadata = {}
+                if "chains" in inpainting_metadata:
+                    converted_metadata["chains"] = {}
+                    for chain_index, chain_data in inpainting_metadata["chains"].items():
+                        if isinstance(chain_index, str):
+                            chain_name = chain_index
+                        else:
+                            chain_name = chain_index_to_name.get(
+                                chain_index, f"chain_{chain_index}"
+                            )
+                        converted_metadata["chains"][chain_name] = chain_data
+                
+                # Add boundary exclusion info if available, converting chain indices to chain names
+                if "boundary_exclusion" in inpainting_metadata:
+                    boundary_exclusion = inpainting_metadata["boundary_exclusion"].copy()
+                    
+                    # Convert boundary_residues_by_chain from chain index to chain name
+                    if "boundary_residues_by_chain" in boundary_exclusion:
+                        converted_boundary_by_chain = {}
+                        for chain_index, residues in boundary_exclusion["boundary_residues_by_chain"].items():
+                            chain_name = chain_index_to_name.get(int(chain_index), f"chain_{chain_index}")
+                            converted_boundary_by_chain[chain_name] = residues
+                        boundary_exclusion["boundary_residues_by_chain"] = converted_boundary_by_chain
+                    
+                    converted_metadata["boundary_exclusion"] = boundary_exclusion
+                
+                path = struct_dir / f"inpainting_metadata_{record.id}.json"
+                with path.open("w") as f:
+                    f.write(json.dumps(converted_metadata, indent=4))
 
     def on_predict_epoch_end(
         self,

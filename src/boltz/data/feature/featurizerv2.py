@@ -421,8 +421,9 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
     # Map (chain_id, seq_idx, res_idx) to deletion
     deletions = numba.typed.Dict.empty(
         key_type=numba.types.Tuple(
-            [numba.types.int64, numba.types.int64, numba.types.int64]),
-        value_type=numba.types.int64
+            [numba.types.int64, numba.types.int64, numba.types.int64]
+        ),
+        value_type=numba.types.int64,
     )
     for chain_id, chain_msa in msa.items():
         chain_deletions = chain_msa.deletions
@@ -1693,6 +1694,114 @@ def load_dummy_templates_features(tdim: int, num_tokens: int) -> dict:
     }
 
 
+def compute_template_atom_features(
+    query_tokens: Tokenized,
+    tmpl_tokens: list[dict],
+    template_structure,
+) -> dict:
+    """Compute atom-level template features for inpainting.
+
+    Maps template atoms to query atoms and extracts their coordinates.
+    """
+    # Get number of atoms in query structure
+    num_atoms = len(query_tokens.structure.atoms)
+
+    # Initialize atom-level features
+    template_atom_coords = np.zeros((num_atoms, 3), dtype=np.float32)
+    template_atom_mask = np.zeros((num_atoms,), dtype=np.float32)
+
+    # # Debug: Print template token information
+    # print(
+    #     f"[DEBUG] compute_template_atom_features: Processing {len(tmpl_tokens)} template tokens"
+    # )
+
+    # Create mapping from query token index to template token
+    query_idx_to_template = {}
+    for token_dict in tmpl_tokens:
+        q_idx = token_dict["q_idx"]
+        token = token_dict["token"]
+        query_idx_to_template[q_idx] = token
+
+        # Debug: Print each template token mapping
+        query_token = (
+            query_tokens.tokens[q_idx] if q_idx < len(query_tokens.tokens) else None
+        )
+        # if query_token is not None:
+        #     print(
+        #         f"[DEBUG]   Token {q_idx}: query_asym_id={query_token['asym_id']}, "
+        #         f"query_res_idx={query_token['res_idx']}, "
+        #         f"template_token_idx={token['token_idx']}"
+        #     )
+
+    # print(f"[DEBUG] Total query tokens: {len(query_tokens.tokens)}")
+    # print(f"[DEBUG] Total query residues: {len(query_tokens.structure.residues)}")
+    # print(f"[DEBUG] Mapped template tokens: {len(query_idx_to_template)}")
+
+    # Map atoms from template to query structure
+    query_residues = query_tokens.structure.residues
+    template_residues = template_structure.residues
+    query_atoms = query_tokens.structure.atoms
+    template_atoms = template_structure.atoms
+    query_token_list = query_tokens.tokens
+
+    # For each query residue that has a template
+    for q_token_idx, tmpl_token in query_idx_to_template.items():
+        # Get the actual residue index from the token
+        # q_token_idx is the token index, we need to get the residue index
+        if q_token_idx >= len(query_token_list):
+            continue
+        query_token = query_token_list[q_token_idx]
+        q_res_idx = query_token[
+            "token_idx"
+        ]  # This is the residue index in structure.residues
+
+        if q_res_idx >= len(query_residues):
+            continue
+
+        # Get query residue info
+        query_res = query_residues[q_res_idx]
+        q_atom_start = query_res["atom_idx"]
+        q_atom_count = query_res["atom_num"]
+
+        # Get template residue info (using token's res_idx from template structure)
+        tmpl_res_idx = tmpl_token["token_idx"]
+        if tmpl_res_idx >= len(template_residues):
+            continue
+
+        template_res = template_residues[tmpl_res_idx]
+        t_atom_start = template_res["atom_idx"]
+        t_atom_count = template_res["atom_num"]
+
+        # Create atom name mapping for this residue
+        template_atom_map = {}
+        for i in range(t_atom_count):
+            t_atom_idx = t_atom_start + i
+            if t_atom_idx >= len(template_atoms):
+                break
+            t_atom = template_atoms[t_atom_idx]
+            if t_atom["is_present"]:
+                atom_name = t_atom["name"]
+                template_atom_map[atom_name] = t_atom
+
+        # Map query atoms to template atoms by name
+        for i in range(q_atom_count):
+            q_atom_idx = q_atom_start + i
+            if q_atom_idx >= len(query_atoms):
+                break
+            q_atom = query_atoms[q_atom_idx]
+            atom_name = q_atom["name"]
+
+            if atom_name in template_atom_map:
+                t_atom = template_atom_map[atom_name]
+                template_atom_coords[q_atom_idx] = t_atom["coords"]
+                template_atom_mask[q_atom_idx] = 1.0
+
+    return {
+        "template_atom_coords": torch.from_numpy(template_atom_coords),
+        "template_atom_mask": torch.from_numpy(template_atom_mask),
+    }
+
+
 def compute_template_features(
     query_tokens: Tokenized,
     tmpl_tokens: list[dict],
@@ -1783,10 +1892,12 @@ def process_template_features(
     for template_info in data.record.templates:
         name_to_templates.setdefault(template_info.name, []).append(template_info)
 
-    # Map chain name to asym_id
+    # Map chain name to asym_id and chain type
     chain_name_to_asym_id = {}
+    chain_name_to_type = {}
     for chain in data.structure.chains:
         chain_name_to_asym_id[chain["name"]] = chain["asym_id"]
+        chain_name_to_type[chain["name"]] = chain["mol_type"]
 
     # Compute the offset
     template_features = []
@@ -1795,11 +1906,18 @@ def process_template_features(
         template_structure = data.templates[template_name]
         template_tokens = data.template_tokens[template_name]
         tmpl_chain_name_to_asym_id = {}
+        tmpl_chain_name_to_type = {}
         for chain in template_structure.chains:
             tmpl_chain_name_to_asym_id[chain["name"]] = chain["asym_id"]
+            tmpl_chain_name_to_type[chain["name"]] = chain["mol_type"]
 
         for template in templates:
             offset = template.template_st - template.query_st
+
+            # Debug logging
+            print(
+                f"[DEBUG] Processing template: query_chain={template.query_chain}, template_chain={template.template_chain}"
+            )
 
             # Get query and template tokens to map residues
             query_tokens = data.tokens
@@ -1810,16 +1928,53 @@ def process_template_features(
             # Get the template tokens at the query residues
             chain_id = tmpl_chain_name_to_asym_id[template.template_chain]
             toks = template_tokens[template_tokens["asym_id"] == chain_id]
-            toks = [t for t in toks if t["res_idx"] - offset in q_indices]
-            for t in toks:
-                q_idx = q_indices[t["res_idx"] - offset]
-                row_tokens.append(
-                    {
-                        "token": t,
-                        "pdb_id": template_id,
-                        "q_idx": q_idx,
-                    }
-                )
+
+            # Check if this is a NONPOLYMER chain (ligand, including glycans)
+            # Use chain type instead of token count
+            query_chain_type = chain_name_to_type.get(template.query_chain, -1)
+            template_chain_type = tmpl_chain_name_to_type.get(
+                template.template_chain, -1
+            )
+            is_nonpolymer_chain = (
+                query_chain_type == const.chain_type_ids["NONPOLYMER"]
+                and template_chain_type == const.chain_type_ids["NONPOLYMER"]
+            )
+
+            print(
+                f"[DEBUG]   len(toks)={len(toks)}, len(q_tokens)={len(q_tokens)}, "
+                f"query_chain_type={query_chain_type}, is_nonpolymer={is_nonpolymer_chain}"
+            )
+
+            if is_nonpolymer_chain:
+                # For NONPOLYMER chains (ligands, glycans), match by position in chain
+                # This handles both single-residue ligands and multi-residue glycans
+                print(f"[DEBUG]   Matching as NONPOLYMER chain")
+                # Match template tokens to query tokens by their position in the chain
+                for i, t in enumerate(toks):
+                    if i < len(q_tokens):
+                        q_idx = q_tokens[i]["token_idx"]
+                        # print(f"[DEBUG]     Adding NONPOLYMER token {i}: q_idx={q_idx}")
+                        row_tokens.append(
+                            {
+                                "token": t,
+                                "pdb_id": template_id,
+                                "q_idx": q_idx,
+                            }
+                        )
+            else:
+                # For protein/RNA/DNA chains, use offset-based matching
+                # print(f"[DEBUG]   Matching as polymer chain with offset={offset}")
+                toks = [t for t in toks if t["res_idx"] - offset in q_indices]
+                # print(f"[DEBUG]     Matched {len(toks)} polymer tokens")
+                for t in toks:
+                    q_idx = q_indices[t["res_idx"] - offset]
+                    row_tokens.append(
+                        {
+                            "token": t,
+                            "pdb_id": template_id,
+                            "q_idx": q_idx,
+                        }
+                    )
 
         # Compute template features for each row
         row_features = compute_template_features(data, row_tokens, max_tokens)
@@ -1828,6 +1983,12 @@ def process_template_features(
             template.threshold if template.threshold is not None else float("inf"),
             dtype=torch.float32,
         )
+
+        # Add atom-level template coordinates for inpainting
+        row_features.update(
+            compute_template_atom_features(data, row_tokens, template_structure)
+        )
+
         template_features.append(row_features)
 
     # Stack each feature
@@ -1894,9 +2055,9 @@ def process_ensemble_features(
 
     if fix_single_ensemble:
         # Always take the first conformer for train and validation
-        assert num_ensembles == 1, (
-            "Number of conformers sampled must be 1 with fix_single_ensemble=True."
-        )
+        assert (
+            num_ensembles == 1
+        ), "Number of conformers sampled must be 1 with fix_single_ensemble=True."
         ensemble_ref_idxs = np.array([0])
     else:
         if ensemble_sample_replacement:
@@ -2335,8 +2496,14 @@ class Boltz2Featurizer:
             chain_constraint_features = process_chain_feature_constraints(data)
             contact_constraint_features = process_contact_feature_constraints(
                 data=data,
-                inference_pocket_constraints=inference_pocket_constraints if inference_pocket_constraints else [],
-                inference_contact_constraints=inference_contact_constraints if inference_contact_constraints else [],
+                inference_pocket_constraints=(
+                    inference_pocket_constraints if inference_pocket_constraints else []
+                ),
+                inference_contact_constraints=(
+                    inference_contact_constraints
+                    if inference_contact_constraints
+                    else []
+                ),
             )
 
         return {

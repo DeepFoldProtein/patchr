@@ -1,4 +1,5 @@
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
+# Mac GPU support added from https://github.com/fnachon/boltz
 
 from einops import einsum
 import torch
@@ -60,9 +61,17 @@ def weighted_rigid_align(
     # Compute the SVD of the covariance matrix, required float32 for svd and determinant
     original_dtype = cov_matrix.dtype
     cov_matrix_32 = cov_matrix.to(dtype=torch.float32)
-    U, S, V = torch.linalg.svd(
-        cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
-    )
+    # Mac GPU support: torch.linalg.svd is not supported yet on mps move to CPU (from https://github.com/fnachon/boltz)
+    if cov_matrix_32.is_mps:
+        cov_matrix_32 = cov_matrix_32.cpu()
+        U, S, V = torch.linalg.svd(cov_matrix_32)
+        U = U.to("mps")
+        S = S.to("mps")
+        V = V.to("mps")
+    else:
+        U, S, V = torch.linalg.svd(
+            cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
+        )
     V = V.mH
 
     # Catch ambiguous rotation by checking the magnitude of singular values
@@ -80,7 +89,11 @@ def weighted_rigid_align(
     F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
         None
     ].repeat(batch_size, 1, 1)
-    F[:, -1, -1] = torch.det(rot_matrix)
+    # Mac GPU support: torch.det is not supported yet on mps move to CPU (from https://github.com/fnachon/boltz)
+    if rot_matrix.is_mps:
+        F[:, -1, -1] = torch.det(rot_matrix.cpu()).to("mps")
+    else:
+        F[:, -1, -1] = torch.det(rot_matrix)
     rot_matrix = einsum(U, F, V, "b i j, b j k, b l k -> b i l")
     rot_matrix = rot_matrix.to(dtype=original_dtype)
 

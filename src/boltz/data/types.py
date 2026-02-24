@@ -581,6 +581,8 @@ class Record(JSONSerializable):
     templates: Optional[list[TemplateInfo]] = None
     md: Optional[MDInfo] = None
     affinity: Optional[AffinityInfo] = None
+    # For inpainting: path to template/structure CIF (struct_conn, chem_comp, etc. merged into output)
+    template_cif_path: Optional[str] = None
 
 
 ####################################################################################################

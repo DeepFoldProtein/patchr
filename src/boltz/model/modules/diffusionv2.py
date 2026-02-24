@@ -10,10 +10,11 @@ import torch.nn.functional as F  # noqa: N812
 from einops import rearrange
 from torch import nn
 from torch.nn import Module
-
+from tqdm import tqdm
 import boltz.model.layers.initialize as init
 from boltz.data import const
 from boltz.model.loss.diffusionv2 import (
+    apply_rigid_transform,
     smooth_lddt_loss,
     weighted_rigid_align,
 )
@@ -22,9 +23,7 @@ from boltz.model.modules.encodersv2 import (
     AtomAttentionEncoder,
     SingleConditioning,
 )
-from boltz.model.modules.transformersv2 import (
-    DiffusionTransformer,
-)
+from boltz.model.modules.transformersv2 import DiffusionTransformer
 from boltz.model.modules.utils import (
     LinearNoBias,
     center_random_augmentation,
@@ -33,6 +32,114 @@ from boltz.model.modules.utils import (
     log,
 )
 from boltz.model.potentials.potentials import get_potentials
+
+
+def get_boundary_region_mask(template_mask, feats, boundary_window=2):
+    """
+    Get mask for atoms in boundary region (template side + generated side).
+    
+    This identifies atoms that are within boundary_window distance from the
+    template-generated boundary, on BOTH sides.
+    
+    Args:
+        template_mask: (batch, n_atoms) boolean tensor
+        feats: feature dictionary containing atom_to_token mapping and asym_id
+        boundary_window: distance from boundary within which to include residues
+                        (e.g., 2 = boundary ± 2 residues on both sides)
+    
+    Returns:
+        boundary_region_mask: (batch, n_atoms) boolean tensor for atoms near boundary
+    """
+    # Get residue-level template mask
+    atom_to_token = feats["atom_to_token"].float()  # (batch, n_atoms, n_residues)
+    
+    # A residue is template if ANY of its atoms is template
+    residue_template_mask = (atom_to_token.transpose(1, 2) @ template_mask.unsqueeze(-1).float()).squeeze(-1) > 0
+    
+    # Get chain information
+    asym_id = feats.get("asym_id", None)
+    if asym_id is not None:
+        if asym_id.dim() > 1:
+            asym_id = asym_id[0]
+        asym_id_np = asym_id.cpu().numpy() if isinstance(asym_id, torch.Tensor) else asym_id
+    else:
+        asym_id_np = None
+    
+    batch_size, n_residues = residue_template_mask.shape
+    
+    # First, find initial boundary residues (where template status changes)
+    boundary_residues_initial = torch.zeros_like(residue_template_mask, dtype=torch.bool)
+    
+    for b in range(batch_size):
+        for i in range(n_residues):
+            # Check previous residue (only if same chain)
+            if i > 0:
+                if asym_id_np is None or asym_id_np[i] == asym_id_np[i-1]:
+                    if residue_template_mask[b, i] != residue_template_mask[b, i-1]:
+                        boundary_residues_initial[b, i] = True
+                        boundary_residues_initial[b, i-1] = True
+            
+            # Check next residue (only if same chain)
+            if i < n_residues - 1:
+                if asym_id_np is None or asym_id_np[i] == asym_id_np[i+1]:
+                    if residue_template_mask[b, i] != residue_template_mask[b, i+1]:
+                        boundary_residues_initial[b, i] = True
+                        boundary_residues_initial[b, i+1] = True
+    
+    # Expand boundary to include residues within boundary_window distance
+    # This includes BOTH template side and generated side
+    boundary_region_residues = torch.zeros_like(residue_template_mask, dtype=torch.bool)
+    
+    for b in range(batch_size):
+        boundary_indices = torch.where(boundary_residues_initial[b])[0].cpu().numpy()
+        
+        if len(boundary_indices) == 0:
+            continue
+        
+        for i in range(n_residues):
+            min_distance = float('inf')
+            
+            for boundary_idx in boundary_indices:
+                # Check if same chain
+                if asym_id_np is not None and asym_id_np[i] != asym_id_np[boundary_idx]:
+                    continue
+                
+                # Compute sequential distance within same chain
+                if i < boundary_idx:
+                    same_chain = True
+                    for j in range(i, boundary_idx):
+                        if asym_id_np is not None and j + 1 < len(asym_id_np):
+                            if asym_id_np[j] != asym_id_np[j + 1]:
+                                same_chain = False
+                                break
+                    if same_chain:
+                        distance = boundary_idx - i
+                    else:
+                        distance = float('inf')
+                elif i > boundary_idx:
+                    same_chain = True
+                    for j in range(boundary_idx, i):
+                        if asym_id_np is not None and j + 1 < len(asym_id_np):
+                            if asym_id_np[j] != asym_id_np[j + 1]:
+                                same_chain = False
+                                break
+                    if same_chain:
+                        distance = i - boundary_idx
+                    else:
+                        distance = float('inf')
+                else:
+                    distance = 0
+                
+                min_distance = min(min_distance, distance)
+            
+            # Include residue if within boundary_window distance (both sides)
+            if min_distance <= boundary_window:
+                boundary_region_residues[b, i] = True
+    
+    # Convert residue mask to atom mask
+    boundary_atom_mask = (atom_to_token @ boundary_region_residues.unsqueeze(-1).float()).squeeze(-1) > 0
+    
+    return boundary_atom_mask
 
 
 class DiffusionModule(Module):
@@ -197,6 +304,8 @@ class AtomDiffusion(Module):
         compile_score: bool = False,
         alignment_reverse_diff: bool = False,
         synchronize_sigmas: bool = False,
+        # Inpainting parameters
+        template_noise_injection: bool = True,
     ):
         super().__init__()
         self.score_model = DiffusionModule(
@@ -228,6 +337,17 @@ class AtomDiffusion(Module):
         )
         self.alignment_reverse_diff = alignment_reverse_diff
         self.synchronize_sigmas = synchronize_sigmas
+
+        # Inpainting parameters
+        self.template_noise_injection = template_noise_injection
+
+        # Boundary refinement parameters (Global-to-Local Refinement)
+        # After global diffusion, refine boundary regions with a short, focused diffusion
+        self.boundary_refinement_enabled = True  # Enable boundary refinement for inpainting
+        self.boundary_refinement_window = 2 # ±N residues from boundary to refine
+        self.boundary_refinement_sigma_start = 1.5  # Start sigma for refinement (Å)
+        self.boundary_refinement_steps = 25  # Number of refinement steps
+        self.boundary_refinement_inpainting_region_mode = False  # If True, only refine inpainting region (generated side) of boundary
 
         self.token_s = score_model_args["token_s"]
         self.register_buffer("zero", torch.tensor(0.0), persistent=False)
@@ -273,24 +393,51 @@ class AtomDiffusion(Module):
         )
         return denoised_coords
 
-    def sample_schedule(self, num_sampling_steps=None):
+    def sample_schedule(self, num_sampling_steps=None, sigma_max_override=None):
         num_sampling_steps = default(num_sampling_steps, self.num_sampling_steps)
         inv_rho = 1 / self.rho
+        
+        # Use override sigma_max if provided, otherwise use default
+        sigma_max = default(sigma_max_override, self.sigma_max)
 
         steps = torch.arange(
             num_sampling_steps, device=self.device, dtype=torch.float32
         )
         sigmas = (
-            self.sigma_max**inv_rho
+            sigma_max**inv_rho
             + steps
             / (num_sampling_steps - 1)
-            * (self.sigma_min**inv_rho - self.sigma_max**inv_rho)
+            * (self.sigma_min**inv_rho - sigma_max**inv_rho)
         ) ** self.rho
 
         sigmas = sigmas * self.sigma_data
 
         sigmas = F.pad(sigmas, (0, 1), value=0.0)  # last step is sigma value of 0.
         return sigmas
+
+    def inject_template_noise(
+        self,
+        template_coords_clean,
+        current_sigma,
+        template_mask,
+    ):
+        """
+        Inject noise into template coordinates to match current noise level.
+
+        The known (template) region needs to have the same noise level as the
+        generated region to be properly merged during inpainting.
+        
+        Args:
+            template_coords_clean: Clean template coordinates (no noise)
+            current_sigma: Current sigma value (noise level)
+            template_mask: Boolean mask for template atoms
+        
+        Returns:
+            Template coordinates with noise added
+        """
+        noise = torch.randn_like(template_coords_clean) * current_sigma
+        template_coords_noisy = template_coords_clean + noise
+        return template_coords_noisy
 
     def sample(
         self,
@@ -299,12 +446,34 @@ class AtomDiffusion(Module):
         multiplicity=1,
         max_parallel_samples=None,
         steering_args=None,
+        progress_tracker=None,
+        # Boundary refinement parameters (can override class defaults)
+        boundary_refinement_enabled=None,
+        boundary_refinement_window=None,
+        boundary_refinement_sigma_start=None,
+        boundary_refinement_steps=None,
+        boundary_refinement_inpainting_region_mode=None,
         **network_condition_kwargs,
     ):
+        # Extract inpainting information if available
+        feats = network_condition_kwargs.get("feats", {})
+        inpainting_template_coords = feats.get("inpainting_template_coords", None)
+        inpainting_template_mask = feats.get("inpainting_template_mask", None)
+        enable_inpainting = (
+            inpainting_template_coords is not None
+            and inpainting_template_mask is not None
+        )
+
+        if enable_inpainting:
+            print(
+                f"[Inpainting] Diffusion will fix {inpainting_template_mask.sum().item()} template atoms"
+            )
+
         if steering_args is not None and (
             steering_args["fk_steering"]
             or steering_args["physical_guidance_update"]
             or steering_args["contact_guidance_update"]
+            or steering_args.get("inpainting", False)
         ):
             potentials = get_potentials(steering_args, boltz2=True)
 
@@ -317,6 +486,7 @@ class AtomDiffusion(Module):
         if (
             steering_args["physical_guidance_update"]
             or steering_args["contact_guidance_update"]
+            or steering_args.get("inpainting", False)
         ):
             scaled_guidance_update = torch.zeros(
                 (multiplicity, *atom_mask.shape[1:], 3),
@@ -330,11 +500,11 @@ class AtomDiffusion(Module):
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
         shape = (*atom_mask.shape, 3)
-
-        # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
         sigmas = self.sample_schedule(num_sampling_steps)
         gammas = torch.where(sigmas > self.gamma_min, self.gamma_0, 0.0)
-        sigmas_and_gammas = list(zip(sigmas[:-1], sigmas[1:], gammas[1:]))
+        
+        schedule = [(i, i+1, 'backward') for i in range(len(sigmas) - 1)]
+        
         if self.training and self.step_scale_random is not None:
             step_scale = np.random.choice(self.step_scale_random)
         else:
@@ -343,39 +513,94 @@ class AtomDiffusion(Module):
         # atom position is noise at the beginning
         init_sigma = sigmas[0]
         atom_coords = init_sigma * torch.randn(shape, device=self.device)
+
+        # Inpainting: Initialize template atoms with template coordinates
+        if enable_inpainting:
+            # Repeat template coords and mask for multiplicity
+            template_coords_expanded = inpainting_template_coords.repeat_interleave(
+                multiplicity, 0
+            )
+            template_mask_expanded = inpainting_template_mask.repeat_interleave(
+                multiplicity, 0
+            )
+            
+            # Store original template coordinates for final alignment back to original coordinate system
+            # This is needed because we transform template along with noisy coords during diffusion
+            template_coords_original = template_coords_expanded.clone()
+
         token_repr = None
         atom_coords_denoised = None
 
-        # gradually denoise
-        for step_idx, (sigma_tm, sigma_t, gamma) in enumerate(sigmas_and_gammas):
-            random_R, random_tr = compute_random_augmentation(
-                multiplicity, device=atom_coords.device, dtype=atom_coords.dtype
-            )
-            atom_coords = atom_coords - atom_coords.mean(dim=-2, keepdims=True)
-            atom_coords = (
-                torch.einsum("bmd,bds->bms", atom_coords, random_R) + random_tr
-            )
-            if atom_coords_denoised is not None:
-                atom_coords_denoised -= atom_coords_denoised.mean(dim=-2, keepdims=True)
-                atom_coords_denoised = (
-                    torch.einsum("bmd,bds->bms", atom_coords_denoised, random_R)
-                    + random_tr
-                )
-            if (
-                steering_args["physical_guidance_update"]
-                or steering_args["contact_guidance_update"]
-            ) and scaled_guidance_update is not None:
-                scaled_guidance_update = torch.einsum(
-                    "bmd,bds->bms", scaled_guidance_update, random_R
-                )
+        # Update progress: diffusion started (40%)
+        if progress_tracker:
+            progress_tracker.update_diffusion_progress("Starting diffusion", 0, len(schedule))
 
-            sigma_tm, sigma_t, gamma = sigma_tm.item(), sigma_t.item(), gamma.item()
+        # gradually denoise
+        for step_idx, (idx_from, idx_to, _) in tqdm(enumerate(schedule), total=len(schedule), desc="Diffusion Steps"):
+            # Get sigma values from indices
+            sigma_from = sigmas[idx_from].item()
+            sigma_to = sigmas[idx_to].item()
+
+            # Get gamma for this step
+            gamma = gammas[idx_to].item() if idx_to < len(gammas) else 0.0
+            # Inpainting: inject noise into template atoms to match current noise level
+            if enable_inpainting and self.template_noise_injection:
+                # Inject noise into template coordinates
+                template_noise = self.inject_template_noise(
+                    template_coords_expanded[template_mask_expanded],
+                    sigma_from,
+                    template_mask_expanded[template_mask_expanded],
+                )
+                atom_coords[template_mask_expanded] = template_noise
+            
+            if self.coordinate_augmentation and not enable_inpainting:
+                # Normal mode: center + random augmentation
+                random_R, random_tr = compute_random_augmentation(
+                    multiplicity, device=atom_coords.device, dtype=atom_coords.dtype
+                )
+                atom_coords = atom_coords - atom_coords.mean(dim=-2, keepdims=True)
+                atom_coords = (
+                    torch.einsum("bmd,bds->bms", atom_coords, random_R) + random_tr
+                )
+                if atom_coords_denoised is not None:
+                    atom_coords_denoised -= atom_coords_denoised.mean(
+                        dim=-2, keepdims=True
+                    )
+                    atom_coords_denoised = (
+                        torch.einsum("bmd,bds->bms", atom_coords_denoised, random_R)
+                        + random_tr
+                    )
+                if (
+                    steering_args is not None
+                    and (
+                        steering_args["physical_guidance_update"]
+                        or steering_args["contact_guidance_update"]
+                    )
+                    and scaled_guidance_update is not None
+                ):
+                    scaled_guidance_update = torch.einsum(
+                        "bmd,bds->bms", scaled_guidance_update, random_R
+                    )
+
+            sigma_tm = sigma_from
+            sigma_t = sigma_to
 
             t_hat = sigma_tm * (1 + gamma)
             steering_t = 1.0 - (step_idx / num_sampling_steps)
             noise_var = self.noise_scale**2 * (t_hat**2 - sigma_tm**2)
             eps = sqrt(noise_var) * torch.randn(shape, device=self.device)
             atom_coords_noisy = atom_coords + eps
+            # Apply scaled_guidance_update from previous step to current noisy coordinates
+            if (
+                steering_args is not None
+                and (
+                    steering_args["physical_guidance_update"]
+                    or steering_args["contact_guidance_update"]
+                    or steering_args.get("inpainting", False)
+                )
+                and scaled_guidance_update is not None
+            ):
+                atom_coords_noisy = atom_coords_noisy + scaled_guidance_update
 
             with torch.no_grad():
                 atom_coords_denoised = torch.zeros_like(atom_coords_noisy)
@@ -385,7 +610,7 @@ class AtomDiffusion(Module):
                 )
 
                 for sample_ids_chunk in sample_ids_chunks:
-                    atom_coords_denoised_chunk = self.preconditioned_network_forward(
+                    atom_coords_denoised[sample_ids_chunk] = self.preconditioned_network_forward(
                         atom_coords_noisy[sample_ids_chunk],
                         t_hat,
                         network_condition_kwargs=dict(
@@ -393,7 +618,6 @@ class AtomDiffusion(Module):
                             **network_condition_kwargs,
                         ),
                     )
-                    atom_coords_denoised[sample_ids_chunk] = atom_coords_denoised_chunk
 
                 if steering_args["fk_steering"] and (
                     (
@@ -425,6 +649,7 @@ class AtomDiffusion(Module):
                     if (
                         steering_args["physical_guidance_update"]
                         or steering_args["contact_guidance_update"]
+                        or steering_args.get("inpainting", False)
                     ) and noise_var > 0:
                         ll_difference = (
                             eps**2 - (eps + scaled_guidance_update) ** 2
@@ -442,14 +667,35 @@ class AtomDiffusion(Module):
 
                 # Compute guidance update to x_0 prediction
                 if (
-                    steering_args["physical_guidance_update"]
-                    or steering_args["contact_guidance_update"]
-                ) and step_idx < num_sampling_steps - 1:
+                    steering_args is not None
+                    and (
+                        steering_args.get("physical_guidance_update", False)
+                        or steering_args.get("contact_guidance_update", False)
+                        or steering_args.get("inpainting", False)
+                    )
+                    and step_idx < num_sampling_steps - 1
+                ):
+                    # Log distances BEFORE guidance update for boundary peptide bonds
+                    boundary_dist_before = None
+                    boundary_potential = None
+                    for potential in potentials:
+                        if hasattr(potential, 'boundary_pairs') and hasattr(potential, 'last_index'):
+                            if len(potential.boundary_pairs) > 0 and potential.last_index is not None and potential.last_index.shape[1] > 0:
+                                boundary_potential = potential
+                                c_coords = atom_coords_denoised[0, potential.last_index[0], :]
+                                n_coords = atom_coords_denoised[0, potential.last_index[1], :]
+                                boundary_dist_before = torch.linalg.norm(c_coords - n_coords, dim=-1)
+                                break
+                    
                     guidance_update = torch.zeros_like(atom_coords_denoised)
                     for guidance_step in range(steering_args["num_gd_steps"]):
                         energy_gradient = torch.zeros_like(atom_coords_denoised)
                         for potential in potentials:
                             parameters = potential.compute_parameters(steering_t)
+                            # Add step_idx and guidance_step to parameters so potential can use them for logging
+                            parameters["step_idx"] = step_idx
+                            parameters["guidance_step"] = guidance_step
+                            parameters["is_last_guidance_step"] = (guidance_step == steering_args["num_gd_steps"] - 1)
                             if (
                                 parameters["guidance_weight"] > 0
                                 and (guidance_step) % parameters["guidance_interval"]
@@ -463,6 +709,40 @@ class AtomDiffusion(Module):
                                     parameters,
                                 )
                         guidance_update -= energy_gradient
+                    
+                    # Log guidance_update magnitude before applying
+                    guidance_update_mags = None
+                    if boundary_potential is not None:
+                        # Calculate magnitude for each pair: combine C and N atom guidance updates
+                        c_guid = guidance_update[0, boundary_potential.last_index[0], :]  # (num_pairs, 3)
+                        n_guid = guidance_update[0, boundary_potential.last_index[1], :]  # (num_pairs, 3)
+                        # Magnitude of the combined effect (relative movement between C and N)
+                        relative_guid = c_guid - n_guid  # (num_pairs, 3)
+                        guidance_update_mags = torch.linalg.norm(relative_guid, dim=-1)  # (num_pairs,)
+                        max_guidance_mag = guidance_update_mags.max().item()
+                        if step_idx % 10 == 0 or step_idx == num_sampling_steps - 1:
+                            print(f"[InpaintingBoundaryPeptideBond] Diffusion step {step_idx} : guidance_update magnitude (max={max_guidance_mag:.6f})")
+                    
+                    # Log distances AFTER guidance update for boundary peptide bonds
+                    if boundary_potential is not None and boundary_dist_before is not None:
+                        c_coords_after = (atom_coords_denoised + guidance_update)[0, boundary_potential.last_index[0], :]
+                        n_coords_after = (atom_coords_denoised + guidance_update)[0, boundary_potential.last_index[1], :]
+                        boundary_dist_after = torch.linalg.norm(c_coords_after - n_coords_after, dim=-1)
+                        
+                        # Log only occasionally to avoid spam
+                        if step_idx % 10 == 0 or step_idx == num_sampling_steps - 1:
+                            dist_before_list = boundary_dist_before.cpu().tolist()
+                            dist_after_list = boundary_dist_after.cpu().tolist()
+                            guid_mags_list = guidance_update_mags.cpu().tolist() if guidance_update_mags is not None else [0.0] * len(dist_before_list)
+                            print(f"[InpaintingBoundaryPeptideBond] Diffusion step {step_idx} : guidance_update applied")
+                            for i, pair in enumerate(boundary_potential.boundary_pairs):
+                                res_i, res_i1 = pair[2], pair[3]
+                                dist_before = dist_before_list[i]
+                                dist_after = dist_after_list[i]
+                                change = dist_after - dist_before
+                                guid_mag = guid_mags_list[i]
+                                print(f"  Res{res_i+1}-Res{res_i1+1}: before={dist_before:.3f}Å, after={dist_after:.3f}Å, change={change:+.3f}Å, guid_mag={guid_mag:.6f}")
+                    
                     atom_coords_denoised += guidance_update
                     scaled_guidance_update = (
                         guidance_update
@@ -471,8 +751,33 @@ class AtomDiffusion(Module):
                         * (sigma_t - t_hat)
                         / t_hat
                     )
-
-                if steering_args["fk_steering"] and (
+                
+                # Log potential for last step even if guidance update is not computed
+                if (
+                    step_idx == num_sampling_steps - 1
+                    and steering_args is not None
+                    and (
+                        steering_args.get("physical_guidance_update", False)
+                        or steering_args.get("contact_guidance_update", False)
+                        or steering_args.get("inpainting", False)
+                    )
+                ):
+                    # Log potential state for the last step
+                    for potential in potentials:
+                        parameters = potential.compute_parameters(steering_t)
+                        parameters["step_idx"] = step_idx
+                        parameters["guidance_step"] = 0
+                        parameters["is_last_guidance_step"] = True
+                        parameters["is_last_step"] = True  # Force logging on last step
+                        # Call compute_gradient with zero weight to trigger logging
+                        if hasattr(potential, 'compute_gradient'):
+                            _ = potential.compute_gradient(
+                                atom_coords_denoised,
+                                network_condition_kwargs["feats"],
+                                parameters,
+                            )
+                        
+                if steering_args is not None and steering_args.get("fk_steering", False) and (
                     (
                         step_idx % steering_args["fk_resampling_interval"] == 0
                         and noise_var > 0
@@ -482,9 +787,11 @@ class AtomDiffusion(Module):
                     resample_indices = (
                         torch.multinomial(
                             resample_weights,
-                            resample_weights.shape[1]
-                            if step_idx < num_sampling_steps - 1
-                            else 1,
+                            (
+                                resample_weights.shape[1]
+                                if step_idx < num_sampling_steps - 1
+                                else 1
+                            ),
                             replacement=True,
                         )
                         + resample_weights.shape[1]
@@ -502,6 +809,7 @@ class AtomDiffusion(Module):
                     if (
                         steering_args["physical_guidance_update"]
                         or steering_args["contact_guidance_update"]
+                        or steering_args.get("inpainting", False)
                     ):
                         scaled_guidance_update = scaled_guidance_update[
                             resample_indices
@@ -509,23 +817,355 @@ class AtomDiffusion(Module):
                     if token_repr is not None:
                         token_repr = token_repr[resample_indices]
 
+            # Kabsch diffusion interpolation (alignment before interpolation)
+            # 
+            # Mathematical Framework:
+            # =======================
+            # weighted_rigid_align(A, B, ...) transforms A to align with B:
+            #   aligned = R @ (A - centroid_A) + centroid_B
+            # 
+            # The interpolation formula is:
+            #   x_{t-1} = x_t + s * (σ_{t-1} - t̂) * (x_t - x̂_0) / t̂
+            # 
+            # For this to work correctly, x_t and x̂_0 must be in the same coordinate system.
+            #
+            # Both Normal and Inpainting modes now use the same approach:
+            # ============================================================
+            # 1. Align noisy → denoised: x_t' = align(x_t, x̂_0)
+            # 2. For Inpainting: Transform template with same (R, t):
+            #    T' = R @ (T - centroid_noisy) + centroid_denoised
+            # 3. Interpolate in denoised's coordinate system
+            # 4. Template injection uses transformed template T'
+            #
+            # Mathematical Equivalence:
+            # =========================
+            # Let R₁ be the rotation for align(denoised→noisy), R₂ for align(noisy→denoised)
+            # Then R₁ = R₂ᵀ (inverse rotation)
+            # 
+            # The key relationship: (x_t' - x̂_0) = R₂ @ (x_t - x̂_0')
+            # where x̂_0' is denoised aligned to noisy's coordinate system.
+            # 
+            # This means both approaches produce structurally identical results,
+            # just in different coordinate systems.
+            #
+            # Why use this approach for Inpainting?
+            # =====================================
+            # 1. Model's prediction x̂_0 is the "ideal answer" - interpolating in its
+            #    coordinate system respects the model's learned representations
+            # 2. Consistency: Same logic as Normal mode, easier to reason about
+            # 3. The denoised_over_sigma vector = (x_t' - x̂_0)/t̂ is computed in the
+            #    coordinate system where the model made its prediction
+            #
+            # Floating Point Considerations:
+            # ==============================
+            # Each step applies a new transformation to the template. Over 200+ steps,
+            # errors could accumulate. However:
+            # - Each transformation is computed fresh from the current state
+            # - Template is re-noised each step anyway, so sub-angstrom drift is negligible
+            # - Final coordinates can be aligned back to original template if needed
             if self.alignment_reverse_diff:
                 with torch.autocast("cuda", enabled=False):
-                    atom_coords_noisy = weighted_rigid_align(
-                        atom_coords_noisy.float(),
-                        atom_coords_denoised.float(),
-                        atom_mask.float(),
-                        atom_mask.float(),
-                    )
+                    if not enable_inpainting:
+                        # Normal: Move current state toward model's prediction
+                        atom_coords_noisy = weighted_rigid_align(
+                            atom_coords_noisy.float(),
+                            atom_coords_denoised.float(),
+                            atom_mask.float(),
+                            atom_mask.float(),
+                        )
+                        atom_coords_noisy = atom_coords_noisy.to(atom_coords_denoised)
+                    else:
+                        # Inpainting: Same as Normal, but also transform template
+                        # 
+                        # Step 1: Align noisy → denoised and get transformation
+                        atom_coords_noisy_aligned, rot_matrix, src_centroid, tgt_centroid = weighted_rigid_align(
+                            atom_coords_noisy.float(),
+                            atom_coords_denoised.float(),
+                            atom_mask.float(),
+                            atom_mask.float(),
+                            return_transform=True,
+                        )
+                        
+                        # Step 2: Apply same transformation to template coordinates
+                        # This keeps template and generated parts in the same coordinate system
+                        template_coords_expanded = apply_rigid_transform(
+                            template_coords_expanded.float(),
+                            rot_matrix,
+                            src_centroid,
+                            tgt_centroid,
+                        )
+                        template_coords_expanded = template_coords_expanded.to(atom_coords_noisy)
+                        
+                        # Step 3: Update noisy coordinates
+                        atom_coords_noisy = atom_coords_noisy_aligned.to(atom_coords_denoised)
 
-                atom_coords_noisy = atom_coords_noisy.to(atom_coords_denoised)
-
+            # Compute denoised_over_sigma
             denoised_over_sigma = (atom_coords_noisy - atom_coords_denoised) / t_hat
             atom_coords_next = (
                 atom_coords_noisy + step_scale * (sigma_t - t_hat) * denoised_over_sigma
             )
 
+
+
             atom_coords = atom_coords_next
+            
+            # Update progress: diffusion step completed (40-100%)
+            if progress_tracker:
+                progress_tracker.update_diffusion_progress(
+                    f"Diffusion step {step_idx + 1}/{len(schedule)}",
+                    step_idx + 1,
+                    len(schedule)
+                )
+
+        # Update progress: diffusion completed (100%)
+        if progress_tracker:
+            progress_tracker.update_diffusion_progress("Diffusion completed", len(schedule), len(schedule))
+
+        # ===================================================================
+        # Stage 2: Boundary Refinement (Global-to-Local Refinement)
+        # ===================================================================
+        # After global diffusion, refine only the boundary region with a short,
+        # focused diffusion. This helps to:
+        # 1. Smooth out the transition between template and generated regions
+        # 2. Improve peptide bond geometry at boundaries
+        # 3. Allow boundary atoms to find geometrically stable positions
+        #
+        # Process:
+        # 1. Create a new template mask that fixes EVERYTHING except boundary region
+        # 2. Add noise to boundary atoms starting from medium sigma (e.g., 2.0Å)
+        # 3. Run short diffusion (10-20 steps) to refine boundary only
+        # ===================================================================
+        
+        # Use provided parameters or fall back to class defaults
+        _boundary_refinement_enabled = default(boundary_refinement_enabled, self.boundary_refinement_enabled)
+        _boundary_refinement_window = default(boundary_refinement_window, self.boundary_refinement_window)
+        _boundary_refinement_sigma_start = default(boundary_refinement_sigma_start, self.boundary_refinement_sigma_start)
+        _boundary_refinement_steps = default(boundary_refinement_steps, self.boundary_refinement_steps)
+        _boundary_refinement_inpainting_region_mode = default(boundary_refinement_inpainting_region_mode, self.boundary_refinement_inpainting_region_mode)
+        
+        if enable_inpainting and _boundary_refinement_enabled:
+            print(f"\n[Inpainting] Starting Stage 2: Boundary Refinement")
+            print(f"  - Boundary window: ±{_boundary_refinement_window} residues")
+            print(f"  - Starting sigma: {_boundary_refinement_sigma_start}Å")
+            print(f"  - Refinement steps: {_boundary_refinement_steps}")
+            print(f"  - Inpainting region mode: {_boundary_refinement_inpainting_region_mode}")
+            
+            # Get boundary region mask (atoms within ±N residues of boundary)
+            # Use the ORIGINAL template mask to identify boundaries
+            boundary_region_mask = get_boundary_region_mask(
+                inpainting_template_mask.repeat_interleave(multiplicity, 0),
+                feats,
+                boundary_window=_boundary_refinement_window
+            )
+            
+            # Restrict boundary refinement to PROTEIN only (exclude DNA, RNA, non-polymer/ligand)
+            if "mol_type" in feats and "atom_to_token" in feats:
+                atom_to_token = feats["atom_to_token"].float()  # (batch, n_atoms, n_residues)
+                mol_type = feats["mol_type"].float()  # (batch, n_residues)
+                atom_type = torch.bmm(atom_to_token, mol_type.unsqueeze(-1)).squeeze(-1)  # (batch, n_atoms)
+                protein_atom_mask = atom_type == const.chain_type_ids["PROTEIN"]
+                protein_atom_mask = protein_atom_mask.repeat_interleave(multiplicity, 0)
+                boundary_region_mask = boundary_region_mask & protein_atom_mask
+                print(f"  - Boundary refinement: PROTEIN only (DNA, RNA, ligand excluded)")
+
+            # Exclude modification (PTM) residues from local refinement
+            if "modified" in feats and "atom_to_token" in feats and feats["modified"] is not None:
+                atom_to_token = feats["atom_to_token"].float()  # (batch, n_atoms, n_residues)
+                modified_tokens = feats["modified"].float()  # (batch, n_residues)
+                if modified_tokens.dim() == 1:
+                    modified_tokens = modified_tokens.unsqueeze(0)
+                # (batch, n_atoms): atom is in a modified residue if its token has modified=1
+                atom_modified = (torch.bmm(atom_to_token, modified_tokens.unsqueeze(-1)).squeeze(-1) > 0)
+                atom_modified = atom_modified.repeat_interleave(multiplicity, 0)
+                boundary_region_mask = boundary_region_mask & (~atom_modified)
+                print(f"  - Boundary refinement: modification (PTM) residues excluded from refinement")
+            
+            # If inpainting region mode is enabled, restrict refinement to inpainting region only
+            # (i.e., generated side of boundary, not template side)
+            if _boundary_refinement_inpainting_region_mode:
+                # Inpainting region = atoms that are NOT in template (generated atoms)
+                inpainting_region_mask = ~inpainting_template_mask.repeat_interleave(multiplicity, 0)
+                # Refinement region = boundary region AND inpainting region
+                boundary_region_mask = boundary_region_mask & inpainting_region_mask
+                print(f"  - Restricted to inpainting region (generated side only)")
+            
+            # Count boundary atoms
+            boundary_atom_count = boundary_region_mask[0].sum().item()
+            total_atom_count = atom_mask[0].sum().item()
+            print(f"  - Boundary atoms to refine: {boundary_atom_count} / {total_atom_count}")
+            
+            if boundary_atom_count > 0:
+                # Create refinement template mask: fix everything EXCEPT boundary region
+                # Template atoms that are NOT in boundary region remain fixed
+                refinement_template_mask = ~boundary_region_mask
+                
+                # Store current coordinates as the new "template" for refinement
+                refinement_template_coords = atom_coords.clone()
+                
+                # Generate refinement schedule (shorter, starting from lower sigma)
+                refinement_sigmas = self.sample_schedule(
+                    num_sampling_steps=_boundary_refinement_steps,
+                    sigma_max_override=_boundary_refinement_sigma_start / self.sigma_data  # Normalize
+                )
+                refinement_gammas = torch.where(
+                    refinement_sigmas > self.gamma_min, self.gamma_0, 0.0
+                )
+                
+                print(f"  - Refinement sigma range: {refinement_sigmas[0].item():.4f} -> {refinement_sigmas[-2].item():.4f}")
+                
+                # Add noise ONLY to boundary region atoms
+                init_refinement_sigma = refinement_sigmas[0]
+                boundary_noise = init_refinement_sigma * torch.randn_like(atom_coords)
+                # Only add noise to boundary region
+                atom_coords_refinement = atom_coords.clone()
+                atom_coords_refinement[boundary_region_mask] = (
+                    atom_coords[boundary_region_mask] + boundary_noise[boundary_region_mask]
+                )
+                
+                print(f"  - Added noise to boundary atoms (sigma={init_refinement_sigma.item():.4f})")
+                
+                # Simple backward schedule for refinement
+                refinement_schedule = [(i, i+1, 'backward') for i in range(len(refinement_sigmas) - 1)]
+                
+                # Refinement diffusion loop
+                atom_coords_denoised_ref = None
+                for step_idx, schedule_item in tqdm(
+                    enumerate(refinement_schedule), 
+                    total=len(refinement_schedule), 
+                    desc="Boundary Refinement"
+                ):
+                    idx_from, idx_to, direction = schedule_item
+                    
+                    sigma_from = refinement_sigmas[idx_from].item()
+                    sigma_to = refinement_sigmas[idx_to].item()
+                    gamma = refinement_gammas[idx_to].item() if idx_to < len(refinement_gammas) else 0.0
+                    
+                    # For refinement: inject noise to non-boundary (fixed) atoms
+                    # to match current noise level for consistency
+                    if self.template_noise_injection:
+                        fixed_noise = torch.randn_like(refinement_template_coords) * sigma_from
+                        # Fixed atoms = everything except boundary region
+                        fixed_mask = refinement_template_mask
+                        atom_coords_refinement[fixed_mask] = (
+                            refinement_template_coords[fixed_mask] + fixed_noise[fixed_mask]
+                        )
+                    
+                    # Denoising step
+                    sigma_tm = sigma_from
+                    sigma_t = sigma_to
+                    t_hat = sigma_tm * (1 + gamma)
+                    
+                    noise_var = self.noise_scale**2 * (t_hat**2 - sigma_tm**2)
+                    eps = sqrt(noise_var) * torch.randn(shape, device=self.device)
+                    atom_coords_noisy_ref = atom_coords_refinement + eps
+                    
+                    with torch.no_grad():
+                        atom_coords_denoised_ref = torch.zeros_like(atom_coords_noisy_ref)
+                        sample_ids = torch.arange(multiplicity).to(atom_coords_noisy_ref.device)
+                        sample_ids_chunks = sample_ids.chunk(
+                            multiplicity % max_parallel_samples + 1
+                        )
+                        
+                        for sample_ids_chunk in sample_ids_chunks:
+                            denoised_chunk = self.preconditioned_network_forward(
+                                atom_coords_noisy_ref[sample_ids_chunk],
+                                t_hat,
+                                network_condition_kwargs=dict(
+                                    multiplicity=sample_ids_chunk.numel(),
+                                    **network_condition_kwargs,
+                                ),
+                            )
+                            atom_coords_denoised_ref[sample_ids_chunk] = denoised_chunk
+                        
+                        # Kabsch alignment (same as main loop)
+                        if self.alignment_reverse_diff:
+                            with torch.autocast("cuda", enabled=False):
+                                atom_coords_noisy_ref_aligned, rot_matrix, src_centroid, tgt_centroid = weighted_rigid_align(
+                                    atom_coords_noisy_ref.float(),
+                                    atom_coords_denoised_ref.float(),
+                                    atom_mask.float(),
+                                    atom_mask.float(),
+                                    return_transform=True,
+                                )
+                                
+                                # Transform refinement template coordinates with same rotation
+                                refinement_template_coords = apply_rigid_transform(
+                                    refinement_template_coords.float(),
+                                    rot_matrix,
+                                    src_centroid,
+                                    tgt_centroid,
+                                )
+                                refinement_template_coords = refinement_template_coords.to(atom_coords_noisy_ref)
+                                
+                                atom_coords_noisy_ref = atom_coords_noisy_ref_aligned.to(atom_coords_denoised_ref)
+                        
+                        # Interpolation step
+                        denoised_over_sigma = (atom_coords_noisy_ref - atom_coords_denoised_ref) / t_hat
+                        atom_coords_next_ref = (
+                            atom_coords_noisy_ref + step_scale * (sigma_t - t_hat) * denoised_over_sigma
+                        )
+                        
+                        atom_coords_refinement = atom_coords_next_ref
+                
+                # After refinement: combine refined boundary with fixed regions
+                # For non-boundary atoms, use the transformed refinement template
+                # For boundary atoms, use the refined coordinates
+                atom_coords_final = refinement_template_coords.clone()
+                atom_coords_final[boundary_region_mask] = atom_coords_refinement[boundary_region_mask]
+                
+                # Use the refined coordinates
+                atom_coords = atom_coords_final
+                
+                # Also update template_coords_expanded to reflect transformations
+                # (needed for final alignment back to original coordinate system)
+                template_coords_expanded = refinement_template_coords
+                
+                print(f"[Inpainting] Boundary refinement completed")
+
+                # Add boundary refinement metadata
+                if "inpainting_metadata" not in feats:
+                    feats["inpainting_metadata"] = {}
+                feats["inpainting_metadata"]["boundary_refinement"] = {
+                    "enabled": True,
+                    "boundary_window": int(_boundary_refinement_window),
+                    "sigma_start": float(_boundary_refinement_sigma_start),
+                    "num_steps": int(_boundary_refinement_steps),
+                    "boundary_atoms_refined": int(boundary_atom_count),
+                    "inpainting_region_mode": bool(_boundary_refinement_inpainting_region_mode),
+                }
+
+        # Inpainting: Align final coordinates back to original template coordinate system
+        # 
+        # After diffusion, the coordinates are in model's preferred coordinate system.
+        # To restore to user's original template coordinate system:
+        # - Align the final coords using template atoms as anchors
+        # - This ensures the template part returns to its original position
+        # - Generated parts follow naturally, maintaining proper connectivity
+        #
+        # Mathematical justification:
+        # ===========================
+        # Let T_orig be original template, T_final be transformed template after diffusion
+        # Let X_final be final generated coordinates
+        # 
+        # We find R, t such that: T_orig ≈ R @ T_final + t (using template mask as weights)
+        # Then apply same transform to all coords: X_restored = R @ X_final + t
+        # 
+        # This preserves the relative geometry between template and generated parts
+        # while restoring the absolute coordinate system to match user's input.
+        if enable_inpainting and self.alignment_reverse_diff:
+            with torch.autocast("cuda", enabled=False):
+                # Align final coordinates to original template coordinate system
+                # We align the transformed template back to original template,
+                # then apply the same transformation to all atoms
+                atom_coords_restored, rot_matrix, src_centroid, tgt_centroid = weighted_rigid_align(
+                    atom_coords.float(),
+                    template_coords_original.float(),
+                    # Use only template atoms as weights for alignment
+                    template_mask_expanded.float(),
+                    atom_mask.float(),
+                    return_transform=True,
+                )
+                atom_coords = atom_coords_restored.to(atom_coords)
 
         return dict(sample_atom_coords=atom_coords, diff_token_repr=token_repr)
 
@@ -614,7 +1254,9 @@ class AtomDiffusion(Module):
                 multiplicity, 0
             )
 
-            align_weights = denoised_atom_coords.new_ones(denoised_atom_coords.shape[:2])
+            align_weights = denoised_atom_coords.new_ones(
+                denoised_atom_coords.shape[:2]
+            )
             atom_type = (
                 torch.bmm(
                     feats["atom_to_token"].float(),

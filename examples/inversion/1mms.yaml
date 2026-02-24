@@ -1,0 +1,16 @@
+version: 1
+
+sequences:
+  - protein:
+      id: C
+      sequence: AKKVAAQIKLQLPAGKATPAPPVGPALGQHGVNIMEFCKRFNAETADKAGMILPVVITVYEDKSFTFIIKTPPASFLLKKAAGIEKGSSEPKRKIVGKVTRKQIEEIAKTKMPDLNANSLEAAMKIIEGTAKSMGIEVVD
+      msa: empty
+  - rna:
+      id: A
+      sequence: GCUGGGAUGUUGGCUUAGAAGCAGCCAUCAUUUAAAGAGUGCGUAACAGCUCACCAGC
+
+# Template structure for inversion test
+# This should be a complete structure with NO missing atoms
+templates:
+  - cif: examples/inversion/1mms_CA_model_0.cif
+    chain_id: [C,A]

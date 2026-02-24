@@ -1,0 +1,22 @@
+version: 1
+
+sequences:
+  - protein:
+      id: G
+      sequence: ALYEDPPDHKTSPSGKPATLKICSWNVDGLRAWIKKKGLDWVKEEAPDILCLQETKCSENKLPAELQELPGLSHQYWSAPSDKEGYSGVGLLSRQCPLKVSYGIGDEEHDQEGRVIVAEFDSFVLVTAYVPNAGRGLVRLEYRQRWDEAFRKFLKGLASRKPLVLCGDLNVAHEEIDLRNPKGNKKNAGFTPQERQGFGELLQAVPLADSFRHLYPNTPYAYTFWTYMMNARSKNVGWRLDYFLLSHSLLPALCDSKIRSKALGSDHCPITLYLAL
+      msa: empty
+  - dna:
+      id: A
+      sequence: CTAC
+  - dna:
+      id: B
+      sequence: NGATC
+  - dna:
+      id: C
+      sequence: GATCGGTAG
+
+# Template structure for inversion test
+# This should be a complete structure with NO missing atoms
+templates:
+  - cif: examples/inversion/1de9_GABC_model_0.cif
+    chain_id: [G,A,B,C]

@@ -164,3 +164,27 @@ cython_debug/
 # Boltz prediction outputs
 #   All result files generated from a boltz prediction call
 boltz_results_*/
+test_outputs/
+
+boltz_inpainting_jobs/
+# Downloaded structures
+structures/*.cif
+structures/*.pdb
+
+# Test outputs
+test_output/
+output/
+results*/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+slurm/
+job_scripts/
+
+.uv/
+tmps/
+slurm_*/
+job_lists/

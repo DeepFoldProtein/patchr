@@ -1,0 +1,49 @@
+version: 1
+
+sequences:
+  - protein:
+      id: A
+      sequence: TFGSGEADCGLRPLFEKKSLEDKTERELLESYIDGR
+      msa: empty
+
+  - protein:
+      id: B
+      sequence: IVEGSDAEIGMSPWQVMLFRKSPQELLCGASLISDRWVLTAAHCLLYPPWDKNFTENDLLVRIGKHSRTRYEANIEKISMLEKIYIHPRYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDRETAASLLQAGYKGRVTGWGNLKETWTANVGKGQPSVLQVVNLPIVERPVCKDSTRIRITDNMFCAGYKPDEGKRGDACEGDSGGPFVMKSPFNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIQKVIDQFGE
+      msa: empty
+
+  - protein:
+      id: C
+      sequence: TFGSGEADCGLRPLFEKKSLEDKTERELLESYIDGR
+      msa: empty
+
+  - protein:
+      id: D
+      sequence: IVEGSDAEIGMSPWQVMLFRKSPQELLCGASLISDRWVLTAAHCLLYPPWDKNFTENDLLVRIGKHSRTRYEANIEKISMLEKIYIHPRYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDRETAASLLQAGYKGRVTGWGNLKETWTANVGKGQPSVLQVVNLPIVERPVCKDSTRIRITDNMFCAGYKPDEGKRGDACEGDSGGPFVMKSPFNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIQKVIDQFGE
+      msa: empty
+
+  - protein:
+      id: E
+      sequence: PAETEXDSLXPEDD
+      msa: empty
+      modifications:
+        - position: 6
+          ccd: PTR
+        - position: 10
+          ccd: PTR
+
+  - ligand:
+      id: F
+      ccd: NA
+
+  - ligand:
+      id: G
+      ccd: NAG
+
+  - ligand:
+      id: H
+      ccd: NA
+
+templates:
+  - cif: examples/inpainting_test/2HWL_CHAINABCDEFGH_chainABCDEFGH.cif
+    chain_id: ['A', 'B', 'C', 'D', 'P', 'B', 'D', 'D']
+    query_id: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']

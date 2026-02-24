@@ -268,7 +268,8 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
             dataset,
             batch_size=1,
             num_workers=self.num_workers,
-            pin_memory=True,
+            # Mac GPU support: MPS does not support pin_memory (from https://github.com/fnachon/boltz)
+            pin_memory=not torch.backends.mps.is_available(),
             shuffle=False,
             collate_fn=collate,
         )

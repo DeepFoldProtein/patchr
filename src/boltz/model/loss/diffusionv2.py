@@ -1,4 +1,5 @@
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
+# Mac GPU support added from https://github.com/fnachon/boltz
 
 import einx
 import torch
@@ -11,9 +12,19 @@ def weighted_rigid_align(
     pred_coords,  # Float['b n 3'],       # predicted coordinates
     weights,  # Float['b n'],             # weights for each atom
     mask,  # Bool['b n'] | None = None    # mask for variable lengths
-):  # -> Float['b n 3']:
+    return_transform=False,  # If True, also return (rot_matrix, true_centroid, pred_centroid)
+):  # -> Float['b n 3'] or (Float['b n 3'], Float['b 3 3'], Float['b 1 3'], Float['b 1 3']):
     """Algorithm 28 : note there is a problem with the pseudocode in the paper where predicted and
-    GT are swapped in algorithm 28, but correct in equation (2)."""
+    GT are swapped in algorithm 28, but correct in equation (2).
+    
+    Aligns true_coords to pred_coords using weighted Kabsch algorithm.
+    
+    The transformation is: aligned = R @ (true - true_centroid) + pred_centroid
+    
+    If return_transform=True, returns (aligned_coords, rot_matrix, true_centroid, pred_centroid)
+    so that the same transformation can be applied to other coordinates:
+        other_aligned = (other - true_centroid) @ rot_matrix.transpose(-1, -2) + pred_centroid
+    """
 
     out_shape = torch.broadcast_shapes(true_coords.shape, pred_coords.shape)
     *batch_size, num_points, dim = out_shape
@@ -48,9 +59,18 @@ def weighted_rigid_align(
     original_dtype = cov_matrix.dtype
     cov_matrix_32 = cov_matrix.to(dtype=torch.float32)
 
-    U, S, V = torch.linalg.svd(
-        cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
-    )
+    # Mac GPU support: Move to CPU for SVD on MPS (from https://github.com/fnachon/boltz)
+    if cov_matrix_32.device.type == "mps":
+        # Move to CPU for SVD
+        cov_matrix_32_cpu = cov_matrix_32.cpu()
+        U, S, V = torch.linalg.svd(cov_matrix_32_cpu)
+        U = U.to("mps")
+        S = S.to("mps")
+        V = V.to("mps")
+    else:
+        U, S, V = torch.linalg.svd(
+            cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
+        )
     V = V.mH
 
     # Catch ambiguous rotation by checking the magnitude of singular values
@@ -70,7 +90,11 @@ def weighted_rigid_align(
     F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
         None
     ].repeat(*batch_size, 1, 1)
-    F[..., -1, -1] = torch.det(rot_matrix)
+    # Mac GPU support: torch.det is not supported yet on mps move to CPU (from https://github.com/fnachon/boltz)
+    if rot_matrix.is_mps:
+        F[..., -1, -1] = torch.det(rot_matrix.cpu()).to("mps")
+    else:
+        F[..., -1, -1] = torch.det(rot_matrix)
     rot_matrix = einsum(U, F, V, "... i j, ... j k, ... l k -> ... i l")
     rot_matrix = rot_matrix.to(dtype=original_dtype)
 
@@ -81,7 +105,37 @@ def weighted_rigid_align(
     )
     aligned_coords.detach_()
 
+    if return_transform:
+        return aligned_coords, rot_matrix.detach(), true_centroid.detach(), pred_centroid.detach()
     return aligned_coords
+
+
+def apply_rigid_transform(
+    coords,  # Float['b n 3']
+    rot_matrix,  # Float['b 3 3']
+    source_centroid,  # Float['b 1 3']
+    target_centroid,  # Float['b 1 3']
+):  # -> Float['b n 3']
+    """Apply the same rigid transformation computed by weighted_rigid_align to other coordinates.
+    
+    This applies: aligned = R @ (coords - source_centroid) + target_centroid
+    
+    This is useful when you want to transform additional coordinates (e.g., template)
+    using the same transformation that was used to align the main coordinates.
+    
+    Args:
+        coords: Coordinates to transform
+        rot_matrix: Rotation matrix from weighted_rigid_align (with return_transform=True)
+        source_centroid: Source centroid (true_centroid from weighted_rigid_align)
+        target_centroid: Target centroid (pred_centroid from weighted_rigid_align)
+    
+    Returns:
+        Transformed coordinates
+    """
+    coords_centered = coords - source_centroid
+    transformed = einsum(coords_centered, rot_matrix, "... n i, ... j i -> ... n j") + target_centroid
+    return transformed
+
 
 
 def smooth_lddt_loss(

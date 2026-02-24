@@ -1,117 +1,162 @@
 <div align="center">
   <div>&nbsp;</div>
-  <img src="docs/boltz2_title.png" width="300"/>
-  <img src="https://model-gateway.boltz.bio/a.png?x-pxid=bce1627f-f326-4bff-8a97-45c6c3bc929d" />
 
-[Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) |
-[Slack](https://boltz.bio/join-slack) <br> <br>
+<img src="docs/patchr_studio.png" width="700"/>
+
+[Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
+
 </div>
 
+<br/>
 
+## Why PATCHR?
 
-![](docs/boltz1_pred_figure.png)
+Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. These gaps block molecular dynamics simulations, drug design pipelines, and structural analysis.
 
+PATCHR fills them in. It generates physically plausible coordinates for missing segments while keeping your existing experimental structure **exactly as-is**.
 
-## Introduction
+- Works with **proteins, DNA, RNA**, and multi-chain complexes
+- Preserves all original atomic coordinates -- zero drift
+- 99.4% of reconstructed structures have **no connectivity issues**
+- Handles everything from short loops to 600+ residue extensions
 
-Boltz is a family of models for biomolecular interaction prediction. Boltz-1 was the first fully open source model to approach AlphaFold3 accuracy. Our latest work Boltz-2 is a new biomolecular foundation model that goes beyond AlphaFold3 and Boltz-1 by jointly modeling complex structures and binding affinities, a critical component towards accurate molecular design. Boltz-2 is the first deep learning model to approach the accuracy of physics-based free-energy perturbation (FEP) methods, while running 1000x faster — making accurate in silico screening practical for early-stage drug discovery.
+## Quick Start
 
-All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. To discuss updates, tools and applications join our [Slack channel](https://boltz.bio/join-slack).
-
-## Installation
-
-> Note: we recommend installing boltz in a fresh python environment
-
-Install boltz with PyPI (recommended):
-
-```
-pip install boltz[cuda] -U
-```
-
-or directly from GitHub for daily updates:
-
-```
-git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .[cuda]
+```bash
+git clone https://github.com/DeepFoldProtein/boltz-inpainting.git
+cd boltz-inpainting
+pip install -e .[cuda]
 ```
 
-If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
+**Step 1.** Generate a YAML template from a PDB structure:
 
-## Inference
+```bash
+# Single chain
+python scripts/generate_inpainting_template.py 4ZLO A,B
 
-You can run inference using Boltz with:
+# With UniProt sequence (for terminal extensions)
+python scripts/generate_inpainting_template.py 4ZLO A,B --uniprot
 
+# From a local CIF file
+python scripts/generate_inpainting_template.py --input structure.cif A,B
 ```
-boltz predict input_path --use_msa_server
+
+This auto-detects missing regions and outputs a YAML + template CIF to `examples/inpainting/`.
+
+**Step 2.** Run inpainting:
+
+```bash
+boltz predict examples/inpainting/4zlo_AB.yaml \
+  --model boltz2_inpaint \
+  --accelerator gpu \
+  --out_dir results
 ```
 
-`input_path` should point to a YAML file, or a directory of YAML files for batched processing, describing the biomolecules you want to model and the properties you want to predict (e.g. affinity). To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md). By default, the `boltz` command will run the latest version of the model.
+> For CPU-only or non-CUDA GPUs, use `pip install -e .` instead. See [prediction docs](docs/prediction.md) for all options.
 
+<details>
+<summary><b>Mac installation</b></summary>
 
-### Binding Affinity Prediction
-There are two main predictions in the affinity output: `affinity_pred_value` and `affinity_probability_binary`. They are trained on largely different datasets, with different supervisions, and should be used in different contexts. The `affinity_probability_binary` field should be used to detect binders from decoys, for example in a hit-discovery stage. Its value ranges from 0 to 1 and represents the predicted probability that the ligand is a binder. The `affinity_pred_value` aims to measure the specific affinity of different binders and how this changes with small modifications of the molecule. This should be used in ligand optimization stages such as hit-to-lead and lead-optimization. It reports a binding affinity value as `log10(IC50)`, derived from an `IC50` measured in `μM`. More details on how to run affinity predictions and parse the output can be found in our [prediction instructions](docs/prediction.md).
+```bash
+conda create --name patchr python=3.12 llvmlite==0.44.0 numba==0.61.0 numpy==1.26.3
+conda activate patchr
+git clone https://github.com/DeepFoldProtein/boltz-inpainting.git
+cd boltz-inpainting && pip install -e .
+export KMP_DUPLICATE_LIB_OK=TRUE
+```
 
-## Authentication to MSA Server
+</details>
 
-When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md).
- 
-## Evaluation
+<details>
+<summary><b>More template generation options</b></summary>
 
-⚠️ **Coming soon: updated evaluation code for Boltz-2!**
+```bash
+# All polymer chains (one per entity)
+python scripts/generate_inpainting_template.py 1CK4 all
 
-To encourage reproducibility and facilitate comparison with other models, on top of the existing Boltz-1 evaluation pipeline, we will soon provide the evaluation scripts and structural predictions for Boltz-2, Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset, and our affinity predictions on the FEP+ benchmark, CASP16 and our MF-PCBA test set.
+# All chains including duplicate copies
+python scripts/generate_inpainting_template.py 1CK4 all-copies
 
-![Affinity test sets evaluations](docs/pearson_plot.png)
-![Test set evaluations](docs/plot_test_boltz2.png)
+# Custom output directory
+python scripts/generate_inpainting_template.py 1CK4 A,B -o my_templates/
 
+# Include solvent atoms
+python scripts/generate_inpainting_template.py 7EOQ A --include-solvent
 
-## Training
+# Use biological assembly
+python scripts/generate_inpainting_template.py 1CK4 all --assembly best
+```
 
-⚠️ **Coming soon: updated training code for Boltz-2!**
+</details>
 
-If you're interested in retraining the model, currently for Boltz-1 but soon for Boltz-2, see our [training instructions](docs/training.md).
+## How It Works
 
+PATCHR uses diffusion-based generation conditioned on your experimental structure as a rigid template. Three key techniques make this work:
 
-## Contributing
+| | Technique | What it does |
+|---|---|---|
+| 1 | **Template Conditioning** | Anchors known coordinates at every diffusion step so the experimental structure is never modified |
+| 2 | **Synchronized Rigid Template Tracking** | Keeps the template aligned with the evolving generation -- no frame drift |
+| 3 | **Local Refinement Denoising** | Cleans up bond geometry at the junction between template and generated regions |
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://boltz.bio/join-slack) to discuss advancements, share insights, and foster collaboration around Boltz-2.
+The result: seamless, chemically valid reconstructions that integrate perfectly with the original structure.
 
-On recent NVIDIA GPUs, Boltz leverages the acceleration provided by [NVIDIA  cuEquivariance](https://developer.nvidia.com/cuequivariance) kernels. Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
+## PATCHR-Studio
+
+A desktop app with a visual interface for the full workflow -- no command line needed.
+
+<div align="center">
+
+<video src="docs/e2e_demo_1080p.mp4" width="700" controls></video>
+
+</div>
+
+Available at [patchr.deepfold.org](https://patchr.deepfold.org/).
+
+## PATCHR Atlas
+
+Pre-computed completed structures for ~35,000 monomeric proteins (and growing to ~160,000 complexes including RNA, DNA, and multi-chain assemblies). Browse and download simulation-ready structures without running anything locally.
+
+[Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
+
+## Performance
+
+Evaluated on 1,000 PDB40 structures with realistic missing region patterns:
+
+| Metric | Value |
+|---|---|
+| Backbone RMSD (missing residues) | 1.78 &#8491; |
+| lDDT (missing atoms) | 98.6 |
+| Connectivity pass rate | 99.4% |
+
+<details>
+<summary><b>Breakdown by structure type</b></summary>
+
+| Region | RMSD (&#8491;) | | Accessibility | RMSD (&#8491;) |
+|---|---|---|---|---|
+| Helix | 0.30 | | Buried | 0.39 |
+| Strand | 0.26 | | Intermediate | 0.65 |
+| Loop | 0.85 | | Surface | 1.01 |
+
+</details>
 
 ## License
 
-Our model and code are released under MIT License, and can be freely used for both academic and commercial purposes.
+MIT -- free for academic and commercial use.
 
+## Acknowledgments
+
+PATCHR builds upon [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) by Passaro, Corso, Wohlwend et al. We thank the Boltz team for making their model and code openly available.
+
+If you use automatic MSA generation, please also cite [ColabFold](https://doi.org/10.1038/s41592-022-01488-1) (Mirdita et al., 2022).
 
 ## Cite
 
-If you use this code or the models in your research, please cite the following papers:
-
 ```bibtex
-@article{passaro2025boltz2,
-  author = {Passaro, Saro and Corso, Gabriele and Wohlwend, Jeremy and Reveiz, Mateo and Thaler, Stephan and Somnath, Vignesh Ram and Getz, Noah and Portnoi, Tally and Roy, Julien and Stark, Hannes and Kwabi-Addo, David and Beaini, Dominique and Jaakkola, Tommi and Barzilay, Regina},
-  title = {Boltz-2: Towards Accurate and Efficient Binding Affinity Prediction},
-  year = {2025},
-  doi = {10.1101/2025.06.14.659707},
-  journal = {bioRxiv}
-}
-
-@article{wohlwend2024boltz1,
-  author = {Wohlwend, Jeremy and Corso, Gabriele and Passaro, Saro and Getz, Noah and Reveiz, Mateo and Leidal, Ken and Swiderski, Wojtek and Atkinson, Liam and Portnoi, Tally and Chinn, Itamar and Silterra, Jacob and Jaakkola, Tommi and Barzilay, Regina},
-  title = {Boltz-1: Democratizing Biomolecular Interaction Modeling},
-  year = {2024},
-  doi = {10.1101/2024.11.19.624167},
-  journal = {bioRxiv}
-}
-```
-
-In addition if you use the automatic MSA generation, please cite:
-
-```bibtex
-@article{mirdita2022colabfold,
-  title={ColabFold: making protein folding accessible to all},
-  author={Mirdita, Milot and Sch{\"u}tze, Konstantin and Moriwaki, Yoshitaka and Heo, Lim and Ovchinnikov, Sergey and Steinegger, Martin},
-  journal={Nature methods},
-  year={2022},
+@article{bae2025patchr,
+  author = {Bae, Hanjin and Kim, Kunwoo and Yoo, Jejoong and Joo, Keehyoung},
+  title = {PATCHR-Studio: Template-conditioned diffusion-based molecular structure
+           inpainting for Protein, RNA, and DNA complexes},
+  year = {2025}
 }
 ```
