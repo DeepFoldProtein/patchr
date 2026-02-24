@@ -2,13 +2,14 @@
 import { useEffect } from "react";
 import { useAtom } from "jotai";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 import {
   missingRegionsDetectedAtom,
   repairSegmentsAtom
 } from "../../store/repair-atoms";
 import { useCurrentProject, useProjectStore } from "../../store/project-store";
 import type { InpaintingYAML } from "../../types/project";
-import type { RepairSegment } from "../../types";
+import type { RepairSegment, MissingRegionInfo } from "../../types";
 
 /**
  * Hook that listens to missing region detection completion
@@ -27,7 +28,7 @@ export function useAutoYAMLGeneration(enabled: boolean = true): void {
     const handleMissingRegionsReady = async (
       segments: RepairSegment[]
     ): Promise<void> => {
-      console.log(
+      logger.log(
         "[Auto YAML] Missing regions detected, generating YAML...",
         segments
       );
@@ -44,7 +45,7 @@ export function useAutoYAMLGeneration(enabled: boolean = true): void {
         const result = await window.api.project.saveYAML(yaml);
         if (result.success) {
           setCurrentYAML(yaml);
-          console.log("✅ [Auto YAML] YAML file generated and saved");
+          logger.log("✅ [Auto YAML] YAML file generated and saved");
           // Notify other components
           // bus.emit("project:yaml-generated", yaml);
         } else {
@@ -54,7 +55,7 @@ export function useAutoYAMLGeneration(enabled: boolean = true): void {
         const message =
           error instanceof Error ? error.message : "Failed to generate YAML";
         setError(message);
-        console.error("❌ [Auto YAML] Error:", message);
+        logger.error("❌ [Auto YAML] Error:", message);
       }
     };
 
@@ -79,7 +80,7 @@ export function useAutoYAMLGeneration(enabled: boolean = true): void {
  */
 function generateYAMLFromMissingRegions(
   segments: RepairSegment[],
-  _missingRegions: any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+  _missingRegions: MissingRegionInfo[],
   projectName: string
 ): InpaintingYAML {
   // Collect all unique chains from segments
@@ -177,7 +178,7 @@ function generateYAMLFromMissingRegions(
 
 /**
  * Extract sequence string from segments
- * TODO: Get actual sequence from structure
+ * Sequence extraction from structure is not yet implemented
  */
 function extractSequenceFromSegments(): string | null {
   // Placeholder - return null for now

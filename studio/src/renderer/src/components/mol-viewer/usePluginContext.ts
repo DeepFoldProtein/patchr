@@ -6,7 +6,8 @@ import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { createPluginUI } from "molstar/lib/mol-plugin-ui";
 import { renderReact18 } from "molstar/lib/mol-plugin-ui/react18";
 import { DefaultPluginUISpec } from "molstar/lib/mol-plugin-ui/spec";
-import { Color } from "molstar/lib/mol-util/color";
+import { logger } from "../../lib/logger";
+import { THEME_COLORS } from "../../lib/constants";
 
 export function usePluginContext(): {
   plugin: PluginUIContext | null;
@@ -32,8 +33,8 @@ export function usePluginContext(): {
 
     // Background color 변경
     const bgColor = isDarkMode
-      ? Color.fromRgb(15, 23, 42) // slate-950 (dark)
-      : Color.fromRgb(248, 250, 252); // slate-50 (light)
+      ? THEME_COLORS.dark
+      : THEME_COLORS.light;
 
     if (pluginInstanceRef.current.canvas3d) {
       pluginInstanceRef.current.canvas3d.setProps({
@@ -43,18 +44,18 @@ export function usePluginContext(): {
       });
     }
 
-    console.log(`🎨 Theme changed to ${isDarkMode ? "dark" : "light"}`);
+    logger.log(`🎨 Theme changed to ${isDarkMode ? "dark" : "light"}`);
   }, [isDarkMode]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pluginInstanceRef.current) {
-        console.log("🧹 Disposing Mol* viewer on unmount...");
+        logger.log("🧹 Disposing Mol* viewer on unmount...");
         try {
           pluginInstanceRef.current.dispose();
         } catch (err) {
-          console.debug("Plugin disposal error:", err);
+          logger.debug("Plugin disposal error:", err);
         }
         pluginInstanceRef.current = null;
       }
@@ -80,7 +81,7 @@ export function usePluginContext(): {
 
     const initPlugin = async (): Promise<void> => {
       try {
-        console.log("🚀 Initializing Mol* viewer...");
+        logger.log("🚀 Initializing Mol* viewer...");
 
         // Create a separate div that React won't touch
         const molstarRoot = document.createElement("div");
@@ -129,8 +130,8 @@ export function usePluginContext(): {
 
         // 카메라 자동 회전 비활성화 및 배경색 설정
         const bgColor = isDarkModeRef.current
-          ? Color.fromRgb(15, 23, 42) // slate-950 (dark)
-          : Color.fromRgb(248, 250, 252); // slate-50 (light)
+          ? THEME_COLORS.dark
+          : THEME_COLORS.light;
 
         if (pluginUI.canvas3d) {
           pluginUI.canvas3d.setProps({
@@ -147,10 +148,10 @@ export function usePluginContext(): {
         }
 
         pluginInstanceRef.current = pluginUI;
-        console.log("✓ Mol* viewer initialized");
+        logger.log("✓ Mol* viewer initialized");
         setPlugin(pluginUI);
       } catch (err) {
-        console.error("Failed to initialize Mol* viewer:", err);
+        logger.error("Failed to initialize Mol* viewer:", err);
         setError(err instanceof Error ? err.message : "Initialization failed");
       }
     };

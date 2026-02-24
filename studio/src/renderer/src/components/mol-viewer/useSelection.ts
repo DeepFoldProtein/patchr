@@ -28,8 +28,7 @@ export function useSelection(plugin: PluginContext | null): {
       const loci = event.current.loci;
 
       if (loci.kind === "element-loci" && loci.elements.length > 0) {
-        // TODO: Extract proper selection info from Mol* loci
-        // This requires understanding Mol* data structures better
+        // Selection info extraction from Mol* loci -- not yet implemented
         const selectionInfo: SelectionInfo = {
           residues: [],
           atoms: [],

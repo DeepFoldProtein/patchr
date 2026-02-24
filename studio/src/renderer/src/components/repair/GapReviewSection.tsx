@@ -8,6 +8,7 @@ import {
   missingRegionDetectionLoadingAtom
 } from "../../store/repair-atoms";
 import { bus } from "../../lib/event-bus";
+import { logger } from "../../lib/logger";
 
 export function MissingRegionReviewSection(): React.ReactElement {
   const [missingRegions] = useAtom(missingRegionsDetectedAtom);
@@ -18,10 +19,10 @@ export function MissingRegionReviewSection(): React.ReactElement {
   const [loading] = useAtom(missingRegionDetectionLoadingAtom);
 
   const handleRegionClick = (regionId: string): void => {
-    console.log(`[Missing Region Review] Region clicked: ${regionId}`);
+    logger.log(`[Missing Region Review] Region clicked: ${regionId}`);
     // Emit region focus event to trigger camera zoom
     bus.emit("missing-region:focus", regionId);
-    console.log(`[Missing Region Review] missing-region:focus event emitted`);
+    logger.log(`[Missing Region Review] missing-region:focus event emitted`);
   };
 
   if (loading) {

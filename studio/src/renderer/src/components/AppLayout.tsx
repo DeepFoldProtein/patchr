@@ -14,6 +14,7 @@ import {
 } from "../store/project-store";
 import { useProject } from "../hooks/useProject";
 import { resetRepairStateAtom } from "../store/repair-atoms";
+import { logger } from "../lib/logger";
 
 export function AppLayout(): React.ReactElement {
   const currentProject = useCurrentProject();
@@ -32,7 +33,7 @@ export function AppLayout(): React.ReactElement {
       const project = await getCurrentProject();
       if (project) {
         setCurrentProject(project);
-        console.log("Restored previous project:", project.name);
+        logger.log("Restored previous project:", project.name);
       }
     };
     void loadLastProject();
@@ -46,7 +47,7 @@ export function AppLayout(): React.ReactElement {
       currentPath !== prevProjectPathRef.current
     ) {
       // Project changed, reset repair state
-      console.log("[AppLayout] Project changed, resetting repair state");
+      logger.log("[AppLayout] Project changed, resetting repair state");
       resetRepairState();
     }
     prevProjectPathRef.current = currentPath;
@@ -72,11 +73,11 @@ export function AppLayout(): React.ReactElement {
           );
           if (structureResult.success && structureResult.content) {
             setStructure(structureResult.content, firstFile);
-            console.log("Loaded existing structure from project:", firstFile);
+            logger.log("Loaded existing structure from project:", firstFile);
           }
         }
       } catch (error) {
-        console.error("Failed to check existing structure:", error);
+        logger.error("Failed to check existing structure:", error);
       } finally {
         setIsCheckingStructure(false);
       }
@@ -89,7 +90,7 @@ export function AppLayout(): React.ReactElement {
   const handleStructureLoaded = useCallback(
     (content: string, filename: string) => {
       setStructure(content, filename);
-      console.log("Structure loaded:", filename);
+      logger.log("Structure loaded:", filename);
     },
     [setStructure]
   );
@@ -100,9 +101,9 @@ export function AppLayout(): React.ReactElement {
       await closeProject();
       clearProject();
       resetRepairState();
-      console.log("Project closed, returning to home");
+      logger.log("Project closed, returning to home");
     } catch (error) {
-      console.error("Failed to close project:", error);
+      logger.error("Failed to close project:", error);
     }
   }, [closeProject, clearProject, resetRepairState]);
 
