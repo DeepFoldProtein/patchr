@@ -58,6 +58,12 @@ Examples:
 
   # Custom sequence with local file
   python generate_inpainting_template.py --input structure.cif A --sequence ACDEFGHIKLMNPQRSTVWY
+
+  # Skip terminal missing residues (only inpaint internal gaps)
+  python generate_inpainting_template.py 7EOQ A --skip-terminal
+
+  # Skip terminal + UniProt sequence
+  python generate_inpainting_template.py 7EOQ A --uniprot --skip-terminal
         """
     )
 
@@ -87,6 +93,10 @@ Examples:
                              'If omitted, uses manually-provided chain IDs or ALL (current behaviour).')
     parser.add_argument('--list-assemblies', action='store_true',
                         help='List available biological assemblies and exit without processing.')
+    parser.add_argument('--skip-terminal', action='store_true',
+                        help='Skip terminal missing residues: trim the sequence to span only from the first '
+                             'residue with structure to the last, so N/C-terminal disordered tails are '
+                             'excluded from inpainting and only internal (non-terminal) gaps are inpainted.')
 
     args = parser.parse_args()
 
@@ -163,6 +173,7 @@ Examples:
         include_ligands=not args.exclude_ligands,
         assembly_id=assembly_id,
         list_assemblies=args.list_assemblies,
+        skip_terminal=args.skip_terminal,
     )
     processor.process(args.output)
 

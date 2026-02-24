@@ -42,13 +42,14 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
         self.cache_dir = cache_dir  # for ccd.pkl (BOLTZ_CACHE or ~/.boltz)
         self.include_solvent = include_solvent
         self.include_ligands = include_ligands
+        self.skip_terminal = skip_terminal
         
         if cif_file_path:
             # Explicit file path provided
@@ -381,6 +382,10 @@ class StructureProcessor(
             # actual atom type, extract from atoms instead
             try:
                 seqres_sequence = self.extract_seqres_from_cif(chain_id)
+                # Fallback: empty SEQRES (e.g. short peptides with no _entity_poly_seq entry)
+                if not seqres_sequence:
+                    print(f"WARNING: Empty SEQRES for chain {chain_id}, extracting sequence from atoms")
+                    seqres_sequence = self.extract_sequence_from_atoms(chain_id)
                 # Verify sequence type matches entity type
                 if entity_type == 'protein':
                     protein_residues = set('ACDEFGHIKLMNPQRSTVWY')
@@ -490,7 +495,24 @@ class StructureProcessor(
             # Determine inpainting region (only for proteins, DNA/RNA uses different logic)
             if entity_type == 'protein':
                 self.determine_inpainting_region(atoms, residue_mapping, final_sequence)
-            
+
+            # --skip-terminal: trim sequence to exclude N/C-terminal missing residues.
+            # Only internal (non-terminal) gaps will be left for inpainting.
+            trim_offset = 0
+            if self.skip_terminal and entity_type == 'protein':
+                present_positions = set(residue_mapping.values())
+                if present_positions:
+                    first_present = min(present_positions)
+                    last_present = max(present_positions)
+                    trim_offset = first_present - 1
+                    n_trim = len(final_sequence) - last_present
+                    if trim_offset > 0 or n_trim > 0:
+                        old_len = len(final_sequence)
+                        final_sequence = final_sequence[first_present - 1 : last_present]
+                        residue_mapping = {k: v - trim_offset for k, v in residue_mapping.items()}
+                        print(f"  --skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
+                              f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
+
             # Renumber atoms (update label_entity_id and label_asym_id for multimeric)
             renumbered_atoms = self.renumber_atoms(atoms, residue_mapping)
             
@@ -515,10 +537,17 @@ class StructureProcessor(
             
             # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
             # For synthetic chains (e.g. D_op2), fall back to the base chain's modification data
+            # NOTE: positions from _entity_poly_seq / struct_conn / non_standard_residues are in original
+            # SEQRES coordinates; apply trim_offset (set above when --skip-terminal is active) to convert
+            # them to the trimmed coordinate system.  seq_pos_to_monomer is already in trimmed coords.
             _mod_key = self._base_chain_id(chain_id)
+            seq_len_trimmed = len(final_sequence)
             if _mod_key in self._modifications_from_entity_poly:
-                chain_modifications = [{'position': m['position'], 'ccd': m['ccd'], 'parent': None, 'parent_one': None}
-                                       for m in self._modifications_from_entity_poly[_mod_key]]
+                chain_modifications = []
+                for m in self._modifications_from_entity_poly[_mod_key]:
+                    new_pos = m['position'] - trim_offset
+                    if 1 <= new_pos <= seq_len_trimmed:
+                        chain_modifications.append({'position': new_pos, 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
             else:
                 chain_modifications = []
             positions_added = {m['position'] for m in chain_modifications}
@@ -526,20 +555,23 @@ class StructureProcessor(
             _conn_key = self._base_chain_id(chain_id)
             if _conn_key in getattr(self, '_modifications_from_struct_conn', {}):
                 for m in self._modifications_from_struct_conn[_conn_key]:
-                    if m['position'] not in positions_added:
-                        chain_modifications.append({'position': m['position'], 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
-                        positions_added.add(m['position'])
+                    new_pos = m['position'] - trim_offset
+                    if 1 <= new_pos <= seq_len_trimmed and new_pos not in positions_added:
+                        chain_modifications.append({'position': new_pos, 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
+                        positions_added.add(new_pos)
             if _mod_key not in self._modifications_from_entity_poly:
                 _ns_key = self._base_chain_id(chain_id)
                 if _ns_key in self.non_standard_residues:
                     for seq_pos, ns_info in sorted(self.non_standard_residues[_ns_key].items()):
-                        if seq_pos not in positions_added:
+                        new_pos = seq_pos - trim_offset
+                        if 1 <= new_pos <= seq_len_trimmed and new_pos not in positions_added:
                             chain_modifications.append({
-                                'position': seq_pos, 'ccd': ns_info['ccd'],
+                                'position': new_pos, 'ccd': ns_info['ccd'],
                                 'parent': ns_info['parent'], 'parent_one': ns_info['parent_one']
                             })
-                            positions_added.add(seq_pos)
+                            positions_added.add(new_pos)
                 for pos, comp_id in sorted(seq_pos_to_monomer.items()):
+                    # seq_pos_to_monomer already uses trimmed coords (from renumbered_atoms)
                     if comp_id not in STANDARD_AA_THREE_LETTER and comp_id not in STANDARD_NUCLEOTIDE_CODES and pos not in positions_added:
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)

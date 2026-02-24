@@ -188,3 +188,4 @@ job_scripts/
 tmps/
 slurm_*/
 job_lists/
+playground/
