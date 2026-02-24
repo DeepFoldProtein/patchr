@@ -1,7 +1,79 @@
 import { app, dialog, ipcMain, shell, net } from "electron";
-import { join, basename } from "path";
+import { join, basename, resolve, relative } from "path";
 import { promises as fs } from "fs";
 import { existsSync } from "fs";
+import { randomBytes } from "crypto";
+
+/**
+ * Validate that a file path is within the allowed base directory.
+ * Prevents path traversal attacks.
+ */
+function validatePathWithinBase(filePath: string, baseDir: string): string {
+  const resolved = resolve(filePath);
+  const resolvedBase = resolve(baseDir);
+  if (!resolved.startsWith(resolvedBase + "/") && resolved !== resolvedBase) {
+    throw new Error("Access denied: path is outside the allowed directory");
+  }
+  return resolved;
+}
+
+/**
+ * Validate that a filename has no directory components.
+ */
+function validateFilename(filename: string): string {
+  const sanitized = basename(filename);
+  if (sanitized !== filename || filename.includes("..")) {
+    throw new Error("Invalid filename");
+  }
+  return sanitized;
+}
+
+/**
+ * Validate that a URL is HTTP or HTTPS.
+ */
+function validateApiUrl(apiUrl: string): URL {
+  const url = new URL(apiUrl);
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Only HTTP(S) URLs are allowed");
+  }
+  return url;
+}
+
+/**
+ * Sanitize a string for use in YAML values.
+ * Escapes quotes and wraps in double quotes if needed.
+ */
+function escapeYamlString(str: string): string {
+  if (
+    str.includes('"') ||
+    str.includes("\n") ||
+    str.includes("\\") ||
+    str.includes(":") ||
+    str.includes("#")
+  ) {
+    return `"${str.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+  }
+  return `"${str}"`;
+}
+
+/**
+ * Sanitize a filename for use in HTTP Content-Disposition headers.
+ * Removes CRLF and other unsafe characters.
+ */
+function sanitizeHeaderFilename(filename: string): string {
+  return filename.replace(/[\r\n"\\]/g, "_");
+}
+
+/**
+ * Validate a PDB ID format (4 alphanumeric characters).
+ */
+function validatePdbId(pdbId: string): string {
+  const id = pdbId.trim().toUpperCase();
+  if (!/^[A-Z0-9]{4}$/.test(id)) {
+    throw new Error("Invalid PDB ID format: must be 4 alphanumeric characters");
+  }
+  return id;
+}
 
 /**
  * Project structure:
@@ -346,7 +418,9 @@ class ProjectManager {
     type: "original" | "canonical",
     filename: string
   ): Promise<string> {
-    const filePath = join(project.structuresPath, type, filename);
+    const safe = validateFilename(filename);
+    const filePath = join(project.structuresPath, type, safe);
+    validatePathWithinBase(filePath, project.structuresPath);
     return await fs.readFile(filePath, "utf-8");
   }
 
@@ -359,7 +433,9 @@ class ProjectManager {
     filename: string,
     content: string
   ): Promise<void> {
-    const filePath = join(project.structuresPath, type, filename);
+    const safe = validateFilename(filename);
+    const filePath = join(project.structuresPath, type, safe);
+    validatePathWithinBase(filePath, project.structuresPath);
     await fs.writeFile(filePath, content, "utf-8");
   }
 
@@ -384,9 +460,9 @@ class ProjectManager {
     let yaml = `version: ${obj.version}\n\n`;
 
     yaml += "metadata:\n";
-    yaml += `  original_pdb: "${obj.metadata.original_pdb}"\n`;
-    yaml += `  created: "${obj.metadata.created}"\n`;
-    yaml += `  modified: "${obj.metadata.modified}"\n\n`;
+    yaml += `  original_pdb: ${escapeYamlString(obj.metadata.original_pdb)}\n`;
+    yaml += `  created: ${escapeYamlString(obj.metadata.created)}\n`;
+    yaml += `  modified: ${escapeYamlString(obj.metadata.modified)}\n\n`;
 
     yaml += "sequences:\n";
     if (obj.sequences.length === 0) {
@@ -402,7 +478,7 @@ class ProjectManager {
         for (const line of seqLines) {
           yaml += `        ${line}\n`;
         }
-        yaml += `      residue_mapping_ref: "${seq.protein.residue_mapping_ref}"\n`;
+        yaml += `      residue_mapping_ref: ${escapeYamlString(seq.protein.residue_mapping_ref)}\n`;
         yaml += `      msa: ${seq.protein.msa}\n`;
       }
       yaml += "\n";
@@ -766,6 +842,11 @@ export function registerProjectIPC(): void {
 
   ipcMain.handle("project:list-directory", async (_event, dirPath: string) => {
     try {
+      const project = projectManager.getCurrentProject();
+      if (!project) {
+        throw new Error("No project is currently open");
+      }
+      validatePathWithinBase(dirPath, project.path);
       const files = await fs.readdir(dirPath);
       return { success: true, files };
     } catch (error) {
@@ -775,15 +856,16 @@ export function registerProjectIPC(): void {
 
   ipcMain.handle("project:open-folder", async (_event, folderPath?: string) => {
     try {
-      if (folderPath) {
-        await shell.openPath(folderPath);
-        return { success: true };
-      }
       const project = projectManager.getCurrentProject();
       if (!project) {
         throw new Error("No project is currently open");
       }
-      await shell.openPath(project.path);
+      if (folderPath) {
+        validatePathWithinBase(folderPath, project.path);
+        await shell.openPath(folderPath);
+      } else {
+        await shell.openPath(project.path);
+      }
       return { success: true };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -796,7 +878,8 @@ export function registerProjectIPC(): void {
     async (_event, pdbId: string, chainIds: string[]) => {
       try {
         // Step 1: Get UniProt mapping from SIFTS API
-        const siftsUrl = `https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${pdbId.toUpperCase()}`;
+        const validatedPdbId = validatePdbId(pdbId);
+        const siftsUrl = `https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${validatedPdbId}`;
         const siftsResponse = await net.fetch(siftsUrl);
 
         if (!siftsResponse.ok) {
@@ -921,6 +1004,7 @@ export function registerProjectIPC(): void {
   // Boltz API handlers
   ipcMain.handle("boltz:health-check", async (_event, apiUrl: string) => {
     try {
+      validateApiUrl(apiUrl);
       const response = await net.fetch(`${apiUrl}/api/v1/health`);
       if (response.ok) {
         const data = await response.json();
@@ -950,9 +1034,9 @@ export function registerProjectIPC(): void {
       customSequences: string
     ) => {
       try {
+        validateApiUrl(apiUrl);
         // Create multipart/form-data manually (matching Python requests format)
-        // Use a simpler boundary format that matches common implementations
-        const boundary = `----formdata-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+        const boundary = `----formdata-${Date.now()}-${randomBytes(12).toString("hex")}`;
         const formDataParts: Buffer[] = [];
 
         // Add chain_ids field
@@ -974,7 +1058,7 @@ export function registerProjectIPC(): void {
         const cifBuffer = Buffer.from(cifContent, "utf-8");
         formDataParts.push(
           Buffer.from(
-            `--${boundary}\r\nContent-Disposition: form-data; name="cif_file"; filename="${cifFilename}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+            `--${boundary}\r\nContent-Disposition: form-data; name="cif_file"; filename="${sanitizeHeaderFilename(cifFilename)}"\r\nContent-Type: application/octet-stream\r\n\r\n`
           )
         );
         formDataParts.push(cifBuffer);
@@ -1012,7 +1096,8 @@ export function registerProjectIPC(): void {
     "boltz:get-job-status",
     async (_event, apiUrl: string, jobId: string) => {
       try {
-        const response = await net.fetch(`${apiUrl}/api/v1/jobs/${jobId}`);
+        validateApiUrl(apiUrl);
+        const response = await net.fetch(`${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}`);
         if (!response.ok) {
           throw new Error(`Status check failed: ${response.statusText}`);
         }
@@ -1031,6 +1116,7 @@ export function registerProjectIPC(): void {
     "boltz:run-prediction",
     async (_event, apiUrl: string, payload: unknown) => {
       try {
+        validateApiUrl(apiUrl);
         const response = await net.fetch(`${apiUrl}/api/v1/predict/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1052,11 +1138,16 @@ export function registerProjectIPC(): void {
     }
   );
 
-  // Read file by absolute path
+  // Read file by absolute path (restricted to project directory)
   ipcMain.handle(
     "project:read-file-by-path",
     async (_event, filePath: string) => {
       try {
+        const project = projectManager.getCurrentProject();
+        if (!project) {
+          throw new Error("No project is currently open");
+        }
+        validatePathWithinBase(filePath, project.path);
         const content = await fs.readFile(filePath, "utf-8");
         return { success: true, content };
       } catch (error) {
@@ -1079,8 +1170,9 @@ export function registerProjectIPC(): void {
 
       try {
         // Download results from API
+        validateApiUrl(apiUrl);
         const response = await net.fetch(
-          `${apiUrl}/api/v1/jobs/${jobId}/files/prediction`
+          `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/files/prediction`
         );
 
         if (!response.ok) {
@@ -1119,11 +1211,20 @@ export function registerProjectIPC(): void {
         const zipPath = join(runDir, `${jobId}_predictions.zip`);
         await fs.writeFile(zipPath, buffer);
 
-        // Extract ZIP using adm-zip
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const AdmZip = require("adm-zip");
+        // Extract ZIP using adm-zip with path traversal protection
+        const { default: AdmZip } = await import("adm-zip");
         const zip = new AdmZip(zipPath);
         const extractDir = join(runDir, "predictions");
+        const resolvedExtractDir = resolve(extractDir);
+
+        // Validate all entries before extraction to prevent zip slip
+        for (const entry of zip.getEntries()) {
+          const entryPath = resolve(extractDir, entry.entryName);
+          if (!entryPath.startsWith(resolvedExtractDir + "/") && entryPath !== resolvedExtractDir) {
+            throw new Error(`Zip entry "${entry.entryName}" escapes target directory`);
+          }
+        }
+
         zip.extractAllTo(extractDir, true);
 
         // Find CIF files in extracted directory

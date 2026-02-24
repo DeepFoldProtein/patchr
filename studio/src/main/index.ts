@@ -24,7 +24,8 @@ function createWindow(): void {
     ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
-      sandbox: false
+      sandbox: true,
+      contextIsolation: true
     }
   });
 
@@ -38,7 +39,14 @@ function createWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(details => {
-    shell.openExternal(details.url);
+    try {
+      const url = new URL(details.url);
+      if (["http:", "https:"].includes(url.protocol)) {
+        shell.openExternal(details.url);
+      }
+    } catch {
+      // Invalid URL, ignore
+    }
     return { action: "deny" };
   });
 
