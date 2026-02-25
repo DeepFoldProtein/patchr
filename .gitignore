@@ -189,3 +189,5 @@ tmps/
 slurm_*/
 job_lists/
 playground/
+.vscode/
+*.local.json
