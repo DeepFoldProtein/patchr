@@ -1544,210 +1544,125 @@ class Boltz2(LightningModule):
                 """Return chain ID (name) for display, fallback to index string if no mapping."""
                 return asym_id_to_chain_name.get(asym_id_val, str(asym_id_val))
 
-            # Count residues with different levels of structure
-            residues_fully_fixed = []
-            residues_partially_fixed = []
-            residues_fully_inpainted = []
+            # ----------------------------------------------------------------
+            # Try to load pre-computed metadata first (from generate_inpainting_template.py)
+            # This avoids the known NONPOLYMER token-offset bug in runtime computation.
+            # ----------------------------------------------------------------
+            inpainting_metadata = None
+            _record = feats.get("record", None)
+            if isinstance(_record, list):
+                _record = _record[0] if _record else None
+            if _record is not None and hasattr(_record, "inpainting_metadata_path"):
+                meta_path = _record.inpainting_metadata_path
+                if meta_path is not None:
+                    try:
+                        import json as _json
+                        with open(meta_path) as _f:
+                            inpainting_metadata = _json.load(_f)
+                        print(f"[Inpainting] Loaded pre-computed metadata from {meta_path}")
+                    except Exception as e:
+                        print(f"[Inpainting] Warning: Failed to load pre-computed metadata: {e}")
 
-            # For multimer: group by chain
-            chain_residues = (
-                {}
-            )  # chain_id -> {fully_fixed: [], partially_fixed: [], fully_inpainted: []}
+            if inpainting_metadata is not None and "chains" in inpainting_metadata:
+                # ----- Use pre-computed metadata for both logging and export -----
+                print(f"\n[Inpainting] Batch 0 validation (from pre-computed metadata):")
+                print(f"  Number of chains: {len(inpainting_metadata['chains'])}")
 
-            for token_idx in range(num_tokens):
-                # Get atoms belonging to this token
-                token_atoms = atom_to_token[0, :, token_idx].bool()
-                token_atom_mask = token_atoms & template_mask_bool[0]
+                for chain_name, chain_data in inpainting_metadata["chains"].items():
+                    n_fixed = len(chain_data.get("fully_fixed_residues", []))
+                    n_partial = len(chain_data.get("partially_fixed_residues", []))
+                    n_inpainted = len(chain_data.get("fully_inpainted_residues", []))
+                    total_res = n_fixed + n_partial + n_inpainted
 
-                # Count atoms in this residue
-                total_atoms_in_residue = token_atoms.sum().item()
-                template_atoms_in_residue = token_atom_mask.sum().item()
+                    print(f"\n  Chain {chain_name}:")
+                    print(f"    Total residues: {total_res}")
+                    print(f"    Fully fixed residues: {n_fixed}")
+                    if chain_data.get("fully_fixed_residues"):
+                        print(f"      Residues: {self._format_residue_ranges(chain_data['fully_fixed_residues'])}")
+                    print(f"    Partially fixed residues: {n_partial}")
+                    if chain_data.get("partially_fixed_residues"):
+                        for entry in chain_data["partially_fixed_residues"]:
+                            print(f"      Residue {entry['residue']}: {entry['fixed_atoms']}/{entry['total_atoms']} atoms fixed")
+                    print(f"    Fully inpainted residues: {n_inpainted}")
+                    if chain_data.get("fully_inpainted_residues"):
+                        print(f"      Residues: {self._format_residue_ranges(chain_data['fully_inpainted_residues'])}")
 
-                if total_atoms_in_residue == 0:
-                    continue  # Skip empty residues
+                    if "total_atoms_with_structure" in chain_data and "total_expected_atoms" in chain_data:
+                        print(f"    Atoms with structure: {chain_data['total_atoms_with_structure']} / {chain_data['total_expected_atoms']}")
+            else:
+                # ----- Fallback: runtime token-based computation -----
+                # (may have offset issues with NONPOLYMER ligand tokens)
+                chain_residues = {}
+                residues_fully_fixed = []
+                residues_partially_fixed = []
+                residues_fully_inpainted = []
 
-                # Get chain ID for this token (if available)
-                chain_id = None
-                if asym_id_np is not None and token_idx < len(asym_id_np):
-                    chain_id = int(asym_id_np[token_idx])
-                    if chain_id not in chain_residues:
-                        chain_residues[chain_id] = {
-                            "fully_fixed": [],
-                            "partially_fixed": [],
-                            "fully_inpainted": [],
-                        }
-
-                residue_info = (
-                    token_idx + 1,  # 1-indexed
-                    template_atoms_in_residue,
-                    total_atoms_in_residue,
-                    chain_id,
-                )
-
-                if template_atoms_in_residue == total_atoms_in_residue:
-                    # All atoms have structure
-                    residues_fully_fixed.append(residue_info)
-                    if chain_id is not None:
-                        chain_residues[chain_id]["fully_fixed"].append(token_idx + 1)
-                elif template_atoms_in_residue > 0:
-                    # Some atoms have structure
-                    residues_partially_fixed.append(residue_info)
-                    if chain_id is not None:
-                        chain_residues[chain_id]["partially_fixed"].append(
-                            (
-                                token_idx + 1,
-                                template_atoms_in_residue,
-                                total_atoms_in_residue,
-                            )
-                        )
-                else:
-                    # No atoms have structure
-                    residues_fully_inpainted.append(residue_info)
-                    if chain_id is not None:
-                        chain_residues[chain_id]["fully_inpainted"].append(
-                            token_idx + 1
-                        )
-
-            # Print summary
-            print(f"\n[Inpainting] Batch 0 validation:")
-            print(f"  Total residues: {num_tokens}")
-
-            # Print chain-specific information for multimer
-            if chain_residues:
-                print(f"  Number of chains: {len(chain_residues)}")
-
-                # Find the first token_idx for each chain to convert to chain-local residue numbering
-                chain_first_token = {}  # chain_id -> first token_idx (0-indexed)
-                chain_is_nonpolymer = {}  # chain_id -> is NONPOLYMER
                 for token_idx in range(num_tokens):
+                    token_atoms = atom_to_token[0, :, token_idx].bool()
+                    token_atom_mask = token_atoms & template_mask_bool[0]
+                    total_atoms_in_residue = token_atoms.sum().item()
+                    template_atoms_in_residue = token_atom_mask.sum().item()
+                    if total_atoms_in_residue == 0:
+                        continue
+
+                    chain_id = None
                     if asym_id_np is not None and token_idx < len(asym_id_np):
                         chain_id = int(asym_id_np[token_idx])
-                        if chain_id not in chain_first_token:
-                            chain_first_token[chain_id] = token_idx
-                            # Check if this chain is NONPOLYMER (ligand)
-                            if mol_type_np is not None and token_idx < len(mol_type_np):
-                                chain_is_nonpolymer[chain_id] = (
-                                    int(mol_type_np[token_idx])
-                                    == const.chain_type_ids["NONPOLYMER"]
-                                )
-                            else:
-                                chain_is_nonpolymer[chain_id] = False
+                        if chain_id not in chain_residues:
+                            chain_residues[chain_id] = {"fully_fixed": [], "partially_fixed": [], "fully_inpainted": []}
 
-                for chain_id in sorted(chain_residues.keys()):
-                    chain_info = chain_residues[chain_id]
-                    # Get the first token_idx for this chain to convert to chain-local numbering
-                    chain_offset = chain_first_token.get(chain_id, 0)
-                    is_ligand = chain_is_nonpolymer.get(chain_id, False)
-
-                    chain_type_label = "LIGAND" if is_ligand else "POLYMER"
-                    print(f"\n  Chain {_chain_display(chain_id)} ({chain_type_label}):")
-
-                    if is_ligand:
-                        # For ligands, show total atoms instead of residue ranges
-                        total_residues = (
-                            len(chain_info["fully_fixed"])
-                            + len(chain_info["partially_fixed"])
-                            + len(chain_info["fully_inpainted"])
-                        )
-                        print(f"    Total residues: {total_residues}")
-                        print(
-                            f"    Fully fixed residues: {len(chain_info['fully_fixed'])}"
-                        )
-                        if chain_info["partially_fixed"]:
-                            print(
-                                f"    Partially fixed residues: {len(chain_info['partially_fixed'])}"
-                            )
-                            for res_idx, fixed_atoms, total_atoms in chain_info[
-                                "partially_fixed"
-                            ]:
-                                chain_local_res_idx = res_idx - chain_offset
-                                print(
-                                    f"      Residue {chain_local_res_idx}: {fixed_atoms}/{total_atoms} atoms fixed"
-                                )
-                        print(
-                            f"    Fully inpainted residues: {len(chain_info['fully_inpainted'])}"
-                        )
+                    residue_info = (token_idx + 1, template_atoms_in_residue, total_atoms_in_residue, chain_id)
+                    if template_atoms_in_residue == total_atoms_in_residue:
+                        residues_fully_fixed.append(residue_info)
+                        if chain_id is not None:
+                            chain_residues[chain_id]["fully_fixed"].append(token_idx + 1)
+                    elif template_atoms_in_residue > 0:
+                        residues_partially_fixed.append(residue_info)
+                        if chain_id is not None:
+                            chain_residues[chain_id]["partially_fixed"].append((token_idx + 1, template_atoms_in_residue, total_atoms_in_residue))
                     else:
-                        # For polymers, show residue ranges as before
-                        print(
-                            f"    Fully fixed residues: {len(chain_info['fully_fixed'])}"
-                        )
-                        if chain_info["fully_fixed"]:
-                            # Convert global residue numbers to chain-local (1-indexed within chain)
-                            chain_local_fixed = [
-                                res_idx - chain_offset
-                                for res_idx in chain_info["fully_fixed"]
-                            ]
-                            fully_fixed_ranges = self._format_residue_ranges(
-                                chain_local_fixed
-                            )
-                            print(f"      Residues: {fully_fixed_ranges}")
-                        print(
-                            f"    Partially fixed residues: {len(chain_info['partially_fixed'])}"
-                        )
-                        if chain_info["partially_fixed"]:
-                            for res_idx, fixed_atoms, total_atoms in chain_info[
-                                "partially_fixed"
-                            ]:
-                                # Convert to chain-local residue number
-                                chain_local_res_idx = res_idx - chain_offset
-                                print(
-                                    f"      Residue {chain_local_res_idx}: {fixed_atoms}/{total_atoms} atoms fixed"
-                                )
-                        print(
-                            f"    Fully inpainted residues: {len(chain_info['fully_inpainted'])}"
-                        )
-                        if chain_info["fully_inpainted"]:
-                            # Convert global residue numbers to chain-local (1-indexed within chain)
-                            chain_local_inpainted = [
-                                res_idx - chain_offset
-                                for res_idx in chain_info["fully_inpainted"]
-                            ]
-                            fully_inpainted_ranges = self._format_residue_ranges(
-                                chain_local_inpainted
-                            )
-                            print(f"      Residues: {fully_inpainted_ranges}")
+                        residues_fully_inpainted.append(residue_info)
+                        if chain_id is not None:
+                            chain_residues[chain_id]["fully_inpainted"].append(token_idx + 1)
 
-            # Print overall summary
-            print(f"\n  Overall summary:")
-            print(
-                f"  Residues FULLY FIXED (all atoms have structure): {len(residues_fully_fixed)}"
-            )
-            if residues_fully_fixed:
-                fully_fixed_ranges = self._format_residue_ranges(
-                    [r[0] for r in residues_fully_fixed]
-                )
-                print(f"    Residues: {fully_fixed_ranges}")
-            else:
-                print("    Residues: (none)")
+                # Build chain_first_token for offset computation
+                chain_first_token = {}
+                if asym_id_np is not None:
+                    for token_idx in range(num_tokens):
+                        if token_idx < len(asym_id_np):
+                            cid = int(asym_id_np[token_idx])
+                            if cid not in chain_first_token:
+                                chain_first_token[cid] = token_idx
 
-            print(
-                f"  Residues PARTIALLY FIXED (some atoms have structure, some need inpainting): {len(residues_partially_fixed)}"
-            )
-            if residues_partially_fixed:
-                for res_info in residues_partially_fixed:
-                    res_idx, fixed_atoms, total_atoms, chain_id = res_info
-                    chain_str = (
-                        f" (Chain {_chain_display(chain_id)})"
-                        if chain_id is not None
-                        else ""
-                    )
-                    print(
-                        f"    Residue {res_idx}{chain_str}: {fixed_atoms}/{total_atoms} atoms fixed"
-                    )
-            else:
-                print("    Residues: (none)")
+                # Print summary (runtime fallback)
+                print(f"\n[Inpainting] Batch 0 validation (runtime computation — no pre-computed metadata):")
+                print(f"  Total tokens: {num_tokens}")
+                if chain_residues:
+                    print(f"  Number of chains: {len(chain_residues)}")
+                    for cid in sorted(chain_residues.keys()):
+                        cinfo = chain_residues[cid]
+                        chain_offset = chain_first_token.get(cid, 0)
+                        print(f"\n  Chain {_chain_display(cid)}:")
+                        print(f"    Fully fixed: {len(cinfo['fully_fixed'])}")
+                        print(f"    Partially fixed: {len(cinfo['partially_fixed'])}")
+                        print(f"    Fully inpainted: {len(cinfo['fully_inpainted'])}")
+                        if cinfo["fully_inpainted"]:
+                            local_inpainted = [r - chain_offset for r in cinfo["fully_inpainted"]]
+                            print(f"      Residues: {self._format_residue_ranges(local_inpainted)}")
 
-            print(
-                f"  Residues FULLY INPAINTED (no atoms have structure): {len(residues_fully_inpainted)}"
-            )
-            if residues_fully_inpainted:
-                fully_inpainted_ranges = self._format_residue_ranges(
-                    [r[0] for r in residues_fully_inpainted]
-                )
-                print(f"    Residues: {fully_inpainted_ranges}")
-            else:
-                print("    Residues: (none)")
+                # Build inpainting_metadata from runtime data
+                inpainting_metadata = {"chains": {}}
+                for cid, cinfo in chain_residues.items():
+                    chain_key = asym_id_to_chain_name.get(cid, f"chain_{cid}") if asym_id_to_chain_name else f"chain_{cid}"
+                    chain_offset = chain_first_token.get(cid, 0)
+                    inpainting_metadata["chains"][chain_key] = {
+                        "fully_fixed_residues": [int(r) - chain_offset for r in cinfo["fully_fixed"]],
+                        "partially_fixed_residues": [
+                            {"residue": int(r[0]) - chain_offset, "fixed_atoms": int(r[1]), "total_atoms": int(r[2])}
+                            for r in cinfo["partially_fixed"]
+                        ],
+                        "fully_inpainted_residues": [int(r) - chain_offset for r in cinfo["fully_inpainted"]],
+                    }
 
         print(
             f"  Total atoms WITH template structure: {num_template_atoms} / {num_atoms}"
@@ -1755,8 +1670,6 @@ class Boltz2(LightningModule):
         print(f"  Total atoms to be INPAINTED: {num_inpaint_atoms} / {num_atoms}")
 
         # Center template coordinates to avoid issues with large absolute coordinate values
-        # This ensures that r_to_q_trans receives coordinates in a similar distribution to training
-        # Log mean before centering
         mean_before_centering = template_coords[0][template_mask_bool[0]].mean(dim=0)
         print(
             f"[Inpainting] Template coordinates before centering (mean: {mean_before_centering.norm().item():.6f}, "
@@ -1765,7 +1678,6 @@ class Boltz2(LightningModule):
 
         template_coords_centered = center(template_coords, template_mask_bool)
 
-        # Verify centering worked (mean should be close to zero)
         mean_after_centering = template_coords_centered[0][template_mask_bool[0]].mean(
             dim=0
         )
@@ -1778,54 +1690,6 @@ class Boltz2(LightningModule):
         # Store inpainting information in feats
         feats["inpainting_template_coords"] = template_coords
         feats["inpainting_template_mask"] = template_mask_bool
-
-        # Store inpainting metadata for JSON export (chain-based only)
-        # Use chain ID (chain name, e.g. "A", "B") as key when available from record; else "chain_{index}"
-        # Convert global residue indices to chain-local indices (starting from 1 for each chain)
-        inpainting_metadata = {}
-        if atom_to_token is not None and chain_residues:
-            # Find the first token_idx for each chain to convert to chain-local residue numbering
-            chain_first_token = {}  # chain_id -> first token_idx (0-indexed)
-            if asym_id_np is not None:
-                for token_idx in range(num_tokens):
-                    if token_idx < len(asym_id_np):
-                        chain_id = int(asym_id_np[token_idx])
-                        if chain_id not in chain_first_token:
-                            chain_first_token[chain_id] = token_idx
-
-            inpainting_metadata["chains"] = {}
-            for chain_id, info in chain_residues.items():
-                # Use chain name (e.g. "A", "B") as key when available
-                chain_key = (
-                    asym_id_to_chain_name.get(chain_id, f"chain_{chain_id}")
-                    if asym_id_to_chain_name
-                    else f"chain_{chain_id}"
-                )
-                # Get the chain offset (first token_idx for this chain)
-                chain_offset = chain_first_token.get(chain_id, 0)
-
-                # Convert global residue indices to chain-local (1-indexed within chain)
-                fully_fixed_local = [int(r) - chain_offset for r in info["fully_fixed"]]
-                partially_fixed_local = [
-                    {
-                        "residue": int(r[0]) - chain_offset,
-                        "fixed_atoms": int(r[1]),
-                        "total_atoms": int(r[2]),
-                    }
-                    for r in info["partially_fixed"]
-                ]
-                fully_inpainted_local = [
-                    int(r) - chain_offset for r in info["fully_inpainted"]
-                ]
-
-                inpainting_metadata["chains"][chain_key] = {
-                    "fully_fixed_residues": fully_fixed_local,
-                    "partially_fixed_residues": partially_fixed_local,
-                    "fully_inpainted_residues": fully_inpainted_local,
-                }
-        else:
-            inpainting_metadata["chains"] = {}
-
         feats["inpainting_metadata"] = inpainting_metadata
 
         print(f"\n[Inpainting] Validation complete. Template coordinates prepared.\n")

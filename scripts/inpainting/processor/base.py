@@ -42,7 +42,7 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
@@ -93,8 +93,8 @@ class StructureProcessor(
         self.non_standard_residues = {}
         # Cached CIF dict to avoid re-parsing the same CIF many times per chain (major speedup)
         self._cif_dict = None
-        # When True, print DEBUG and per-chain blocks (set BOLTZ_VERBOSE=1 for interactive use)
-        self.verbose = os.environ.get("BOLTZ_VERBOSE", "").strip().lower() in ("1", "true", "yes")
+        # When True, print DEBUG and per-chain blocks (set via --verbose flag or BOLTZ_VERBOSE=1)
+        self.verbose = verbose or os.environ.get("BOLTZ_VERBOSE", "").strip().lower() in ("1", "true", "yes")
         # Assembly selection
         self.assembly_id = assembly_id          # None / 'best' / str(N)
         self.list_assemblies = list_assemblies
@@ -114,9 +114,11 @@ class StructureProcessor(
         )
 
 
-    def generate_yaml(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict]) -> str:
+    def generate_yaml(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict],
+                       inpainting_metadata_path: Path = None) -> str:
         """Generate YAML configuration (delegates to yaml_writer)."""
-        return yaml_writer.generate_yaml(self.chain_ids, all_chains_data, cif_path, output_dir)
+        return yaml_writer.generate_yaml(self.chain_ids, all_chains_data, cif_path, output_dir,
+                                         inpainting_metadata_path=inpainting_metadata_path)
 
 
 
@@ -187,7 +189,20 @@ class StructureProcessor(
                     print("WARNING: Assembly produced no chains; proceeding with original chains.")
 
         # Load CCD from ccd.pkl (same as mmcif.parse_mmcif mols / main.py)
-        ccd_path = (self.cache_dir or get_boltz_cache()) / "ccd.pkl"
+        ccd_dir = self.cache_dir or get_boltz_cache()
+        ccd_path = ccd_dir / "ccd.pkl"
+        if not ccd_path.exists():
+            import urllib.request
+            CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
+            print(f"Downloading CCD dictionary to {ccd_path} ...")
+            ccd_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                urllib.request.urlretrieve(CCD_URL, str(ccd_path))  # noqa: S310
+                print(f"Downloaded ccd.pkl successfully.")
+            except Exception as e:
+                print(f"ERROR: Failed to download ccd.pkl: {e}", file=sys.stderr)
+                print(f"Please download manually or set --cache to a directory containing ccd.pkl.", file=sys.stderr)
+                sys.exit(1)
         ccd = load_ccd_dict(ccd_path)
         # Parse non-standard residue info from CIF (uses ccd.pkl via ccd_utils)
         self.parse_non_standard_residues(ccd=ccd)
@@ -330,9 +345,7 @@ class StructureProcessor(
                                                 'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                                 'THR', 'VAL', 'TRP', 'TYR'}
                             has_dna_rna = bool(chain_residues & dna_rna_residues)
-                            has_protein = bool(chain_residues & protein_residues) or bool(
-                                chain_residues - STANDARD_AA_THREE_LETTER - dna_rna_residues - {'HOH', 'H2O', 'WAT'}
-                            )
+                            has_protein = bool(chain_residues & protein_residues)
                             if has_dna_rna and not has_protein:
                                 if 'U' in chain_residues or any('R' in r for r in chain_residues if len(r) > 1 and 'R' in r):
                                     entity_type = 'rna'
@@ -363,6 +376,15 @@ class StructureProcessor(
                     atom['label_seq_id'] = 1
                     atom['auth_seq_id'] = atom.get('auth_seq_id') or 1
                     atom['auth_asym_id'] = author_chain_id
+                # Ligand chains are fully fixed (all atoms from template structure)
+                ligand_atom_names = set(a.get('label_atom_id', '') for a in atoms)
+                ligand_inpainting_meta = {
+                    "fully_fixed_residues": [1],
+                    "partially_fixed_residues": [],
+                    "fully_inpainted_residues": [],
+                    "total_atoms_with_structure": len(ligand_atom_names),
+                    "total_expected_atoms": len(ligand_atom_names),
+                }
                 all_chains_data[chain_id] = {
                     'atoms': atoms,
                     'sequence': '',
@@ -373,6 +395,7 @@ class StructureProcessor(
                     'author_chain_id': author_chain_id,
                     'modifications': [],
                     'ccd': ligand_ccd,
+                    'inpainting_metadata': ligand_inpainting_meta,
                 }
                 print(f"Chain {chain_id}: ligand (ccd={ligand_ccd})")
                 entity_id += 1
@@ -503,8 +526,9 @@ class StructureProcessor(
                 self.check_missing_atoms(atoms, residue_mapping, final_sequence)
             
             # Determine inpainting region (only for proteins, DNA/RNA uses different logic)
+            chain_inpainting_metadata = None
             if entity_type == 'protein':
-                self.determine_inpainting_region(atoms, residue_mapping, final_sequence)
+                _, chain_inpainting_metadata = self.determine_inpainting_region(atoms, residue_mapping, final_sequence)
 
             # --skip-terminal: trim sequence to exclude N/C-terminal missing residues.
             # Only internal (non-terminal) gaps will be left for inpainting.
@@ -522,6 +546,21 @@ class StructureProcessor(
                         residue_mapping = {k: v - trim_offset for k, v in residue_mapping.items()}
                         print(f"  --skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
                               f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
+
+            # Apply skip-terminal offset to inpainting metadata
+            if chain_inpainting_metadata is not None and trim_offset > 0:
+                trimmed_len = len(final_sequence)
+                def _shift_and_filter(residues):
+                    return [r - trim_offset for r in residues if trim_offset < r <= trim_offset + trimmed_len]
+                chain_inpainting_metadata["fully_fixed_residues"] = _shift_and_filter(
+                    chain_inpainting_metadata["fully_fixed_residues"])
+                chain_inpainting_metadata["fully_inpainted_residues"] = _shift_and_filter(
+                    chain_inpainting_metadata["fully_inpainted_residues"])
+                chain_inpainting_metadata["partially_fixed_residues"] = [
+                    {**entry, "residue": entry["residue"] - trim_offset}
+                    for entry in chain_inpainting_metadata["partially_fixed_residues"]
+                    if trim_offset < entry["residue"] <= trim_offset + trimmed_len
+                ]
 
             # Renumber atoms (update label_entity_id and label_asym_id for multimeric)
             renumbered_atoms = self.renumber_atoms(atoms, residue_mapping)
@@ -612,7 +651,8 @@ class StructureProcessor(
                 'entity_type': entity_type,
                 'monomer_ids': seq_pos_to_monomer,  # Actual 3-letter codes from atoms (e.g., 3DR)
                 'author_chain_id': author_chain_id,  # Author chain ID for output files
-                'modifications': chain_modifications  # modifications for YAML output
+                'modifications': chain_modifications,  # modifications for YAML output
+                'inpainting_metadata': chain_inpainting_metadata,  # None for non-protein chains
             }
             
             entity_id += 1
@@ -642,12 +682,27 @@ class StructureProcessor(
             f.write(cif_content)
         print(f"Saved CIF file: {cif_path.absolute()}")
         
+        # Save inpainting metadata JSON (per-chain, matching boltz2 format)
+        # Must be saved before YAML so the path can be embedded in the YAML template block
+        json_path = None
+        inpainting_meta_by_chain = {}
+        for cid, cdata in all_chains_data.items():
+            meta = cdata.get('inpainting_metadata')
+            if meta is not None:
+                author_cid = cdata.get('author_chain_id', cid)
+                inpainting_meta_by_chain[author_cid] = meta
+        if inpainting_meta_by_chain:
+            json_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}_inpainting_metadata.json"
+            json_path = output_dir / json_filename
+            self.save_inpainting_metadata(inpainting_meta_by_chain, json_path)
+
         # Generate and save YAML (with relative path to CIF from script execution directory)
-        yaml_content = self.generate_yaml(cif_path, output_dir, all_chains_data)
+        yaml_content = self.generate_yaml(cif_path, output_dir, all_chains_data,
+                                          inpainting_metadata_path=json_path)
         with open(yaml_path, 'w') as f:
             f.write(yaml_content)
         print(f"Saved YAML file: {yaml_path.absolute()}")
-        
+
         print(f"\n{'='*60}")
         print("Processing complete!")
         print(f"{'='*60}\n")

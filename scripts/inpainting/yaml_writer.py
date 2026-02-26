@@ -19,6 +19,7 @@ def generate_yaml(
     all_chains_data: Dict[str, Dict],
     cif_path: Path,
     output_dir: Path,
+    inpainting_metadata_path: Path = None,
 ) -> str:
     """Generate YAML configuration using benchmark generate_yaml_content."""
     chains = []
@@ -68,6 +69,20 @@ def generate_yaml(
                 new_lines.append(f"    chain_id: {''.join(auth_ids)}")
             else:
                 new_lines.append(f"    chain_id: {auth_ids}")
+            # Add inpainting_metadata path right after chain_id
+            if inpainting_metadata_path is not None:
+                try:
+                    meta_rel = str(
+                        inpainting_metadata_path.resolve().relative_to(
+                            Path.cwd().resolve()
+                        )
+                    )
+                except (ValueError, RuntimeError):
+                    meta_rel = os.path.relpath(
+                        str(inpainting_metadata_path.resolve()),
+                        str(Path.cwd().resolve()),
+                    )
+                new_lines.append(f"    inpainting_metadata: {meta_rel}")
         else:
             new_lines.append(line)
     yaml_content = "\n".join(new_lines)

@@ -127,11 +127,8 @@ class ChainDiscoveryMixin:
                             protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE', 
                                                 'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
                                                 'THR', 'VAL', 'TRP', 'TYR'}
-                            # Include non-standard residues so chains with ACE/PTR/DIP etc. are classified as protein
                             has_dna_rna = bool(atom_residues & dna_rna_residues)
-                            has_protein = bool(atom_residues & protein_residues) or bool(
-                                atom_residues - STANDARD_AA_THREE_LETTER - dna_rna_residues - {'HOH', 'H2O', 'WAT'}
-                            )
+                            has_protein = bool(atom_residues & protein_residues)
                             
                             if has_dna_rna and not has_protein:
                                 # Check if DNA or RNA
@@ -244,6 +241,8 @@ class ChainDiscoveryMixin:
                     result[asym_id] = 'water'
                 elif 'non-polymer' in raw:
                     result[asym_id] = 'ligand'
+                elif 'branched' in raw:
+                    result[asym_id] = 'protein'
         return result
 
     def get_ligand_chain_ids(self) -> List[str]:

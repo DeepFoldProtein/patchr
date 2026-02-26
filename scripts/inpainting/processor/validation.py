@@ -1,6 +1,8 @@
 """Missing atom checks and inpainting region detection."""
+import json
 import sys
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..constants import ref_atoms
 
@@ -116,18 +118,20 @@ class ValidationMixin:
                 print("  No missing atoms found in residues with structure!")
                 print(f"{'='*60}\n")
     
-    def determine_inpainting_region(self, atoms: List[Dict], residue_mapping: Dict[int, int], final_sequence: str) -> Tuple[int, int]:
+    def determine_inpainting_region(self, atoms: List[Dict], residue_mapping: Dict[int, int], final_sequence: str) -> Tuple[Tuple[int, int], Dict[str, Any]]:
         """
         Determine the inpainting region (missing residues) by checking atom presence per residue.
         This matches the logic in boltz2.py _validate_and_prepare_inpainting.
-        
+
         Args:
             atoms: List of atom dictionaries
             residue_mapping: Mapping from sequential index to SEQRES position
             final_sequence: Final sequence to use
-        
+
         Returns:
-            Tuple of (start, end) residue numbers in new numbering
+            Tuple of:
+              - (start, end) residue numbers of the largest inpainting gap
+              - metadata dict with fully_fixed/partially_fixed/fully_inpainted residues
         """
         # Build reverse mapping: (auth_seq_id_base, ins_code) -> SEQRES position
         key_to_seqres = {}
@@ -193,8 +197,18 @@ class ValidationMixin:
             else:
                 aa_three_letter = 'UNK'
             
-            expected_atoms = set(ref_atoms.get(aa_three_letter, ref_atoms.get("UNK", [])))
-            
+            # For non-standard residues (X), use actual structure atoms as expected set
+            # since ref_atoms only covers standard amino acids (NAG, etc. have different atom names)
+            if aa_three_letter == 'UNK' and seq_pos in residue_atoms:
+                actual_type = residue_types.get(seq_pos, 'UNK')
+                if actual_type not in ref_atoms:
+                    # Non-standard residue (e.g. NAG): all structure atoms count as expected
+                    expected_atoms = residue_atoms[seq_pos]
+                else:
+                    expected_atoms = set(ref_atoms.get(actual_type, ref_atoms.get("UNK", [])))
+            else:
+                expected_atoms = set(ref_atoms.get(aa_three_letter, ref_atoms.get("UNK", [])))
+
             if seq_pos in residue_atoms:
                 # Residue has some structure - check if all atoms are present
                 # Only count atoms that are in ref_atoms (exclude hydrogen and other non-standard atoms)
@@ -286,9 +300,18 @@ class ValidationMixin:
             if seq_pos <= len(final_sequence):
                 aa_one = final_sequence[seq_pos - 1]
                 aa_three = aa_one_to_three.get(aa_one, 'UNK')
-                expected_atoms = set(ref_atoms.get(aa_three, ref_atoms.get("UNK", [])))
+
+                # For non-standard residues (X/UNK), use actual structure atoms as expected set
+                if aa_three == 'UNK' and seq_pos in residue_atoms:
+                    actual_type = residue_types.get(seq_pos, 'UNK')
+                    if actual_type not in ref_atoms:
+                        expected_atoms = residue_atoms[seq_pos]
+                    else:
+                        expected_atoms = set(ref_atoms.get(actual_type, ref_atoms.get("UNK", [])))
+                else:
+                    expected_atoms = set(ref_atoms.get(aa_three, ref_atoms.get("UNK", [])))
                 total_expected_atoms += len(expected_atoms)
-                
+
                 # Count only ref_atoms that are present in structure
                 if seq_pos in residue_atoms:
                     all_actual_atoms = residue_atoms[seq_pos]
@@ -300,15 +323,27 @@ class ValidationMixin:
             print(f"  Total atoms to be INPAINTED: {total_expected_atoms - total_atoms_with_structure} / {total_expected_atoms}")
             print(f"{'='*60}\n")
         
+        # Build metadata dict (matching boltz2.py inpainting_metadata format)
+        metadata = {
+            "fully_fixed_residues": residues_fully_fixed,
+            "partially_fixed_residues": [
+                {"residue": r[0], "fixed_atoms": r[1], "total_atoms": r[2]}
+                for r in residues_partially_fixed
+            ],
+            "fully_inpainted_residues": residues_fully_inpainted,
+            "total_atoms_with_structure": total_atoms_with_structure,
+            "total_expected_atoms": total_expected_atoms,
+        }
+
         # Find contiguous inpainting regions
         # Include both FULLY INPAINTED and PARTIALLY FIXED residues (both need inpainting)
         residues_needing_inpainting = set(residues_fully_inpainted)
         residues_needing_inpainting.update([r[0] for r in residues_partially_fixed])
-        
+
         if residues_needing_inpainting:
             missing_regions = []
             current_gap_start = None
-            
+
             for seq_pos in sorted(residues_needing_inpainting):
                 if current_gap_start is None:
                     current_gap_start = seq_pos
@@ -319,14 +354,38 @@ class ValidationMixin:
                     # Gap ended, start new one
                     missing_regions.append((current_gap_start, seq_pos - 1))
                     current_gap_start = seq_pos
-            
+
             # Add final gap
             if current_gap_start is not None:
                 missing_regions.append((current_gap_start, max(residues_needing_inpainting)))
-            
-            # Return the largest gap or first gap
+
             if missing_regions:
-                return max(missing_regions, key=lambda x: x[1] - x[0] + 1)
-        
-        return (0, 0)
+                largest_gap = max(missing_regions, key=lambda x: x[1] - x[0] + 1)
+                return largest_gap, metadata
+
+        return (0, 0), metadata
+
+    def save_inpainting_metadata(self, all_inpainting_metadata: Dict[str, Dict[str, Any]], output_path: Path) -> None:
+        """Save per-chain inpainting metadata as JSON (matching boltz2 format).
+
+        Args:
+            all_inpainting_metadata: chain_id -> metadata dict from determine_inpainting_region
+            output_path: Path to write the JSON file
+        """
+        import numpy as np
+
+        class _NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, (np.integer,)):
+                    return int(obj)
+                if isinstance(obj, (np.floating,)):
+                    return float(obj)
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return super().default(obj)
+
+        data = {"chains": all_inpainting_metadata}
+        with open(output_path, "w") as f:
+            json.dump(data, f, indent=4, cls=_NumpyEncoder)
+        print(f"Saved inpainting metadata: {output_path.absolute()}")
     

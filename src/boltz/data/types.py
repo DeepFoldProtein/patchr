@@ -583,6 +583,8 @@ class Record(JSONSerializable):
     affinity: Optional[AffinityInfo] = None
     # For inpainting: path to template/structure CIF (struct_conn, chem_comp, etc. merged into output)
     template_cif_path: Optional[str] = None
+    # For inpainting: path to pre-computed inpainting metadata JSON (bypasses buggy runtime computation)
+    inpainting_metadata_path: Optional[str] = None
 
 
 ####################################################################################################

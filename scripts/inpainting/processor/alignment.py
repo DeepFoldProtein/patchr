@@ -333,15 +333,29 @@ class AlignmentMixin:
         # Always use alignment-based method to handle insertion codes and structural order properly
         # No longer try to use auth_seq_id directly as it may have insertion codes
         print(f"Aligning structure ({len(struct_residue_order)} residues) to SEQRES ({len(seqres_sequence)} residues)")
-        
-        
+
+        # Short-circuit: if both sequences are entirely non-standard ('X') with same length,
+        # alignment is meaningless (e.g. branched carbohydrate chains like NAG-NAG).
+        # Use simple 1:1 sequential mapping.
+        if (len(struct_residue_order) == len(seqres_sequence)
+                and all(c == 'X' for c in struct_seq)
+                and all(c == 'X' for c in seqres_sequence)):
+            residue_mapping = {idx: idx + 1 for idx in struct_residue_order}
+            print(f"Using 1:1 sequential mapping for all-non-standard chain ({len(residue_mapping)} residues)")
+            if residue_mapping:
+                mapped_positions = sorted(residue_mapping.values())
+                print(f"Mapped to sequence positions: {min(mapped_positions)} to {max(mapped_positions)}")
+                print(f"Original residue range: {struct_residue_order[0]} to {struct_residue_order[-1]}")
+            print()
+            return residue_mapping
+
         # Use Bio.Align.PairwiseAligner for local alignment (same as boltz2)
         aligner = Align.PairwiseAligner(scoring="blastp")
         aligner.mode = "local"
-        
+
         alignments = list(aligner.align(struct_seq, seqres_sequence))
         window_offset = 0  # Track if window alignment was used
-        
+
         if not alignments:
             print("ERROR: Alignment failed, cannot create mapping")
             return {}

@@ -550,18 +550,14 @@ def get_template_records_from_search(
     threshold: Optional[float] = None,
 ) -> list[TemplateInfo]:
     """Get template records from an alignment."""
-    # For inpainting: if chain_ids and template_chain_ids have the same length and order,
-    # and all sequences are identical (homo-oligomer), preserve the order instead of using
-    # linear_sum_assignment which might swap chains
+    # For inpainting: preserve 1:1 chain name mapping when possible.
+    # linear_sum_assignment can swap homo-oligomer chains if modification counts differ
+    # (e.g., template AA has 6 SEP/TPO but A_op2 has 3, causing cross-chain mapping).
     preserve_order = False
     if len(chain_ids) == len(template_chain_ids):
-        # Check if all query sequences are identical (homo-oligomer)
-        query_seqs = [sequences[cid] for cid in chain_ids]
-        template_seqs = [template_sequences[tid] for tid in template_chain_ids]
-        if len(set(query_seqs)) == 1 and len(set(template_seqs)) == 1:
-            # Check if chain_ids and template_chain_ids match in order
-            if chain_ids == template_chain_ids:
-                preserve_order = True
+        # If every query chain name exists in template chain names with same order, use direct mapping
+        if chain_ids == template_chain_ids:
+            preserve_order = True
 
     if preserve_order:
         # For homo-oligomers with matching chain order, preserve YAML order
@@ -1672,6 +1668,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     templates = {}
     template_records = []
     template_cif_path_resolved: Optional[str] = None  # For inpainting: merge struct_conn etc. into output
+    inpainting_metadata_path_resolved: Optional[str] = None  # For inpainting: pre-computed metadata JSON
     for template in template_schema:
         if "cif" in template:
             path = template["cif"]
@@ -1686,6 +1683,12 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Template CIF path: resolve relative to cwd (YAML paths are cwd-relative at process time)
         if not pdb and template_cif_path_resolved is None:
             template_cif_path_resolved = str(Path(path).resolve())
+
+        # Inpainting metadata JSON path (optional, pre-computed by generate_inpainting_template.py)
+        if inpainting_metadata_path_resolved is None:
+            meta_path = template.get("inpainting_metadata", None)
+            if meta_path is not None:
+                inpainting_metadata_path_resolved = str(Path(meta_path).resolve())
 
         template_id = Path(path).stem
         chain_ids = template.get("chain_id", None)
@@ -1933,6 +1936,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         templates=template_records,
         affinity=affinity_info,
         template_cif_path=template_cif_path_resolved,
+        inpainting_metadata_path=inpainting_metadata_path_resolved,
     )
 
     residue_constraints = ResidueConstraints(

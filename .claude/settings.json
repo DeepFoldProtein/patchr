@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(cat results_boltz_inpainting/boltz_results_3lj1_ACA_op2C_op2/*.yaml)",
+      "Bash(python -m json.tool)"
+    ]
+  }
+}

@@ -62,9 +62,7 @@ class SequenceExtractMixin:
                                                 'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
                                                 'THR', 'VAL', 'TRP', 'TYR'}
                             has_dna_rna = bool(chain_residues & dna_rna_residues)
-                            has_protein = bool(chain_residues & protein_residues) or bool(
-                                chain_residues - STANDARD_AA_THREE_LETTER - dna_rna_residues - {'HOH', 'H2O', 'WAT'}
-                            )
+                            has_protein = bool(chain_residues & protein_residues)
                             if has_dna_rna and not has_protein:
                                 if 'U' in chain_residues or any('R' in r for r in chain_residues if len(r) > 1 and 'R' in r):
                                     entity_type = 'rna'
@@ -255,9 +253,7 @@ class SequenceExtractMixin:
                                 'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
                                 'THR', 'VAL', 'TRP', 'TYR'}
             has_dna_rna = bool(residue_types & dna_rna_residues)
-            has_protein = bool(residue_types & protein_residues) or bool(
-                residue_types - STANDARD_AA_THREE_LETTER - dna_rna_residues - {'HOH', 'H2O', 'WAT'}
-            )
+            has_protein = bool(residue_types & protein_residues)
             if has_dna_rna and not has_protein:
                 # Check if DNA or RNA
                 if 'U' in residue_types or any('R' in r for r in residue_types if len(r) > 1 and 'R' in r):

@@ -97,6 +97,8 @@ Examples:
                         help='Skip terminal missing residues: trim the sequence to span only from the first '
                              'residue with structure to the last, so N/C-terminal disordered tails are '
                              'excluded from inpainting and only internal (non-terminal) gaps are inpainted.')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Print detailed inpainting region analysis and missing atom checks')
 
     args = parser.parse_args()
 
@@ -174,6 +176,7 @@ Examples:
         assembly_id=assembly_id,
         list_assemblies=args.list_assemblies,
         skip_terminal=args.skip_terminal,
+        verbose=args.verbose,
     )
     processor.process(args.output)
 
