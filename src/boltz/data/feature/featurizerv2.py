@@ -1743,6 +1743,8 @@ def compute_template_atom_features(
     query_atoms = query_tokens.structure.atoms
     template_atoms = template_structure.atoms
     query_token_list = query_tokens.tokens
+    query_chains = query_tokens.structure.chains
+    template_chains = template_structure.chains
 
     # For each query residue that has a template
     for q_token_idx, tmpl_token in query_idx_to_template.items():
@@ -1751,9 +1753,11 @@ def compute_template_atom_features(
         if q_token_idx >= len(query_token_list):
             continue
         query_token = query_token_list[q_token_idx]
-        q_res_idx = query_token[
-            "res_idx"
-        ]  # This is the residue index in structure.residues
+
+        # token["res_idx"] is chain-local; convert to global using chain's res_idx offset
+        # (same convention as mol.py: residue_idx = token["res_idx"] + chains[asym_id]["res_idx"])
+        q_asym_id = int(query_token["asym_id"])
+        q_res_idx = int(query_token["res_idx"]) + int(query_chains[q_asym_id]["res_idx"])
 
         if q_res_idx >= len(query_residues):
             continue
@@ -1763,8 +1767,10 @@ def compute_template_atom_features(
         q_atom_start = query_res["atom_idx"]
         q_atom_count = query_res["atom_num"]
 
-        # Get template residue info (using token's res_idx from template structure)
-        tmpl_res_idx = tmpl_token["res_idx"]
+        # Get template residue info: same chain-local → global conversion
+        tmpl_asym_id = int(tmpl_token["asym_id"])
+        tmpl_res_idx = int(tmpl_token["res_idx"]) + int(template_chains[tmpl_asym_id]["res_idx"])
+
         if tmpl_res_idx >= len(template_residues):
             continue
 
@@ -1942,7 +1948,6 @@ def process_template_features(
                 for i, t in enumerate(toks):
                     if i < len(q_tokens):
                         q_idx = q_tokens[i]["token_idx"]
-                        # print(f"[DEBUG]     Adding NONPOLYMER token {i}: q_idx={q_idx}")
                         row_tokens.append(
                             {
                                 "token": t,

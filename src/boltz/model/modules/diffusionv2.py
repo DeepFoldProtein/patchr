@@ -908,7 +908,17 @@ class AtomDiffusion(Module):
 
 
             atom_coords = atom_coords_next
-            
+
+            # Inpainting: reset template atoms to exact current-frame positions after each step.
+            # Backbone is already correct (conditioned via template_ca/frame features),
+            # but sidechain and ligand atoms drift because the network has no per-atom
+            # conditioning for them. Resetting here ensures the inpainted region is always
+            # generated in the context of correctly-positioned template atoms.
+            if enable_inpainting:
+                atom_coords[template_mask_expanded] = (
+                    template_coords_expanded[template_mask_expanded].to(atom_coords)
+                )
+
             # Update progress: diffusion step completed (40-100%)
             if progress_tracker:
                 progress_tracker.update_diffusion_progress(
@@ -1150,24 +1160,33 @@ class AtomDiffusion(Module):
         # We find R, t such that: T_orig ≈ R @ T_final + t (using template mask as weights)
         # Then apply same transform to all coords: X_restored = R @ X_final + t
         # 
-        # This preserves the relative geometry between template and generated parts
-        # while restoring the absolute coordinate system to match user's input.
-        if enable_inpainting and self.alignment_reverse_diff:
-            with torch.autocast("cuda", enabled=False):
-                # Align final coordinates to original template coordinate system
-                # We align the transformed template back to original template,
-                # then apply the same transformation to all atoms
-                atom_coords_restored, rot_matrix, src_centroid, tgt_centroid = weighted_rigid_align(
-                    atom_coords.float(),
-                    template_coords_original.float(),
-                    # Use only template atoms as weights for alignment
-                    template_mask_expanded.float(),
-                    atom_mask.float(),
-                    return_transform=True,
-                )
-                atom_coords = atom_coords_restored.to(atom_coords)
+        # # This preserves the relative geometry between template and generated parts
+        # # while restoring the absolute coordinate system to match user's input.
+        # if enable_inpainting and self.alignment_reverse_diff:
+        #     with torch.autocast("cuda", enabled=False):
+        #         # Align final coordinates to original template coordinate system
+        #         # We align the transformed template back to original template,
+        #         # then apply the same transformation to all atoms
+        #         atom_coords_restored, rot_matrix, src_centroid, tgt_centroid = weighted_rigid_align(
+        #             atom_coords.float(),
+        #             template_coords_original.float(),
+        #             # Use only template atoms as weights for alignment
+        #             template_mask_expanded.float(),
+        #             atom_mask.float(),
+        #             return_transform=True,
+        #         )
+        #         atom_coords = atom_coords_restored.to(atom_coords)
 
-        return dict(sample_atom_coords=atom_coords, diff_token_repr=token_repr)
+        #         # Force-replace template atoms to exact template positions.
+        #         # The rigid alignment minimises global RMSD but leaves flexible
+        #         # sidechains (ARG, HIS, …) slightly off.  Overwriting ensures
+        #         # every template-masked atom is pixel-perfect.
+        #         atom_coords[template_mask_expanded] = template_coords_original[template_mask_expanded].to(atom_coords)
+
+        return dict(
+            sample_atom_coords=atom_coords,
+            diff_token_repr=token_repr,
+        )
 
     def loss_weight(self, sigma):
         return (sigma**2 + self.sigma_data**2) / ((sigma * self.sigma_data) ** 2)

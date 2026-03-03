@@ -1170,6 +1170,7 @@ class Boltz2(LightningModule):
             # Store inpainting metadata if available (for JSON export)
             if "inpainting_metadata" in out:
                 pred_dict["inpainting_metadata"] = out["inpainting_metadata"]
+
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
                 pred_dict["pde"] = out["pde"]
@@ -1424,17 +1425,6 @@ class Boltz2(LightningModule):
             feats["inpainting_template_coords"] = None
             feats["inpainting_template_mask"] = None
             return
-
-        # Debug: Show template mask statistics
-        print(
-            f"[DEBUG boltz2] template_atom_coords shape: {template_atom_coords.shape}"
-        )
-        print(f"[DEBUG boltz2] template_atom_mask shape: {template_atom_mask.shape}")
-        for template_idx in range(template_atom_mask.shape[1]):
-            mask_sum = template_atom_mask[0, template_idx].sum().item()
-            print(
-                f"[DEBUG boltz2]   Template {template_idx}: {mask_sum} atoms with structure"
-            )
 
         # Use the first batch and merge all templates for multimer support
         # template_atom_coords shape: (batch, num_templates, atoms, 3)
