@@ -1752,7 +1752,7 @@ def compute_template_atom_features(
             continue
         query_token = query_token_list[q_token_idx]
         q_res_idx = query_token[
-            "token_idx"
+            "res_idx"
         ]  # This is the residue index in structure.residues
 
         if q_res_idx >= len(query_residues):
@@ -1764,7 +1764,7 @@ def compute_template_atom_features(
         q_atom_count = query_res["atom_num"]
 
         # Get template residue info (using token's res_idx from template structure)
-        tmpl_res_idx = tmpl_token["token_idx"]
+        tmpl_res_idx = tmpl_token["res_idx"]
         if tmpl_res_idx >= len(template_residues):
             continue
 
@@ -1914,11 +1914,6 @@ def process_template_features(
         for template in templates:
             offset = template.template_st - template.query_st
 
-            # Debug logging
-            print(
-                f"[DEBUG] Processing template: query_chain={template.query_chain}, template_chain={template.template_chain}"
-            )
-
             # Get query and template tokens to map residues
             query_tokens = data.tokens
             chain_id = chain_name_to_asym_id[template.query_chain]
@@ -1940,15 +1935,9 @@ def process_template_features(
                 and template_chain_type == const.chain_type_ids["NONPOLYMER"]
             )
 
-            print(
-                f"[DEBUG]   len(toks)={len(toks)}, len(q_tokens)={len(q_tokens)}, "
-                f"query_chain_type={query_chain_type}, is_nonpolymer={is_nonpolymer_chain}"
-            )
-
             if is_nonpolymer_chain:
                 # For NONPOLYMER chains (ligands, glycans), match by position in chain
                 # This handles both single-residue ligands and multi-residue glycans
-                print(f"[DEBUG]   Matching as NONPOLYMER chain")
                 # Match template tokens to query tokens by their position in the chain
                 for i, t in enumerate(toks):
                     if i < len(q_tokens):
