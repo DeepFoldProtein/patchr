@@ -255,7 +255,7 @@ def run_rna_msa_search(
             / "nt_rna_2023_02_23_clust_seq_id_90_cov_80_rep_seq.fasta"
         ).as_posix()
     if not os.path.exists(ntrna_database_path):
-        from runner.inference import download_from_url
+        from protenix_runner.inference import download_from_url
 
         os.makedirs(os.path.dirname(ntrna_database_path), exist_ok=True)
         logger.info(
@@ -273,7 +273,7 @@ def run_rna_msa_search(
             / "rfam_14_9_clust_seq_id_90_cov_80_rep_seq.fasta"
         ).as_posix()
     if not os.path.exists(rfam_database_path):
-        from runner.inference import download_from_url
+        from protenix_runner.inference import download_from_url
 
         os.makedirs(os.path.dirname(rfam_database_path), exist_ok=True)
         logger.info(
@@ -291,7 +291,7 @@ def run_rna_msa_search(
             / "rnacentral_active_seq_id_90_cov_80_linclust.fasta"
         ).as_posix()
     if not os.path.exists(rna_central_database_path):
-        from runner.inference import download_from_url
+        from protenix_runner.inference import download_from_url
 
         os.makedirs(os.path.dirname(rna_central_database_path), exist_ok=True)
         logger.info(

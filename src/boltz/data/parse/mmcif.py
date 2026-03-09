@@ -633,7 +633,11 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
 
         # Handle non-standard residues
         elif res_name not in ref_res:
-            modified_mol = get_mol(res_name, mols, moldir)
+            try:
+                modified_mol = get_mol(res_name, mols, moldir)
+            except ValueError:
+                # Unknown CCD (e.g., from template sequence) — treat as UNK
+                modified_mol = None
             if modified_mol is not None:
                 residue = parse_ccd_residue(
                     name=res_name,

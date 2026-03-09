@@ -43,7 +43,7 @@ from protenix.utils.training import get_optimizer, is_loss_nan_check
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
-from runner.ema import EMAWrapper
+from protenix_runner.ema import EMAWrapper
 
 # Disable WANDB's console output capture to reduce unnecessary logging
 os.environ["WANDB_CONSOLE"] = "off"

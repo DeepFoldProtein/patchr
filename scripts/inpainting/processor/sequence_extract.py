@@ -28,17 +28,25 @@ class SequenceExtractMixin:
                     asym_ids = cif_dict['_struct_asym.id']
                     asym_entity_ids = cif_dict['_struct_asym.entity_id']
 
-                    # Find entity_id for our chain (use base ID for synthetic chains)
+                    # Find entity_id for our chain.
+                    # Primary: use base ID (strips _op<N> suffix for assembly synthetic chains).
+                    # Fallback: try the full chain_id directly — needed when the input CIF is
+                    # already a generated template that embeds synthetic chains (e.g. A_op2) as
+                    # real label_asym_id entries in its struct_asym table.
                     target_entity_id = None
                     for asym_id, entity_id in zip(asym_ids, asym_entity_ids):
                         if asym_id.upper() == lookup_id.upper():
                             target_entity_id = entity_id
                             break
+                    if target_entity_id is None and lookup_id != chain_id:
+                        for asym_id, entity_id in zip(asym_ids, asym_entity_ids):
+                            if asym_id.upper() == chain_id.upper():
+                                target_entity_id = entity_id
+                                break
 
                     if target_entity_id is None:
-                        print(f"ERROR: Could not find entity mapping for chain {chain_id}", file=sys.stderr)
-                        print(f"ERROR: Available chains: {asym_ids}", file=sys.stderr)
-                        sys.exit(1)
+                        print(f"WARNING: Could not find entity mapping for chain {chain_id}, skipping", file=sys.stderr)
+                        return ""
                     
                     # Determine entity type for this chain
                     # First try to get from chain_entity_types (if already set)

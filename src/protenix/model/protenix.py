@@ -304,10 +304,9 @@ class Protenix(nn.Module):
         return s_inputs, s, z
 
     def _prepare_inpainting(self, input_feature_dict: dict[str, Any]) -> None:
-        """Center inpainting template coordinates on the centroid of fixed atoms.
-
-        Template coords are centered so diffusion starts in a coordinate-agnostic
-        frame, consistent with how patchr boltz2.py handles template centering.
+        """Log inpainting readiness.  No coordinate transforms needed here --
+        template coords stay in their original PDB frame and the diffusion
+        loop handles alignment via Kabsch at each step.
 
         Modifies input_feature_dict in-place.  No-op if no inpainting keys present.
         """
@@ -317,14 +316,7 @@ class Protenix(nn.Module):
         if coords is None or mask is None:
             return
 
-        coords = coords.float()
         mask_bool = mask.bool()
-
-        if mask_bool.sum() > 0:
-            centroid = coords[mask_bool].mean(dim=0)
-            coords = coords - centroid
-
-        input_feature_dict["inpainting_template_coords"] = coords
         logger.info(
             "[Inpainting] Template ready: %d / %d atoms fixed",
             int(mask_bool.sum()),
@@ -541,6 +533,8 @@ class Protenix(nn.Module):
 
         keys_to_delete = []
         for key in input_feature_dict.keys():
+            if key.startswith("inpainting_"):
+                continue  # preserve inpainting features for diffusion
             if "template_" in key or key in [
                 "msa",
                 "has_deletion",

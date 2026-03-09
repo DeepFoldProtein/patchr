@@ -1003,7 +1003,60 @@ class AtomDiffusion(Module):
             boundary_atom_count = boundary_region_mask[0].sum().item()
             total_atom_count = atom_mask[0].sum().item()
             print(f"  - Boundary atoms to refine: {boundary_atom_count} / {total_atom_count}")
-            
+
+            # ── BOUNDARY MASK DEBUG ──
+            _atom_to_token = feats["atom_to_token"].float()  # (batch, n_atoms, n_residues)
+            _res_tmpl = ((_atom_to_token[0].T) @ inpainting_template_mask[0].unsqueeze(-1).float()).squeeze(-1) > 0
+            _n_res = _res_tmpl.shape[0]
+            _n_atoms_total = int(atom_mask[0].sum().item())
+            print(f"  [BND-DEBUG] N_tokens={_n_res}, N_atoms={_n_atoms_total}")
+            print(f"  [BND-DEBUG] Template tokens: {_res_tmpl.sum().item()}/{_n_res}")
+            # Generated token ranges
+            _gen_ranges = []
+            _in_gen = False
+            _gen_start = 0
+            for _i in range(_n_res):
+                if not _res_tmpl[_i] and not _in_gen:
+                    _gen_start = _i
+                    _in_gen = True
+                elif _res_tmpl[_i] and _in_gen:
+                    _gen_ranges.append(f"{_gen_start}-{_i-1}")
+                    _in_gen = False
+            if _in_gen:
+                _gen_ranges.append(f"{_gen_start}-{_n_res-1}")
+            print(f"  [BND-DEBUG] Generated token ranges: {', '.join(_gen_ranges) if _gen_ranges else 'none'}")
+            # Boundary initial tokens
+            _bnd_init = []
+            _asym = feats.get("asym_id", None)
+            if _asym is not None:
+                if _asym.dim() > 1:
+                    _asym = _asym[0]
+                _asym_np = _asym.cpu().numpy()
+            else:
+                _asym_np = None
+            for _i in range(_n_res):
+                if _i > 0:
+                    if _asym_np is None or _asym_np[_i] == _asym_np[_i-1]:
+                        if _res_tmpl[_i] != _res_tmpl[_i-1]:
+                            _bnd_init.extend([_i-1, _i])
+            _bnd_init = sorted(set(_bnd_init))
+            print(f"  [BND-DEBUG] Boundary init tokens: {_bnd_init}")
+            # Expanded boundary tokens
+            _bnd_res = boundary_region_mask[0]  # atom-level
+            # Map atom mask to token: which tokens have at least one boundary atom?
+            _bnd_token_mask = ((_atom_to_token[0].T) @ _bnd_res.unsqueeze(-1).float()).squeeze(-1) > 0
+            _bnd_expanded_toks = torch.where(_bnd_token_mask)[0].tolist()
+            print(f"  [BND-DEBUG] Boundary expanded tokens (window={_boundary_refinement_window}): {_bnd_expanded_toks}")
+            # Per-token atom counts
+            _tok_details = []
+            for _ti in _bnd_expanded_toks:
+                _tok_atoms = _atom_to_token[0, :, _ti]  # (n_atoms,) - which atoms belong to this token
+                _n_total = int(_tok_atoms.sum().item())
+                _n_bnd = int((_tok_atoms.bool() & _bnd_res).sum().item())
+                _is_tmpl = "T" if _res_tmpl[_ti] else "G"
+                _tok_details.append(f"{_ti}({_is_tmpl}):{_n_bnd}/{_n_total}")
+            print(f"  [BND-DEBUG] Per-token boundary atoms: {_tok_details}")
+
             if boundary_atom_count > 0:
                 # Create refinement template mask: fix everything EXCEPT boundary region
                 # Template atoms that are NOT in boundary region remain fixed
@@ -1021,8 +1074,15 @@ class AtomDiffusion(Module):
                     refinement_sigmas > self.gamma_min, self.gamma_0, 0.0
                 )
                 
-                print(f"  - Refinement sigma range: {refinement_sigmas[0].item():.4f} -> {refinement_sigmas[-2].item():.4f}")
-                
+                print(f"  [BOLTZ-LRD] Schedule ({_boundary_refinement_steps} steps): "
+                      f"σ_start={refinement_sigmas[0].item():.4f}, "
+                      f"σ_end={refinement_sigmas[-2].item():.4f}, σ_final=0")
+                print(f"  [BOLTZ-LRD] Params: gamma_0={self.gamma_0}, gamma_min={self.gamma_min}, "
+                      f"noise_scale={self.noise_scale}, step_scale={step_scale}")
+                print(f"  [BOLTZ-LRD] sigma_min={self.sigma_min}, "
+                      f"sigma_max_override={_boundary_refinement_sigma_start / self.sigma_data:.6f}, "
+                      f"rho={self.rho}")
+
                 # Add noise ONLY to boundary region atoms
                 init_refinement_sigma = refinement_sigmas[0]
                 boundary_noise = init_refinement_sigma * torch.randn_like(atom_coords)
@@ -1031,25 +1091,29 @@ class AtomDiffusion(Module):
                 atom_coords_refinement[boundary_region_mask] = (
                     atom_coords[boundary_region_mask] + boundary_noise[boundary_region_mask]
                 )
-                
-                print(f"  - Added noise to boundary atoms (sigma={init_refinement_sigma.item():.4f})")
-                
+
+                # Save pre-refinement coords for comparison
+                _dbg_pre_refine = atom_coords[0].clone()
+
+                print(f"  [BOLTZ-LRD] Init noise σ={init_refinement_sigma.item():.4f} applied to "
+                      f"{boundary_atom_count} boundary atoms")
+
                 # Simple backward schedule for refinement
                 refinement_schedule = [(i, i+1, 'backward') for i in range(len(refinement_sigmas) - 1)]
-                
+
                 # Refinement diffusion loop
                 atom_coords_denoised_ref = None
                 for step_idx, schedule_item in tqdm(
-                    enumerate(refinement_schedule), 
-                    total=len(refinement_schedule), 
+                    enumerate(refinement_schedule),
+                    total=len(refinement_schedule),
                     desc="Boundary Refinement"
                 ):
                     idx_from, idx_to, direction = schedule_item
-                    
+
                     sigma_from = refinement_sigmas[idx_from].item()
                     sigma_to = refinement_sigmas[idx_to].item()
                     gamma = refinement_gammas[idx_to].item() if idx_to < len(refinement_gammas) else 0.0
-                    
+
                     # For refinement: inject noise to non-boundary (fixed) atoms
                     # to match current noise level for consistency
                     if self.template_noise_injection:
@@ -1059,23 +1123,23 @@ class AtomDiffusion(Module):
                         atom_coords_refinement[fixed_mask] = (
                             refinement_template_coords[fixed_mask] + fixed_noise[fixed_mask]
                         )
-                    
+
                     # Denoising step
                     sigma_tm = sigma_from
                     sigma_t = sigma_to
                     t_hat = sigma_tm * (1 + gamma)
-                    
+
                     noise_var = self.noise_scale**2 * (t_hat**2 - sigma_tm**2)
                     eps = sqrt(noise_var) * torch.randn(shape, device=self.device)
                     atom_coords_noisy_ref = atom_coords_refinement + eps
-                    
+
                     with torch.no_grad():
                         atom_coords_denoised_ref = torch.zeros_like(atom_coords_noisy_ref)
                         sample_ids = torch.arange(multiplicity).to(atom_coords_noisy_ref.device)
                         sample_ids_chunks = sample_ids.chunk(
                             multiplicity % max_parallel_samples + 1
                         )
-                        
+
                         for sample_ids_chunk in sample_ids_chunks:
                             denoised_chunk = self.preconditioned_network_forward(
                                 atom_coords_noisy_ref[sample_ids_chunk],
@@ -1086,7 +1150,7 @@ class AtomDiffusion(Module):
                                 ),
                             )
                             atom_coords_denoised_ref[sample_ids_chunk] = denoised_chunk
-                        
+
                         # Kabsch alignment (same as main loop)
                         if self.alignment_reverse_diff:
                             with torch.autocast("cuda", enabled=False):
@@ -1097,7 +1161,7 @@ class AtomDiffusion(Module):
                                     atom_mask.float(),
                                     return_transform=True,
                                 )
-                                
+
                                 # Transform refinement template coordinates with same rotation
                                 refinement_template_coords = apply_rigid_transform(
                                     refinement_template_coords.float(),
@@ -1106,30 +1170,55 @@ class AtomDiffusion(Module):
                                     tgt_centroid,
                                 )
                                 refinement_template_coords = refinement_template_coords.to(atom_coords_noisy_ref)
-                                
+
                                 atom_coords_noisy_ref = atom_coords_noisy_ref_aligned.to(atom_coords_denoised_ref)
-                        
+
                         # Interpolation step
                         denoised_over_sigma = (atom_coords_noisy_ref - atom_coords_denoised_ref) / t_hat
                         atom_coords_next_ref = (
                             atom_coords_noisy_ref + step_scale * (sigma_t - t_hat) * denoised_over_sigma
                         )
-                        
+
                         atom_coords_refinement = atom_coords_next_ref
-                
+
+                    # DEBUG: detailed per-step logging (matching protenix format)
+                    _c = atom_coords_refinement[0]
+                    _c_tmpl = refinement_template_coords[0]
+                    _bnd_disp = (_c.float() - _c_tmpl.float())[boundary_region_mask[0]].norm(dim=-1)
+                    _denoise_mag = (atom_coords_noisy_ref[0].float() - atom_coords_denoised_ref[0].float()).norm(dim=-1).mean()
+                    print(f"  [BOLTZ-LRD step {step_idx+1:2d}/{len(refinement_schedule)}] "
+                          f"σ={sigma_from:.4f}→{sigma_to:.4f}, "
+                          f"t_hat={t_hat:.4f}, γ={gamma:.2f}, "
+                          f"noise_var={noise_var:.6f}, "
+                          f"bnd_disp: mean={_bnd_disp.mean():.3f} max={_bnd_disp.max():.3f}Å, "
+                          f"denoise_mag={_denoise_mag:.3f}Å")
+
                 # After refinement: combine refined boundary with fixed regions
                 # For non-boundary atoms, use the transformed refinement template
                 # For boundary atoms, use the refined coordinates
                 atom_coords_final = refinement_template_coords.clone()
                 atom_coords_final[boundary_region_mask] = atom_coords_refinement[boundary_region_mask]
-                
+
+                # DEBUG: post-LRD displacement
+                _dbg_post_refine = atom_coords_final[0]
+                _total_displacement = (_dbg_post_refine.float() - _dbg_pre_refine.float()).norm(dim=-1)
+                _boundary_only = _total_displacement[boundary_region_mask[0]]
+                _fixed_only = _total_displacement[~boundary_region_mask[0]]
+                print(f"  [BOLTZ-LRD] Overall boundary displacement (pre→post): "
+                      f"mean={_boundary_only.mean():.3f}Å, "
+                      f"max={_boundary_only.max():.3f}Å, "
+                      f"min={_boundary_only.min():.3f}Å")
+                print(f"  [BOLTZ-LRD] Fixed atom drift (pre→post): "
+                      f"mean={_fixed_only.mean():.3f}Å, "
+                      f"max={_fixed_only.max():.3f}Å")
+
                 # Use the refined coordinates
                 atom_coords = atom_coords_final
-                
+
                 # Also update template_coords_expanded to reflect transformations
                 # (needed for final alignment back to original coordinate system)
                 template_coords_expanded = refinement_template_coords
-                
+
                 print(f"[Inpainting] Boundary refinement completed")
 
                 # Add boundary refinement metadata

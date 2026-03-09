@@ -176,6 +176,17 @@ def _yaml_ccd_value(ccd: Any) -> str:
     return repr(s)
 
 
+def _yaml_str(value: Any) -> str:
+    """Single-quote a chain ID or arbitrary string for safe YAML output.
+
+    Single-quoted YAML scalars treat backslash as literal (no escape processing).
+    Single quotes inside the value are escaped by doubling them: ' -> ''.
+    This handles numeric-looking IDs ('2'), IDs with special chars ('A\\', 'A['), etc.
+    """
+    s = str(value) if value is not None else ""
+    return "'" + s.replace("'", "''") + "'"
+
+
 def generate_yaml_content(
     chains: List[Dict[str, Any]],
     cif_path: str,
@@ -200,7 +211,7 @@ def generate_yaml_content(
         entity_type = c.get("entity_type", "protein")
         if entity_type == "ligand":
             lines.append("  - ligand:")
-            lines.append(f"      id: {c['id']}")
+            lines.append(f"      id: {_yaml_str(c['id'])}")
             if c.get("ccd"):
                 lines.append(f"      ccd: {_yaml_ccd_value(c['ccd'])}")
             elif c.get("smiles"):
@@ -211,7 +222,7 @@ def generate_yaml_content(
             if entity_type not in ("protein", "dna", "rna"):
                 entity_type = "protein"
             lines.append(f"  - {entity_type}:")
-            lines.append(f"      id: {c['id']}")
+            lines.append(f"      id: {_yaml_str(c['id'])}")
             lines.append(f"      sequence: {c['sequence']}")
             if entity_type == "protein":
                 lines.append("      msa: empty")
@@ -225,9 +236,10 @@ def generate_yaml_content(
     lines.append(f"  - cif: {cif_path}")
     chain_ids_for_template = [c["id"] for c in chains]
     if len(chain_ids_for_template) == 1:
-        lines.append(f"    chain_id: {chain_ids_for_template[0]}")
+        lines.append(f"    chain_id: {_yaml_str(chain_ids_for_template[0])}")
     else:
-        lines.append(f"    chain_id: {chain_ids_for_template}")
+        quoted = [_yaml_str(cid) for cid in chain_ids_for_template]
+        lines.append(f"    chain_id: [{', '.join(quoted)}]")
     return "\n".join(lines).rstrip() + "\n"
 
 

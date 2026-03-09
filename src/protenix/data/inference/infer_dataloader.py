@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
 from protenix.data.esm.esm_featurizer import ESMFeaturizer
 from protenix.data.inference.json_to_feature import SampleDictToFeatures
+from protenix.data.inference.yaml_parser import load_input
 from protenix.data.msa.msa_featurizer import InferenceMSAFeaturizer
 from protenix.data.template.template_featurizer import InferenceTemplateFeaturizer
 from protenix.data.template.template_utils import TemplateHitFeaturizer
@@ -74,15 +75,14 @@ class InferenceDataset(Dataset):
     ) -> None:
         self.configs = configs
 
-        self.input_json_path = configs.input_json_path
+        self.input_path = configs.input_path
         self.dump_dir = configs.dump_dir
         self.use_msa = configs.use_msa
         self.msa_pair_as_unpair = configs.get("msa_pair_as_unpair", True)
         self.use_rna_msa = configs.get("use_rna_msa", True)
         self.use_template = configs.get("use_template", True)
-        with open(self.input_json_path, "r") as f:
-            self.inputs = json.load(f)
-        json_task_name = os.path.basename(self.input_json_path).split(".")[0]
+        self.inputs = load_input(self.input_path)
+        json_task_name = os.path.basename(self.input_path).split(".")[0]
         if self.use_template:
             template_mmcif_dir = configs.data.template.prot_template_mmcif_dir
             fetch_remote = configs.data.template.get("fetch_remote", True)

@@ -99,7 +99,7 @@ def run_template_search(
         )
         seqres_database_path = _SEQRES_DATABASE_PATH.as_posix()
     if not os.path.exists(seqres_database_path):
-        from runner.inference import download_from_url
+        from protenix_runner.inference import download_from_url
 
         os.makedirs(os.path.dirname(seqres_database_path), exist_ok=True)
         logger.info(

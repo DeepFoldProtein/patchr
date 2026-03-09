@@ -99,6 +99,8 @@ Examples:
                              'excluded from inpainting and only internal (non-terminal) gaps are inpainted.')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Print detailed inpainting region analysis and missing atom checks')
+    parser.add_argument('--format', choices=['yaml', 'protenix-json'], default='yaml',
+                        help='Output format: yaml (patchr, default) or protenix-json (Protenix inference)')
 
     args = parser.parse_args()
 
@@ -177,6 +179,7 @@ Examples:
         list_assemblies=args.list_assemblies,
         skip_terminal=args.skip_terminal,
         verbose=args.verbose,
+        output_format=args.format,
     )
     processor.process(args.output)
 

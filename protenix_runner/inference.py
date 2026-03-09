@@ -37,7 +37,7 @@ from protenix.utils.seed import seed_everything
 from protenix.utils.torch_utils import to_device
 from protenix.web_service.dependency_url import URL
 
-from runner.dumper import DataDumper
+from protenix_runner.dumper import DataDumper
 
 logger = logging.getLogger(__name__)
 """
@@ -199,7 +199,7 @@ class InferenceRunner(object):
             sorted_by_ranking_score=sorted_by_ranking_score,
         )
 
-    # Adapted from runner.train.AF3Trainer.evaluate
+    # Adapted from protenix_runner.train.AF3Trainer.evaluate
     @torch.no_grad()
     def predict(self, data: Mapping[str, Mapping[str, Any]]) -> dict[str, torch.Tensor]:
         """
@@ -417,14 +417,15 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
         configs (Any): Inference configurations.
     """
     # Data loading
-    logger.info(f"Loading data from {configs.input_json_path}")
-    with open(configs.input_json_path, "r", encoding="utf-8") as f:
-        json_data = json.load(f)
+    from protenix.data.inference.yaml_parser import load_input
+
+    logger.info(f"Loading data from {configs.input_path}")
+    json_data = load_input(configs.input_path)
 
     if not isinstance(json_data, list) or len(json_data) == 0:
         raise ValueError(
-            f"Input JSON must be a non-empty top-level list, got {type(json_data).__name__} "
-            f"from {configs.input_json_path}"
+            f"Input must be a non-empty top-level list, got {type(json_data).__name__} "
+            f"from {configs.input_path}"
         )
 
     seed_in_json = json_data[0].get("modelSeeds")
@@ -593,6 +594,37 @@ def run() -> None:
         fill_required_with_null=True,
     )
     model_name = configs.model_name
+
+    # ── Inpainting: force base model ─────────────────────────────────────
+    # Inpainting requires a full-size model with proper diffusion parameters
+    # (N_step=200, gamma0=0.8, step_scale_eta=1.5). Mini/tiny models use
+    # reduced settings (N_step=5, gamma0=0, step_scale_eta=1.0) that cannot
+    # produce connected boundaries.
+    _INPAINTING_MODEL = "protenix_base_default_v1.0.0"
+    _input_path = configs.input_path
+    _has_inpainting = False
+    if _input_path and os.path.isfile(_input_path):
+        import yaml as _yaml
+        try:
+            with open(_input_path) as _f:
+                _raw = _yaml.safe_load(_f)
+            if isinstance(_raw, dict):
+                _has_inpainting = bool(_raw.get("templates"))
+            elif isinstance(_raw, list):
+                _has_inpainting = any(
+                    s.get("inpainting") or s.get("templates") for s in _raw if isinstance(s, dict)
+                )
+        except Exception:
+            pass
+    if _has_inpainting and model_name != _INPAINTING_MODEL:
+        logger.warning(
+            "Inpainting detected in input. Overriding model_name "
+            "'%s' → '%s' (required for boundary connectivity).",
+            model_name, _INPAINTING_MODEL,
+        )
+        model_name = _INPAINTING_MODEL
+        configs.model_name = _INPAINTING_MODEL
+    # ─────────────────────────────────────────────────────────────────────
 
     # 2. Get model specifics and merge into base defaults
     base_configs = {**configs_base, **{"data": data_configs}, **inference_configs}

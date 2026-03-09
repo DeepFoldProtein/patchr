@@ -5,8 +5,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from .. import cif_writer, yaml_writer
-from ..ccd_utils import load_ccd_dict, get_non_standard_parent_from_ccd
+from .. import cif_writer, yaml_writer, json_writer
+from ..ccd_utils import load_ccd_dict, get_non_standard_parent_from_ccd, is_ccd_available
 from ..constants import (
     get_boltz_cache,
     get_default_ccd_path,
@@ -42,7 +42,7 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml'):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
@@ -95,6 +95,8 @@ class StructureProcessor(
         self._cif_dict = None
         # When True, print DEBUG and per-chain blocks (set via --verbose flag or BOLTZ_VERBOSE=1)
         self.verbose = verbose or os.environ.get("BOLTZ_VERBOSE", "").strip().lower() in ("1", "true", "yes")
+        # Output format: 'yaml' (patchr) or 'protenix-json'
+        self.output_format = output_format
         # Assembly selection
         self.assembly_id = assembly_id          # None / 'best' / str(N)
         self.list_assemblies = list_assemblies
@@ -102,11 +104,19 @@ class StructureProcessor(
         self._assembly_entity_types: Dict[str, str] = {}   # label_asym_id -> entity type for assembly chains
 
 
+    def _processed_chain_ids(self, all_chains_data: Dict[str, Dict]) -> List[str]:
+        """Return only the chain IDs that were successfully processed (present in all_chains_data).
+
+        Chains may be absent because their CCD was unsupported, they had no atoms, etc.
+        Preserving the original order from self.chain_ids.
+        """
+        return [c for c in self.chain_ids if c in all_chains_data]
+
     def generate_cif(self, all_chains_data: Dict[str, Dict], solvent_atoms: Optional[List[Dict]] = None) -> str:
         """Generate complete CIF file for multiple chains (delegates to cif_writer)."""
         return cif_writer.generate_cif(
             self.pdb_id,
-            self.chain_ids,
+            self._processed_chain_ids(all_chains_data),
             all_chains_data,
             solvent_atoms,
             self.cif_content,
@@ -117,7 +127,13 @@ class StructureProcessor(
     def generate_yaml(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict],
                        inpainting_metadata_path: Path = None) -> str:
         """Generate YAML configuration (delegates to yaml_writer)."""
-        return yaml_writer.generate_yaml(self.chain_ids, all_chains_data, cif_path, output_dir,
+        return yaml_writer.generate_yaml(self._processed_chain_ids(all_chains_data), all_chains_data, cif_path, output_dir,
+                                         inpainting_metadata_path=inpainting_metadata_path)
+
+    def generate_json(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict],
+                      inpainting_metadata_path: Path = None) -> str:
+        """Generate Protenix JSON configuration (delegates to json_writer)."""
+        return json_writer.generate_json(self._processed_chain_ids(all_chains_data), all_chains_data, cif_path, output_dir,
                                          inpainting_metadata_path=inpainting_metadata_path)
 
 
@@ -204,6 +220,7 @@ class StructureProcessor(
                 print(f"Please download manually or set --cache to a directory containing ccd.pkl.", file=sys.stderr)
                 sys.exit(1)
         ccd = load_ccd_dict(ccd_path)
+        self.ccd = ccd  # stored so ligand / modification validation can use it later
         # Parse non-standard residue info from CIF (uses ccd.pkl via ccd_utils)
         self.parse_non_standard_residues(ccd=ccd)
 
@@ -370,7 +387,15 @@ class StructureProcessor(
                     print(f"WARNING: No atoms for ligand chain {chain_id}, skipping")
                     continue
                 ligand_ccd = (atoms[0].get('label_comp_id') or 'UNK').strip().upper()
+                if not is_ccd_available(getattr(self, 'ccd', None), ligand_ccd):
+                    print(f"WARNING: CCD '{ligand_ccd}' not found in boltz CCD database (or has no conformer), "
+                          f"skipping ligand chain {chain_id}")
+                    continue
                 author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+                if '\\' in author_chain_id:
+                    print(f"WARNING: Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
+                          f"(contains backslash), skipping")
+                    continue
                 for atom in atoms:
                     atom['label_entity_id'] = str(entity_id)
                     atom['label_seq_id'] = 1
@@ -585,11 +610,14 @@ class StructureProcessor(
                         seq_pos_to_monomer[pos] = comp_id
             
             # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
-            # For synthetic chains (e.g. D_op2), fall back to the base chain's modification data
+            # For synthetic chains (e.g. D_op2) from assembly: try base chain ID first, then the
+            # full chain_id (handles re-processed generated CIFs where _op chains are real entities).
             # NOTE: positions from _entity_poly_seq / struct_conn / non_standard_residues are in original
             # SEQRES coordinates; apply trim_offset (set above when --skip-terminal is active) to convert
             # them to the trimmed coordinate system.  seq_pos_to_monomer is already in trimmed coords.
             _mod_key = self._base_chain_id(chain_id)
+            if _mod_key not in self._modifications_from_entity_poly and chain_id in self._modifications_from_entity_poly:
+                _mod_key = chain_id
             seq_len_trimmed = len(final_sequence)
             if _mod_key in self._modifications_from_entity_poly:
                 chain_modifications = []
@@ -602,6 +630,8 @@ class StructureProcessor(
             positions_added = {m['position'] for m in chain_modifications}
             # Merge modifications from _struct_conn (e.g. NH2 at B 7 when entity_poly_seq has UNK)
             _conn_key = self._base_chain_id(chain_id)
+            if _conn_key not in getattr(self, '_modifications_from_struct_conn', {}) and chain_id in getattr(self, '_modifications_from_struct_conn', {}):
+                _conn_key = chain_id
             if _conn_key in getattr(self, '_modifications_from_struct_conn', {}):
                 for m in self._modifications_from_struct_conn[_conn_key]:
                     new_pos = m['position'] - trim_offset
@@ -610,6 +640,8 @@ class StructureProcessor(
                         positions_added.add(new_pos)
             if _mod_key not in self._modifications_from_entity_poly:
                 _ns_key = self._base_chain_id(chain_id)
+                if _ns_key not in self.non_standard_residues and chain_id in self.non_standard_residues:
+                    _ns_key = chain_id
                 if _ns_key in self.non_standard_residues:
                     for seq_pos, ns_info in sorted(self.non_standard_residues[_ns_key].items()):
                         new_pos = seq_pos - trim_offset
@@ -625,6 +657,35 @@ class StructureProcessor(
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)
             chain_modifications.sort(key=lambda m: m['position'])
+            # Filter out modifications whose CCD is not available in boltz's CCD database.
+            # Also collect positions to scrub from the template CIF atoms so that boltz's
+            # parse_mmcif does not encounter an unsupported residue name.
+            _ccd_db = getattr(self, 'ccd', None)
+            filtered_mods = []
+            _unavailable_seq_positions: set = set()
+            for _m in chain_modifications:
+                _ccd_code = _m.get('ccd', '')
+                if _ccd_code in STANDARD_AA_THREE_LETTER or _ccd_code in STANDARD_NUCLEOTIDE_CODES:
+                    filtered_mods.append(_m)
+                elif is_ccd_available(_ccd_db, _ccd_code):
+                    filtered_mods.append(_m)
+                else:
+                    print(f"WARNING: Chain {chain_id}: modification CCD '{_ccd_code}' at position "
+                          f"{_m.get('position')} not found in boltz CCD database, skipping modification "
+                          f"and removing its atoms from template CIF")
+                    _unavailable_seq_positions.add(_m.get('position'))
+            chain_modifications = filtered_mods
+            # Remove atoms at positions with unavailable CCD so the template CIF is clean.
+            if _unavailable_seq_positions:
+                def _atom_seq_pos(a):
+                    try:
+                        return int(a.get('label_seq_id', -1))
+                    except (ValueError, TypeError):
+                        return -1
+                renumbered_atoms = [
+                    a for a in renumbered_atoms
+                    if _atom_seq_pos(a) not in _unavailable_seq_positions
+                ]
             # Modification positions: set X for non-standard residues only (e.g. PTR, TPO); keep standard AA (e.g. ASN) as is
             output_sequence = final_sequence
             for mod in chain_modifications:
@@ -643,6 +704,10 @@ class StructureProcessor(
             
             # Store chain data (include author chain ID for output files)
             author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+            if '\\' in author_chain_id:
+                print(f"WARNING: Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
+                      f"(contains backslash), skipping")
+                continue
             all_chains_data[chain_id] = {
                 'atoms': renumbered_atoms,
                 'sequence': output_sequence,
@@ -659,7 +724,7 @@ class StructureProcessor(
         
         # Generate output files
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # File naming: use label chain IDs so names are unique (e.g. ABC not ABA when ligand C has auth A)
         # Keep filename under 255 chars (filesystem limit): abbreviate when too many chains
         suffix = "_uniprot" if self.uniprot_mode else ""
@@ -668,23 +733,26 @@ class StructureProcessor(
         if len(chain_ids_str_short) > max_chain_chars:
             chain_ids_str_short = f"ALL_{len(self.chain_ids)}chains"
         cif_filename = f"{self.pdb_id}_chain{chain_ids_str_short}{suffix}.cif"
-        yaml_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.yaml"
-        
+        if self.output_format == 'protenix-json':
+            config_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.json"
+        else:
+            config_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.yaml"
+
         cif_path = output_dir / cif_filename
-        yaml_path = output_dir / yaml_filename
-        
+        config_path = output_dir / config_filename
+
         # Optional: include solvent (water) atoms for full structure transfer
         solvent_atoms = self._extract_solvent_atoms() if self.include_solvent else None
-        
+
         # Generate and save CIF
         cif_content = self.generate_cif(all_chains_data, solvent_atoms=solvent_atoms)
         with open(cif_path, 'w') as f:
             f.write(cif_content)
         print(f"Saved CIF file: {cif_path.absolute()}")
-        
+
         # Save inpainting metadata JSON (per-chain, matching boltz2 format)
-        # Must be saved before YAML so the path can be embedded in the YAML template block
-        json_path = None
+        # Must be saved before config so the path can be embedded in it
+        metadata_path = None
         inpainting_meta_by_chain = {}
         for cid, cdata in all_chains_data.items():
             meta = cdata.get('inpainting_metadata')
@@ -692,16 +760,23 @@ class StructureProcessor(
                 author_cid = cdata.get('author_chain_id', cid)
                 inpainting_meta_by_chain[author_cid] = meta
         if inpainting_meta_by_chain:
-            json_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}_inpainting_metadata.json"
-            json_path = output_dir / json_filename
-            self.save_inpainting_metadata(inpainting_meta_by_chain, json_path)
+            meta_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}_inpainting_metadata.json"
+            metadata_path = output_dir / meta_filename
+            self.save_inpainting_metadata(inpainting_meta_by_chain, metadata_path)
 
-        # Generate and save YAML (with relative path to CIF from script execution directory)
-        yaml_content = self.generate_yaml(cif_path, output_dir, all_chains_data,
-                                          inpainting_metadata_path=json_path)
-        with open(yaml_path, 'w') as f:
-            f.write(yaml_content)
-        print(f"Saved YAML file: {yaml_path.absolute()}")
+        # Generate and save config (YAML or Protenix JSON)
+        if self.output_format == 'protenix-json':
+            config_content = self.generate_json(cif_path, output_dir, all_chains_data,
+                                                inpainting_metadata_path=metadata_path)
+            with open(config_path, 'w') as f:
+                f.write(config_content)
+            print(f"Saved Protenix JSON: {config_path.absolute()}")
+        else:
+            config_content = self.generate_yaml(cif_path, output_dir, all_chains_data,
+                                                inpainting_metadata_path=metadata_path)
+            with open(config_path, 'w') as f:
+                f.write(config_content)
+            print(f"Saved YAML file: {config_path.absolute()}")
 
         print(f"\n{'='*60}")
         print("Processing complete!")

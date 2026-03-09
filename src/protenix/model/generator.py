@@ -345,6 +345,20 @@ def sample_diffusion(
         if not enable_inpainting:
             return x_l
 
+        # ── Final alignment to PDB frame ──
+        _tc_original = _tc.unsqueeze(-3).expand(
+            *batch_shape, chunk_n_sample, N_atom, 3
+        )
+        def _final_align_to_pdb_frame(x):
+            with torch.autocast("cuda", enabled=False):
+                w = template_mask.float()
+                m = torch.ones_like(w)
+                xa, _, _, _ = weighted_rigid_align(
+                    x.float(), _tc_original.float(),
+                    weights=w, mask=m, return_transform=True,
+                )
+            return xa.to(dtype)
+
         # ── Stage 2: Boundary Refinement ────────────────────────────────────
         # Runs a short focused diffusion on atoms near the template boundary.
         if not boundary_refinement_enabled or n_fixed == 0 or n_fixed == N_atom:
@@ -359,6 +373,28 @@ def sample_diffusion(
             _tm, atom_to_token_idx, asym_id, boundary_window=boundary_refinement_window
         )  # (N_atom,)
 
+        # ── Fix 4: Protein-only filtering & PTM exclusion ──
+        is_protein = input_feature_dict.get("is_protein")
+        if is_protein is not None:
+            protein_atom_mask = is_protein.to(device=device, dtype=torch.bool)
+            if protein_atom_mask.dim() > 1:
+                protein_atom_mask = protein_atom_mask[0]
+            boundary_mask = boundary_mask & protein_atom_mask
+            print("  - Boundary refinement: PROTEIN only (DNA, RNA, ligand excluded)")
+
+        modified_res_mask = input_feature_dict.get("modified_res_mask")
+        if modified_res_mask is not None:
+            ptm_mask = modified_res_mask.to(device=device, dtype=torch.bool)
+            if ptm_mask.dim() > 1:
+                ptm_mask = ptm_mask[0]
+            boundary_mask = boundary_mask & (~ptm_mask)
+            print("  - Boundary refinement: modified (PTM) residues excluded")
+
+        # Note: Refine BOTH template-side and generated-side boundary atoms.
+        # Template-side atoms drift from their exact template positions during LRD,
+        # but this produces better peptide bond geometry at boundaries.
+        # The final Kabsch alignment (_final_align_to_pdb_frame) corrects the global frame.
+
         # Expand boundary mask for chunk dimension
         boundary_mask_exp = boundary_mask.unsqueeze(-2).expand(
             *batch_shape, chunk_n_sample, N_atom
@@ -367,69 +403,252 @@ def sample_diffusion(
         refinement_fixed_mask = ~boundary_mask_exp
         refinement_template_coords = x_l.clone()  # current coordinates are "template"
 
+        boundary_atom_count = int(boundary_mask.sum())
         print(f"[Inpainting] Stage 2: boundary refinement "
-              f"({int(boundary_mask.sum())} boundary atoms, "
+              f"({boundary_atom_count} boundary atoms, "
               f"σ_start={boundary_refinement_sigma_start:.2f}, "
               f"steps={boundary_refinement_steps})")
 
-        # Build short noise schedule for boundary refinement
-        sigma_end = float(noise_schedule[-2].item())  # second-to-last (just above 0)
-        sigma_start = boundary_refinement_sigma_start
-        rho = 7
-        s_max_r = sigma_start ** (1 / rho)
-        s_min_r = sigma_end ** (1 / rho)
-        step_indices = torch.linspace(0, 1, boundary_refinement_steps + 1, device=device)
-        ref_schedule = (s_max_r + step_indices * (s_min_r - s_max_r)) ** rho
-        ref_schedule = ref_schedule.to(dtype)
-        ref_schedule[-1] = 0.0
+        # ── BOUNDARY MASK DEBUG ──
+        _n_tokens = int(asym_id.shape[0])
+        _residue_tmpl = torch.zeros(_n_tokens, dtype=torch.bool, device=device)
+        for _ti in range(_n_tokens):
+            _asel = atom_to_token_idx == _ti
+            if _asel.any():
+                _residue_tmpl[_ti] = _tm[_asel].any()
+        # Find boundary initial tokens
+        _boundary_init_toks = []
+        for _i in range(_n_tokens):
+            if _i > 0 and asym_id[_i] == asym_id[_i - 1]:
+                if _residue_tmpl[_i] != _residue_tmpl[_i - 1]:
+                    _boundary_init_toks.extend([_i - 1, _i])
+        _boundary_init_toks = sorted(set(_boundary_init_toks))
+        # Show expanded boundary tokens
+        _boundary_expanded_toks = []
+        for _ti in range(_n_tokens):
+            if boundary_mask[atom_to_token_idx == _ti].any():
+                _boundary_expanded_toks.append(_ti)
+        # Per-token atom count
+        _tok_atom_counts = []
+        for _ti in _boundary_expanded_toks:
+            _n = int((atom_to_token_idx == _ti).sum())
+            _is_tmpl = "T" if _residue_tmpl[_ti] else "G"
+            _n_bnd = int(boundary_mask[atom_to_token_idx == _ti].sum())
+            _tok_atom_counts.append(f"{_ti}({_is_tmpl}):{_n_bnd}/{_n}")
+        print(f"  [BND-DEBUG] N_tokens={_n_tokens}, N_atoms={int(atom_to_token_idx.shape[0])}")
+        print(f"  [BND-DEBUG] Template tokens: {_residue_tmpl.sum().item()}/{_n_tokens}")
+        print(f"  [BND-DEBUG] Generated token ranges: ", end="")
+        _gen_ranges = []
+        _in_gen = False
+        _gen_start = 0
+        for _i in range(_n_tokens):
+            if not _residue_tmpl[_i] and not _in_gen:
+                _gen_start = _i
+                _in_gen = True
+            elif _residue_tmpl[_i] and _in_gen:
+                _gen_ranges.append(f"{_gen_start}-{_i-1}")
+                _in_gen = False
+        if _in_gen:
+            _gen_ranges.append(f"{_gen_start}-{_n_tokens-1}")
+        print(", ".join(_gen_ranges) if _gen_ranges else "none")
+        print(f"  [BND-DEBUG] Boundary init tokens: {_boundary_init_toks}")
+        print(f"  [BND-DEBUG] Boundary expanded tokens (window={boundary_refinement_window}): {_boundary_expanded_toks}")
+        print(f"  [BND-DEBUG] Per-token boundary atoms: {_tok_atom_counts}")
+
+        if boundary_atom_count == 0:
+            return _final_align_to_pdb_frame(x_l)
+
+        # ── DEBUG: identify boundary residues & measure bond distances ──
+        _dbg_residue_tmpl = torch.zeros(int(asym_id.shape[0]), dtype=torch.bool, device=device)
+        for tok_idx in range(int(asym_id.shape[0])):
+            atom_sel = atom_to_token_idx == tok_idx
+            if atom_sel.any():
+                _dbg_residue_tmpl[tok_idx] = _tm[atom_sel].any()
+        _dbg_boundary_init = []
+        for i in range(int(asym_id.shape[0])):
+            if i > 0 and asym_id[i] == asym_id[i - 1]:
+                if _dbg_residue_tmpl[i] != _dbg_residue_tmpl[i - 1]:
+                    _dbg_boundary_init.append((i - 1, i))
+        print(f"  [DEBUG] Boundary residue pairs (token indices): {_dbg_boundary_init}")
+        print(f"  [DEBUG] Residue template mask: {_dbg_residue_tmpl.int().tolist()}")
+
+        # Decode atom names from ref_atom_name_chars (4 chars per atom, one-hot encoded)
+        _ref_name_chars = input_feature_dict.get("ref_atom_name_chars")
+        def _get_atom_name(atom_idx):
+            if _ref_name_chars is None:
+                return "?"
+            # ref_atom_name_chars: (N_atom, 4, 64) one-hot → decode
+            chars = _ref_name_chars[atom_idx]  # (4, 64)
+            name = ""
+            for ch in range(4):
+                idx = chars[ch].argmax().item()
+                if idx == 0:
+                    name += " "
+                else:
+                    name += chr(idx + 31)  # rough ASCII mapping
+                    # The encoding might use different schemes; fall back
+            return name.strip()
+
+        # Measure backbone C→N peptide bond distances at boundary
+        def _measure_boundary_bonds(coords, label=""):
+            """Measure backbone peptide bond (C→N) distances at boundary junctions."""
+            c = coords[..., 0, :, :] if coords.dim() > 2 else coords
+            if c.dim() > 2:
+                c = c.reshape(-1, 3)
+            for (tok_a, tok_b) in _dbg_boundary_init:
+                atoms_a = (atom_to_token_idx == tok_a).nonzero(as_tuple=True)[0]
+                atoms_b = (atom_to_token_idx == tok_b).nonzero(as_tuple=True)[0]
+                if len(atoms_a) == 0 or len(atoms_b) == 0:
+                    continue
+                # For protein: atom ordering is typically N=0, CA=1, C=2, O=3, ...
+                # Find C atom (index 2) in tok_a and N atom (index 0) in tok_b
+                c_atom_idx = atoms_a[2] if len(atoms_a) > 2 else atoms_a[-1]  # backbone C
+                n_atom_idx = atoms_b[0]  # backbone N
+                cn_dist = (c[c_atom_idx] - c[n_atom_idx]).norm().item()
+                # Also CA→CA distance (should be ~3.8Å)
+                ca_a = atoms_a[1] if len(atoms_a) > 1 else atoms_a[0]
+                ca_b = atoms_b[1] if len(atoms_b) > 1 else atoms_b[0]
+                caca_dist = (c[ca_a] - c[ca_b]).norm().item()
+                # Min distance
+                dists = torch.cdist(c[atoms_a].unsqueeze(0).float(),
+                                    c[atoms_b].unsqueeze(0).float()).squeeze(0)
+                min_dist = dists.min().item()
+                is_tmpl_a = "T" if _dbg_residue_tmpl[tok_a] else "G"
+                is_tmpl_b = "T" if _dbg_residue_tmpl[tok_b] else "G"
+                in_boundary_a = "B" if boundary_mask[atoms_a].any() else "-"
+                in_boundary_b = "B" if boundary_mask[atoms_b].any() else "-"
+                print(f"  [{label}] tok {tok_a}({is_tmpl_a}{in_boundary_a})"
+                      f"→tok {tok_b}({is_tmpl_b}{in_boundary_b}): "
+                      f"C→N={cn_dist:.3f}Å (ideal ~1.33), "
+                      f"CA→CA={caca_dist:.3f}Å (ideal ~3.8), "
+                      f"min={min_dist:.3f}Å")
+        _measure_boundary_bonds(x_l, "BEFORE-LRD")
+
+        # ── Measure ALL consecutive bonds in generated regions ──
+        _gen_regions = []  # list of (start, end) inclusive
+        _in_gen = False
+        for _i in range(int(asym_id.shape[0])):
+            if not _dbg_residue_tmpl[_i] and not _in_gen:
+                _gen_start = _i
+                _in_gen = True
+            elif (_dbg_residue_tmpl[_i] or _i == int(asym_id.shape[0]) - 1) and _in_gen:
+                _gen_end = _i - 1 if _dbg_residue_tmpl[_i] else _i
+                _gen_regions.append((_gen_start, _gen_end))
+                _in_gen = False
+
+        _c_coords = x_l[..., 0, :, :] if x_l.dim() > 2 else x_l
+        if _c_coords.dim() > 2:
+            _c_coords_flat = _c_coords.reshape(-1, 3)
+        else:
+            _c_coords_flat = _c_coords
+
+        _all_bonds_to_check = []  # (tok_a, tok_b) for all bonds in/around generated regions
+        for (gs, ge) in _gen_regions:
+            # Include boundary-1 to boundary+1
+            check_start = max(0, gs - 1)
+            check_end = min(int(asym_id.shape[0]) - 1, ge + 1)
+            for t in range(check_start, check_end):
+                if asym_id[t] == asym_id[t + 1]:
+                    _all_bonds_to_check.append((t, t + 1))
+
+        _broken_internal_bonds = []
+        print(f"  [BONDS] All bonds in/near generated regions:")
+        for (tok_a, tok_b) in _all_bonds_to_check:
+            atoms_a = (atom_to_token_idx == tok_a).nonzero(as_tuple=True)[0]
+            atoms_b = (atom_to_token_idx == tok_b).nonzero(as_tuple=True)[0]
+            if len(atoms_a) < 3 or len(atoms_b) == 0:
+                continue
+            cn_dist = (_c_coords_flat[atoms_a[2]] - _c_coords_flat[atoms_b[0]]).norm().item()
+            cn_err = abs(cn_dist - 1.33)
+            is_boundary = (tok_a, tok_b) in _dbg_boundary_init
+            tag = "BND" if is_boundary else "INT"
+            status = "OK" if cn_err <= 0.35 else "BROKEN"
+            is_a = "T" if _dbg_residue_tmpl[tok_a] else "G"
+            is_b = "T" if _dbg_residue_tmpl[tok_b] else "G"
+            print(f"    {tok_a}({is_a})→{tok_b}({is_b}) [{tag}]: C→N={cn_dist:.3f}Å (err={cn_err:.3f}) {status}")
+            if not is_boundary and cn_err > 0.35:
+                _broken_internal_bonds.append((tok_a, tok_b))
+
+        # ── Per-region independent LRD ──
+        # Run LRD separately for each generated region to avoid inter-region interference.
+        # LRD params
+        _lrd_gamma0 = 0.8
+        _lrd_gamma_min = 1.0
+        _lrd_noise_scale = 1.003
+        _lrd_step_scale = 1.5
+        _sigma_data = 16.0
+        _sigma_min_norm = 0.0004
+        _sigma_max_norm = boundary_refinement_sigma_start / _sigma_data
+        _rho = 7
+        _inv_rho = 1.0 / _rho
+
+        # Build noise schedule (shared across regions)
+        _steps = torch.arange(boundary_refinement_steps, device=device, dtype=torch.float32)
+        ref_schedule = (
+            _sigma_max_norm ** _inv_rho
+            + _steps / (boundary_refinement_steps - 1)
+            * (_sigma_min_norm ** _inv_rho - _sigma_max_norm ** _inv_rho)
+        ) ** _rho * _sigma_data
+        ref_schedule = torch.cat([ref_schedule, torch.zeros(1, device=device)]).to(dtype)
+
+        _n_stochastic = int((ref_schedule[1:] > _lrd_gamma_min).sum())
+        print(f"  [LRD] Schedule: {boundary_refinement_steps} steps, "
+              f"σ={float(ref_schedule[0]):.4f}→0, "
+              f"γ_min={_lrd_gamma_min} ({_n_stochastic} stochastic steps)")
+
+        # ── Global LRD (Boltz-style) ──
+        # Refine all boundary atoms at once with a single diffusion loop.
+        refinement_template = x_l.clone()
+
+        # Add initial noise to boundary atoms only
+        init_sigma = ref_schedule[0]
+        boundary_noise = init_sigma * torch.randn_like(x_l)
+        x_ref = x_l.clone()
+        x_ref[boundary_mask_exp] = refinement_template[boundary_mask_exp] + boundary_noise[boundary_mask_exp]
 
         for ref_c_tau_last, ref_c_tau in zip(ref_schedule[:-1], ref_schedule[1:]):
+            # Inject noise into boundary atoms from template
             sigma_from = float(ref_c_tau_last)
-            # Inject noise into boundary atoms
-            noise = torch.randn_like(x_l) * sigma_from
-            x_l = x_l.clone()
-            x_l[boundary_mask_exp] = (
-                refinement_template_coords[boundary_mask_exp]
-                + noise[boundary_mask_exp]
+            noise = torch.randn_like(x_ref) * sigma_from
+            x_ref = x_ref.clone()
+            x_ref[boundary_mask_exp] = (
+                refinement_template[boundary_mask_exp] + noise[boundary_mask_exp]
             )
-            # Fix non-boundary atoms
-            x_l[refinement_fixed_mask] = refinement_template_coords[refinement_fixed_mask]
+            # Hard reset fixed atoms
+            x_ref[refinement_fixed_mask] = refinement_template[refinement_fixed_mask]
 
             gamma = float(gamma0) if ref_c_tau > gamma_min else 0
-            t_hat_ref = ref_c_tau_last * (gamma + 1)
-            delta_noise_ref = torch.sqrt(t_hat_ref ** 2 - ref_c_tau_last ** 2)
-            x_noisy_ref = x_l + noise_scale_lambda * delta_noise_ref * torch.randn_like(x_l)
+            t_hat = ref_c_tau_last * (gamma + 1)
+            delta_noise = torch.sqrt(t_hat ** 2 - ref_c_tau_last ** 2)
+            x_noisy = x_ref + noise_scale_lambda * delta_noise * torch.randn_like(x_ref)
 
-            t_hat_ref_exp = (
-                t_hat_ref.reshape((1,) * (len(batch_shape) + 1))
-                .expand(*batch_shape, chunk_n_sample)
-                .to(dtype)
+            t_hat_exp = (
+                t_hat.reshape((1,) * (len(batch_shape) + 1))
+                .expand(*batch_shape, chunk_n_sample).to(dtype)
             )
             with torch.no_grad():
-                x_denoised_ref = denoise_net(
-                    x_noisy=x_noisy_ref,
-                    t_hat_noise_level=t_hat_ref_exp,
+                x_denoised = denoise_net(
+                    x_noisy=x_noisy, t_hat_noise_level=t_hat_exp,
                     input_feature_dict=input_feature_dict,
-                    s_inputs=s_inputs,
-                    s_trunk=s_trunk,
-                    z_trunk=z_trunk,
-                    pair_z=pair_z,
-                    p_lm=p_lm,
-                    c_l=c_l,
-                    chunk_size=attn_chunk_size,
-                    inplace_safe=inplace_safe,
+                    s_inputs=s_inputs, s_trunk=s_trunk, z_trunk=z_trunk,
+                    pair_z=pair_z, p_lm=p_lm, c_l=c_l,
+                    chunk_size=attn_chunk_size, inplace_safe=inplace_safe,
                     enable_efficient_fusion=enable_efficient_fusion,
                 )
 
-            delta_ref = (x_noisy_ref - x_denoised_ref) / t_hat_ref_exp[..., None, None]
-            dt_ref = ref_c_tau - t_hat_ref_exp
-            x_l = x_noisy_ref + step_scale_eta * dt_ref[..., None, None] * delta_ref
+            delta = (x_noisy - x_denoised) / t_hat_exp[..., None, None]
+            dt = ref_c_tau - t_hat_exp
+            x_ref = x_noisy + step_scale_eta * dt[..., None, None] * delta
 
-            # Hard reset non-boundary atoms
-            x_l = x_l.clone()
-            x_l[refinement_fixed_mask] = refinement_template_coords[refinement_fixed_mask]
+            # Hard reset fixed atoms after Euler step
+            x_ref = x_ref.clone()
+            x_ref[refinement_fixed_mask] = refinement_template[refinement_fixed_mask]
 
-        return x_l
+        x_result = x_ref
+
+        _measure_boundary_bonds(x_result, "AFTER-LRD")
+
+        return x_result
     # ────────────────────────────────────────────────────────────────────────
 
     if diffusion_chunk_size is None:

@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 import requests
-from runner.template_search import run_template_search
+from protenix_runner.template_search import run_template_search
 
 import protenix.data.core.ccd as ccd
 from protenix.data.inference.json_to_feature import SampleDictToFeatures
@@ -472,7 +472,7 @@ class RequestParser(object):
             f"--load_checkpoint_dir {checkpoint_dir}",
             f"--model_name {self.model_name}",
             f"--dump_dir {self.request_dir}",
-            f"--input_json_path {input_json_path}",
+            f"--input_path {input_json_path}",
             f"--need_atom_confidence {self.request['atom_confidence']}",
             f"--use_msa {self.request['use_msa']}",
             "--num_workers 0",

@@ -39,15 +39,15 @@ from protenix.data.utils import pdb_to_cif
 from protenix.utils.logger import get_logger
 from rdkit import Chem
 
-from runner.inference import (
+from protenix_runner.inference import (
     download_inference_cache,
     infer_predict,
     InferenceRunner,
     update_gpu_compatible_configs,
 )
-from runner.msa_search import msa_search, update_infer_json
-from runner.rna_msa_search import update_rna_msa_info
-from runner.template_search import update_template_info
+from protenix_runner.msa_search import msa_search, update_infer_json
+from protenix_runner.rna_msa_search import update_rna_msa_info
+from protenix_runner.template_search import update_template_info
 
 logger = get_logger(__name__)
 
@@ -524,7 +524,7 @@ def inference_jsons(
     configs = runner.configs
     for _, infer_json in enumerate(tqdm.tqdm(infer_jsons)):
         try:
-            configs["input_json_path"] = preprocess_input(
+            configs["input_path"] = preprocess_input(
                 infer_json,
                 out_dir=out_dir,
                 use_msa=use_msa,

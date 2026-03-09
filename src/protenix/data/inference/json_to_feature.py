@@ -392,7 +392,7 @@ class SampleDictToFeatures:
         )
 
         template_cif = inpainting_cfg["template_cif"]
-        metadata = inpainting_cfg["metadata"]
+        metadata = inpainting_cfg.get("metadata")
         chain_id_mapping = inpainting_cfg.get("chain_id_mapping", {})
 
         coords, mask = compute_inpainting_template_features(

@@ -25,7 +25,8 @@ PATCHR fills them in. It generates physically plausible coordinates for missing 
 ```bash
 git clone https://github.com/DeepFoldProtein/patchr.git
 cd patchr
-pip install -e .[cuda]
+pip install -e .[cuda]          # Boltz-2 backend
+pip install -e .[cuda,protenix] # + Protenix (AlphaFold 3) backend
 ```
 
 **Step 1.** Generate a YAML template from a PDB structure:
@@ -43,7 +44,7 @@ python scripts/generate_inpainting_template.py --input structure.cif A,B
 
 This auto-detects missing regions and outputs a YAML + template CIF to `examples/inpainting/`.
 
-**Step 2.** Run inpainting:
+**Step 2.** Run inpainting with Boltz-2:
 
 ```bash
 boltz predict examples/inpainting/4zlo_AB.yaml \
@@ -51,6 +52,24 @@ boltz predict examples/inpainting/4zlo_AB.yaml \
   --accelerator gpu \
   --out_dir results
 ```
+
+Or with **Protenix** (AlphaFold 3-based):
+
+```bash
+# Generate a Protenix JSON instead of a YAML
+python scripts/generate_inpainting_template.py 4ZLO A,B --format protenix-json
+
+# Run inference (inpainting requires protenix_base_default_v1.0.0)
+PYTHONPATH="$(pwd)" python runner/inference.py \
+  --model_name protenix_base_default_v1.0.0 \
+  --input_path examples/inpainting/5k7g_AEFG.yaml \
+  --dump_dir results \
+  --seeds 42
+```
+
+The first run downloads the model checkpoint automatically to `~/checkpoint/`.
+
+> **Note:** Inpainting requires `protenix_base_default_v1.0.0`. Mini/tiny models use reduced diffusion parameters (5 steps, no stochastic noise) that cannot produce connected boundaries. If a different model is specified with an inpainting input, it will be automatically overridden.
 
 > For CPU-only or non-CUDA GPUs, use `pip install -e .` instead. See [prediction docs](docs/prediction.md) for all options.
 

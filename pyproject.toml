@@ -59,6 +59,15 @@ server = [
     "aiofiles>=23.2.1",
     "python-multipart>=0.0.6",
 ]
+protenix = [
+    "ml-collections>=0.1.1",
+    "biotite>=1.4.0",
+    "fair-esm==2.0.0",
+    "optree>=0.13.0",
+    "pydantic>=2.0.0",
+    "pdbeccdutils>=0.8.5",
+    "ninja",
+]
 
 [tool.ruff]
 src = ["src"]

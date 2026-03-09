@@ -117,7 +117,7 @@ def _parse_chem_comp(cif_content: str, comp_ids: Set[str]) -> list:
     for cid in comp_ids:
         if cid.upper() in found_ids:
             continue
-        lines.append(f"{cid} ? ? ? ? ? ? ?")
+        lines.append(f"{cid} ? ? ? ? ? ?")
     return lines
 
 

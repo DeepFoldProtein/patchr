@@ -55,7 +55,10 @@ def weighted_rigid_align(
     V = V.mH
 
     rot = torch.einsum("... i j, ... k j -> ... i k", U, V).to(torch.float32)
-    F = torch.eye(dim, dtype=cov32.dtype, device=cov.device)[None].repeat(*batch_size, 1, 1)
+    if batch_size:
+        F = torch.eye(dim, dtype=cov32.dtype, device=cov.device)[None].repeat(*batch_size, 1, 1)
+    else:
+        F = torch.eye(dim, dtype=cov32.dtype, device=cov.device)
     det = torch.det(rot.cpu()).to(rot.device) if rot.is_mps else torch.det(rot)
     F[..., -1, -1] = det
     rot = einsum(U, F, V, "... i j, ... j k, ... l k -> ... i l").to(orig_dtype)

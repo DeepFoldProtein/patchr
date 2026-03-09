@@ -25,7 +25,7 @@ inference_configs = {
     "dump_dir": "./output",
     "need_atom_confidence": False,
     "sorted_by_ranking_score": True,
-    "input_json_path": RequiredValue(str),
+    "input_path": RequiredValue(str),
     "load_checkpoint_dir": os.path.join(PROTENIX_ROOT_DIR, "checkpoint"),
     "num_workers": 0,
     "use_msa": True,

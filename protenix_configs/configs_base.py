@@ -179,7 +179,7 @@ model_configs = {
         "noise_scale_lambda": 1.003,
         "step_scale_eta": 1.5,
         "N_step": 200,
-        "N_sample": 5,
+        "N_sample": 1,
         "N_step_mini_rollout": 20,
         "N_sample_mini_rollout": 1,
     },

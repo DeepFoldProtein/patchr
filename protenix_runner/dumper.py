@@ -49,6 +49,14 @@ class DataDumper:
     """
     Class for dumping prediction data, including structure coordinates and confidence scores.
 
+    Output directory structure (Boltz-style):
+        {base_dir}/predictions/{sample_name}/
+            {sample_name}_model_{rank}.cif
+            confidence_{sample_name}_model_{rank}.json
+            plddt_{sample_name}_model_{rank}.npz
+            pae_{sample_name}_model_{rank}.npz
+            pde_{sample_name}_model_{rank}.npz
+
     Args:
         base_dir (str): Base directory for saving dumped data.
         need_atom_confidence (bool): Whether to save detailed atom-level confidence data.
@@ -85,7 +93,7 @@ class DataDumper:
             atom_array (AtomArray): The AtomArray object containing the structure data.
             entity_poly_type (dict[str, str]): The entity poly type information.
         """
-        dump_dir = self._get_dump_dir(dataset_name, pdb_id, seed)
+        dump_dir = self._get_dump_dir(pdb_id)
         Path(dump_dir).mkdir(parents=True, exist_ok=True)
 
         self.dump_predictions(
@@ -97,15 +105,13 @@ class DataDumper:
             seed=seed,
         )
 
-    def _get_dump_dir(self, dataset_name: str, sample_name: str, seed: int) -> str:
+    def _get_dump_dir(self, sample_name: str) -> str:
         """
-        Generate the directory path for dumping data based on the dataset
-        name, sample name, and seed.
+        Generate the directory path for dumping data (Boltz-style).
+
+        Layout: {base_dir}/predictions/{sample_name}/
         """
-        dump_dir = os.path.join(
-            self.base_dir, dataset_name, sample_name, f"seed_{seed}"
-        )
-        return dump_dir
+        return os.path.join(self.base_dir, "predictions", sample_name)
 
     def dump_predictions(
         self,
@@ -127,9 +133,6 @@ class DataDumper:
             entity_poly_type (dict[str, str]): Dictionary mapping entity IDs to their polymer types.
             seed (int): Random seed used for the prediction.
         """
-        prediction_save_dir = os.path.join(dump_dir, "predictions")
-        os.makedirs(prediction_save_dir, exist_ok=True)
-
         # Dump structure
         b_factor = None
         if "full_data" in pred_dict:
@@ -148,7 +151,7 @@ class DataDumper:
         sorted_indices = self._get_ranker_indices(data=pred_dict)
         self._save_structure(
             pred_coordinates=pred_dict["coordinate"],
-            prediction_save_dir=prediction_save_dir,
+            prediction_save_dir=dump_dir,
             sample_name=pdb_id,
             atom_array=atom_array,
             entity_poly_type=entity_poly_type,
@@ -159,7 +162,7 @@ class DataDumper:
         # Dump confidence
         self._save_confidence(
             data=pred_dict,
-            prediction_save_dir=prediction_save_dir,
+            prediction_save_dir=dump_dir,
             sample_name=pdb_id,
             seed=seed,
             sorted_indices=sorted_indices,
@@ -196,7 +199,7 @@ class DataDumper:
         for idx, rank in enumerate(sorted_indices):
             output_fpath = os.path.join(
                 prediction_save_dir,
-                f"{sample_name}_sample_{rank}.cif",
+                f"{sample_name}_model_{rank}.cif",
             )
             if b_factor is not None:
                 # b_factor.shape == [N_sample, N_atom]
@@ -244,7 +247,13 @@ class DataDumper:
         sorted_indices: Optional[List[int]],
     ):
         """
-        Save confidence data to JSON files.
+        Save confidence data: JSON summary + NPZ arrays (plddt, pae, pde).
+
+        Boltz-style file naming:
+            confidence_{name}_model_{rank}.json
+            plddt_{name}_model_{rank}.npz
+            pae_{name}_model_{rank}.npz
+            pde_{name}_model_{rank}.npz
 
         Args:
             data (dict): Prediction results containing confidence scores.
@@ -262,14 +271,63 @@ class DataDumper:
         if sorted_indices is None:
             sorted_indices = range(N_sample)
         for idx, rank in enumerate(sorted_indices):
+            # Confidence summary JSON (Boltz-style naming)
             output_fpath = os.path.join(
                 prediction_save_dir,
-                f"{sample_name}_summary_confidence_sample_{rank}.json",
+                f"confidence_{sample_name}_model_{rank}.json",
             )
             save_json(data["summary_confidence"][idx], output_fpath, indent=4)
+
+            # Save plddt / pae / pde as NPZ (Boltz-style)
+            if "full_data" in data:
+                sample_data = data["full_data"][idx]
+
+                if "atom_plddt" in sample_data:
+                    plddt = sample_data["atom_plddt"]
+                    if isinstance(plddt, torch.Tensor):
+                        if plddt.dtype == torch.bfloat16:
+                            plddt = plddt.to(torch.float32)
+                        plddt = plddt.cpu().numpy()
+                    np.savez_compressed(
+                        os.path.join(
+                            prediction_save_dir,
+                            f"plddt_{sample_name}_model_{rank}.npz",
+                        ),
+                        plddt=plddt,
+                    )
+
+                if "token_pair_pae" in sample_data:
+                    pae = sample_data["token_pair_pae"]
+                    if isinstance(pae, torch.Tensor):
+                        if pae.dtype == torch.bfloat16:
+                            pae = pae.to(torch.float32)
+                        pae = pae.cpu().numpy()
+                    np.savez_compressed(
+                        os.path.join(
+                            prediction_save_dir,
+                            f"pae_{sample_name}_model_{rank}.npz",
+                        ),
+                        pae=pae,
+                    )
+
+                if "token_pair_pde" in sample_data:
+                    pde = sample_data["token_pair_pde"]
+                    if isinstance(pde, torch.Tensor):
+                        if pde.dtype == torch.bfloat16:
+                            pde = pde.to(torch.float32)
+                        pde = pde.cpu().numpy()
+                    np.savez_compressed(
+                        os.path.join(
+                            prediction_save_dir,
+                            f"pde_{sample_name}_model_{rank}.npz",
+                        ),
+                        pde=pde,
+                    )
+
+            # Full data JSON (optional, for backward compat)
             if self.need_atom_confidence:
                 output_fpath = os.path.join(
                     prediction_save_dir,
-                    f"{sample_name}_full_data_sample_{rank}.json",
+                    f"{sample_name}_full_data_model_{rank}.json",
                 )
                 save_json(data["full_data"][idx], output_fpath, indent=None)
