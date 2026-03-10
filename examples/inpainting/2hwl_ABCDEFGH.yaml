@@ -2,22 +2,22 @@ version: 1
 
 sequences:
   - protein:
-      id: A
+      id: 'A'
       sequence: TFGSGEADCGLRPLFEKKSLEDKTERELLESYIDGR
       msa: empty
 
   - protein:
-      id: BA
+      id: 'BA'
       sequence: IVEGSDAEIGMSPWQVMLFRKSPQELLCGASLISDRWVLTAAHCLLYPPWDKNFTENDLLVRIGKHSRTRYEANIEKISMLEKIYIHPRYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDRETAASLLQAGYKGRVTGWGNLKETWTANVGKGQPSVLQVVNLPIVERPVCKDSTRIRITDNMFCAGYKPDEGKRGDACEGDSGGPFVMKSPFNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIQKVIDQFGE
       msa: empty
 
   - protein:
-      id: C
+      id: 'C'
       sequence: TFGSGEADCGLRPLFEKKSLEDKTERELLESYIDGR
       msa: empty
 
   - protein:
-      id: DA
+      id: 'DA'
       sequence: IVEGSDAEIGMSPWQVMLFRKSPQELLCGASLISDRWVLTAAHCLLYPPWDKNFTENDLLVRIGKHSRTRYEANIEKISMLEKIYIHPRYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDRETAASLLQAGYKGRVTGWGNLKETWTANVGKGQPSVLQVVNLPIVERPVCKDSTRIRITDNMFCAGYKPDEGKRGDACEGDSGGPFVMKSPFNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIQKVIDQFGE
       msa: empty
       modifications:
@@ -25,7 +25,7 @@ sequences:
           ccd: 'ASN'
 
   - protein:
-      id: P
+      id: 'P'
       sequence: PAETEXDSLXPEDD
       msa: empty
       modifications:
@@ -35,17 +35,18 @@ sequences:
           ccd: 'PTR'
 
   - ligand:
-      id: BB
+      id: 'BB'
       ccd: 'NA'
 
   - ligand:
-      id: DB
+      id: 'DB'
       ccd: 'NAG'
 
   - ligand:
-      id: DC
+      id: 'DC'
       ccd: 'NA'
 
 templates:
-  - cif: examples/inpainting/2HWL_chainABCDEFGH.cif
+  - cif: /workspace/examples/inpainting/2HWL_chainABCDEFGH.cif
     chain_id: ['A', 'BA', 'C', 'DA', 'P', 'BB', 'DB', 'DC']
+    inpainting_metadata: /workspace/examples/inpainting/2hwl_ABCDEFGH_inpainting_metadata.json

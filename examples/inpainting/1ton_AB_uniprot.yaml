@@ -2,14 +2,15 @@ version: 1
 
 sequences:
   - protein:
-      id: A
+      id: 'AA'
       sequence: MWLQILSLVLSVGRIDAAPPGQSRIVGGYKCEKNSQPWQVAVINEYLCGGVLIDPSWVITAAHCYSNNYQVLLGRNNLFKDEPFAQRRLVRQSFRHPDYIPLIVTNDTEQPVHDHSNDLMLLHLSEPADITGGVKVIDLPTKEPKVGSTCLASGWGSTNPSEMVVSHDLQCVNIHLLSNEKCIETYKDNVTDVMLCAGEMEGGKDTCAGDSGGPLICDGVLQGITSGGATPCAKPKTPAIYAKLIKFTSWIKKVMKENP
       msa: empty
 
   - ligand:
-      id: A
+      id: 'AB'
       ccd: 'ZN'
 
 templates:
-  - cif: examples/inpainting/1TON_chainAB_uniprot.cif
-    chain_id: ['A', 'A']
+  - cif: /workspace/examples/inpainting/1TON_chainAB_uniprot.cif
+    chain_id: ['AA', 'AB']
+    inpainting_metadata: /workspace/examples/inpainting/1ton_AB_uniprot_inpainting_metadata.json

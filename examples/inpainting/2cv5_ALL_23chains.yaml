@@ -2,105 +2,106 @@ version: 1
 
 sequences:
   - dna:
-      id: IA
+      id: 'A'
       sequence: ATCAATATCCACCTGCAGATTCTACCAAAAGTGTATTTGGAAACTGCTCCATCAAAAGGCATGTTCAGCTGAATTCAGCTGAACATGCCTTTTGATGGAGCAGTTTCCAAATACACTTTTGGTAGAATCTGCAGGTGGATATTGAT
 
   - dna:
-      id: JA
+      id: 'B'
       sequence: ATCAATATCCACCTGCAGATTCTACCAAAAGTGTATTTGGAAACTGCTCCATCAAAAGGCATGTTCAGCTGAATTCAGCTGAACATGCCTTTTGATGGAGCAGTTTCCAAATACACTTTTGGTAGAATCTGCAGGTGGATATTGAT
 
   - protein:
-      id: AA
+      id: 'C'
       sequence: MARTKQTARKSTGGKAPRKQLATKAARKSAPATGGVKKPHRYRPGTVALREIRRYQKSTELLIRKLPFQRLVREIAQDFKTDLRFQSSAVMALQEACEAYLVGLFEDTNLCAIHAKRVTIMPKDIQLARRIRGERA
       msa: empty
 
   - protein:
-      id: B
+      id: 'D'
       sequence: MSGRGKGGKGLGKGGAKRHRKVLRDNIQGITKPAIRRLARRGGVKRISGLIYEETRGVLKVFLENVIRDAVTYTEHAKRKTVTAMDVVYALKRQGRTLYGFGG
       msa: empty
 
   - protein:
-      id: CA
+      id: 'E'
       sequence: MSGRGKQGGKARAKAKTRSSRAGLQFPVGRVHRLLRKGNYSERVGAGAPVYLAAVLEYLTAEILELAGNAARDNKKTRIIPRHLQLAIRNDEELNKLLGRVTIAQGGVLPNIQAVLLPKKTESHHKAKGK
       msa: empty
 
   - protein:
-      id: DA
+      id: 'F'
       sequence: MPEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK
       msa: empty
 
   - protein:
-      id: EA
+      id: 'G'
       sequence: MARTKQTARKSTGGKAPRKQLATKAARKSAPATGGVKKPHRYRPGTVALREIRRYQKSTELLIRKLPFQRLVREIAQDFKTDLRFQSSAVMALQEACEAYLVGLFEDTNLCAIHAKRVTIMPKDIQLARRIRGERA
       msa: empty
 
   - protein:
-      id: F
+      id: 'H'
       sequence: MSGRGKGGKGLGKGGAKRHRKVLRDNIQGITKPAIRRLARRGGVKRISGLIYEETRGVLKVFLENVIRDAVTYTEHAKRKTVTAMDVVYALKRQGRTLYGFGG
       msa: empty
 
   - protein:
-      id: GA
+      id: 'I'
       sequence: MSGRGKQGGKARAKAKTRSSRAGLQFPVGRVHRLLRKGNYSERVGAGAPVYLAAVLEYLTAEILELAGNAARDNKKTRIIPRHLQLAIRNDEELNKLLGRVTIAQGGVLPNIQAVLLPKKTESHHKAKGK
       msa: empty
 
   - protein:
-      id: H
+      id: 'J'
       sequence: MPEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK
       msa: empty
 
   - ligand:
-      id: IB
+      id: 'K'
       ccd: 'MN'
 
   - ligand:
-      id: IC
+      id: 'L'
       ccd: 'MN'
 
   - ligand:
-      id: ID
+      id: 'M'
       ccd: 'MN'
 
   - ligand:
-      id: JB
+      id: 'N'
       ccd: 'MN'
 
   - ligand:
-      id: JC
+      id: 'O'
       ccd: 'MN'
 
   - ligand:
-      id: JD
+      id: 'P'
       ccd: 'MN'
 
   - ligand:
-      id: JE
+      id: 'Q'
       ccd: 'MN'
 
   - ligand:
-      id: JF
+      id: 'R'
       ccd: 'MN'
 
   - ligand:
-      id: AB
+      id: 'S'
       ccd: 'CL'
 
   - ligand:
-      id: CB
+      id: 'T'
       ccd: 'CL'
 
   - ligand:
-      id: DB
+      id: 'U'
       ccd: 'MN'
 
   - ligand:
-      id: EB
+      id: 'V'
       ccd: 'CL'
 
   - ligand:
-      id: GB
+      id: 'W'
       ccd: 'CL'
 
 templates:
-  - cif: examples/inpainting/2CV5_chainALL_23chains.cif
-    chain_id: ['IA', 'JA', 'AA', 'B', 'CA', 'DA', 'EA', 'F', 'GA', 'H', 'IB', 'IC', 'ID', 'JB', 'JC', 'JD', 'JE', 'JF', 'AB', 'CB', 'DB', 'EB', 'GB']
+  - cif: /workspace/examples/inpainting/2CV5_chainALL_23chains.cif
+    chain_id: ABCDEFGHIJKLMNOPQRSTUVW
+    inpainting_metadata: /workspace/examples/inpainting/2cv5_ALL_23chains_inpainting_metadata.json
