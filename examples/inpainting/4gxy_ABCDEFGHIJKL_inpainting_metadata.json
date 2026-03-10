@@ -1,0 +1,103 @@
+{
+    "chains": {
+        "AB": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 109,
+            "total_expected_atoms": 109
+        },
+        "AC": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 18,
+            "total_expected_atoms": 18
+        },
+        "AD": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AE": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AF": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AG": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AH": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AI": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AJ": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 7,
+            "total_expected_atoms": 7
+        },
+        "AK": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 1,
+            "total_expected_atoms": 1
+        },
+        "AL": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 1,
+            "total_expected_atoms": 1
+        }
+    }
+}

@@ -1,0 +1,79 @@
+version: 1
+
+sequences:
+  - protein:
+      id: 'AA'
+      sequence: GAMGSMERASLIQKAKLAEQAERYEDMAAFMKGAVEKGEELSXEERNLLSVAYKNVVGGQRAAWRVLSSIEQKSNEEGSEEKGPEVREYREKVETELQGVCDTVLGLLDSHLIKEAGDAESRVFYLKMKGDYYRYLAEVATGDDKKRIIDSARSAYQEAMDISKKEMPPTNPIRLGLALNFSVFHYEIANSPEEAISLAKTTFDEAMADLHTLSEDSYKDSTLIMQLLRDNLTLWTADNAGEEGGEAPQEPQS
+      msa: empty
+      modifications:
+        - position: 43
+          ccd: 'CSO'
+
+  - protein:
+      id: 'P'
+      sequence: KLMFKXEGPDSD
+      msa: empty
+      modifications:
+        - position: 6
+          ccd: 'TPO'
+
+  - ligand:
+      id: 'AB'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'AC'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'AD'
+      ccd: 'CL'
+
+  - ligand:
+      id: 'AE'
+      ccd: 'GOL'
+
+  - ligand:
+      id: 'AF'
+      ccd: 'K48'
+
+  - protein:
+      id: 'A_op2'
+      sequence: GAMGSMERASLIQKAKLAEQAERYEDMAAFMKGAVEKGEELSXEERNLLSVAYKNVVGGQRAAWRVLSSIEQKSNEEGSEEKGPEVREYREKVETELQGVCDTVLGLLDSHLIKEAGDAESRVFYLKMKGDYYRYLAEVATGDDKKRIIDSARSAYQEAMDISKKEMPPTNPIRLGLALNFSVFHYEIANSPEEAISLAKTTFDEAMADLHTLSEDSYKDSTLIMQLLRDNLTLWTADNAGEEGGEAPQEPQS
+      msa: empty
+      modifications:
+        - position: 43
+          ccd: 'CSO'
+
+  - protein:
+      id: 'B_op2'
+      sequence: KLMFKXEGPDSD
+      msa: empty
+      modifications:
+        - position: 6
+          ccd: 'TPO'
+
+  - ligand:
+      id: 'C_op2'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'D_op2'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'E_op2'
+      ccd: 'CL'
+
+  - ligand:
+      id: 'F_op2'
+      ccd: 'GOL'
+
+  - ligand:
+      id: 'G_op2'
+      ccd: 'K48'
+
+templates:
+  - cif: /workspace/examples/inpainting/6RL3_chainALL_14chains.cif
+    chain_id: ['AA', 'P', 'AB', 'AC', 'AD', 'AE', 'AF', 'A_op2', 'B_op2', 'C_op2', 'D_op2', 'E_op2', 'F_op2', 'G_op2']
+    inpainting_metadata: /workspace/examples/inpainting/6rl3_ALL_14chains_inpainting_metadata.json

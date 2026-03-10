@@ -2,7 +2,7 @@ version: 1
 
 sequences:
   - protein:
-      id: AA
+      id: 'AA'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
       modifications:
@@ -10,15 +10,15 @@ sequences:
           ccd: 'TPO'
 
   - ligand:
-      id: AB
+      id: 'AB'
       ccd: '4PV'
 
   - ligand:
-      id: AC
+      id: 'AC'
       ccd: 'GOL'
 
   - protein:
-      id: B_op2
+      id: 'B_op2'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
       modifications:
@@ -26,5 +26,6 @@ sequences:
           ccd: 'TPO'
 
 templates:
-  - cif: examples/inpainting/4ZLO_chainACDB_op2.cif
+  - cif: /workspace/examples/inpainting/4ZLO_chainACDB_op2.cif
     chain_id: ['AA', 'AB', 'AC', 'B_op2']
+    inpainting_metadata: /workspace/examples/inpainting/4zlo_ACDB_op2_inpainting_metadata.json

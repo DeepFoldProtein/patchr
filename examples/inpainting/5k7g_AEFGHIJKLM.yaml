@@ -1,0 +1,53 @@
+version: 1
+
+sequences:
+  - protein:
+      id: 'AA'
+      sequence: VSDTRFHSFSFYELKNVTNNFDERPISVGGNKMGEGGFGVVYKGYVNNTTVAVKKLAAMVDITTEELKQQFDQEIKVMAKCQHENLVELLGFSSDGDDLCLVYVYMPNGSLLDRLSCLDGTPPLSWHMRCKIAQGAANGINFLHENHHIHRDIKSANILLDEAFTAKISDFGLARASEKFAQTVMXXRIVGTTAYMAPEALRGEITPKSDIYSFGVVLLEIITGLPAVDEHREPQLLLDIKEEIEDEEKTIEDYIDKKMNDADSTSVEAMYSVASQCLHEKKNKRPDIKKVQQLLQEMTAS
+      msa: empty
+      modifications:
+        - position: 186
+          ccd: 'TPO'
+        - position: 187
+          ccd: 'SEP'
+
+  - ligand:
+      id: 'AB'
+      ccd: 'SO4'
+
+  - ligand:
+      id: 'AC'
+      ccd: 'SO4'
+
+  - ligand:
+      id: 'AD'
+      ccd: '6R0'
+
+  - ligand:
+      id: 'H'
+      ccd: 'SO4'
+
+  - ligand:
+      id: 'I'
+      ccd: 'SO4'
+
+  - ligand:
+      id: 'J'
+      ccd: '6R0'
+
+  - ligand:
+      id: 'K'
+      ccd: '6R0'
+
+  - ligand:
+      id: 'L'
+      ccd: 'SO4'
+
+  - ligand:
+      id: 'M'
+      ccd: '6R0'
+
+templates:
+  - cif: /workspace/examples/inpainting/5K7G_chainAEFGHIJKLM.cif
+    chain_id: ['AA', 'AB', 'AC', 'AD', 'H', 'I', 'J', 'K', 'L', 'M']
+    inpainting_metadata: /workspace/examples/inpainting/5k7g_AEFGHIJKLM_inpainting_metadata.json

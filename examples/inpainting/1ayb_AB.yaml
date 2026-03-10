@@ -2,12 +2,12 @@ version: 1
 
 sequences:
   - protein:
-      id: A
+      id: 'A'
       sequence: MRRWFHPNITGVEAENLLLTRGVDGSFLARPSKSNPGDFTLSVRRNGAVTHIKIQNTGDYYDLYGGEKFATLAELVQYYMEHHGQLKEKNGDVIELKYPLN
       msa: empty
 
   - protein:
-      id: P
+      id: 'P'
       sequence: SPGEXVNIEFGS
       msa: empty
       modifications:
@@ -15,5 +15,6 @@ sequences:
           ccd: 'PTR'
 
 templates:
-  - cif: examples/inpainting/1AYB_chainAB.cif
+  - cif: /workspace/examples/inpainting/1AYB_chainAB.cif
     chain_id: ['A', 'P']
+    inpainting_metadata: /workspace/examples/inpainting/1ayb_AB_inpainting_metadata.json

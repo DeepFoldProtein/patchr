@@ -1,0 +1,73 @@
+version: 1
+
+sequences:
+  - protein:
+      id: 'AA'
+      sequence: GAMGSMERASLIQKAKLAEQAERYEDMAAFMKGAVEKGEELSNEERCLLSVAYKNVVGGQRAAWRVLSSIEQKSNEEGSEEKGPEVREYREKVETELQGVCDTVLGLLDSHLIKEAGDAESRVFYLKMKGDYYRYLAEVATGDDKKRIIDSARSAYQEAMDISKKEMPPTNPIRLGLALNFSVFHYEIANSPEEAISLAKTTFDEAMADLHTLSEDSYKDSTLIMQLLRDNLTLWT
+      msa: empty
+
+  - protein:
+      id: 'B'
+      sequence: FPAXV
+      msa: empty
+      modifications:
+        - position: 4
+          ccd: 'TPO'
+
+  - ligand:
+      id: 'AB'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'AC'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'AD'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'AE'
+      ccd: 'GEH'
+
+  - ligand:
+      id: 'AF'
+      ccd: 'LF5'
+
+  - protein:
+      id: 'A_op2'
+      sequence: GAMGSMERASLIQKAKLAEQAERYEDMAAFMKGAVEKGEELSNEERCLLSVAYKNVVGGQRAAWRVLSSIEQKSNEEGSEEKGPEVREYREKVETELQGVCDTVLGLLDSHLIKEAGDAESRVFYLKMKGDYYRYLAEVATGDDKKRIIDSARSAYQEAMDISKKEMPPTNPIRLGLALNFSVFHYEIANSPEEAISLAKTTFDEAMADLHTLSEDSYKDSTLIMQLLRDNLTLWT
+      msa: empty
+
+  - protein:
+      id: 'B_op2'
+      sequence: FPAXV
+      msa: empty
+      modifications:
+        - position: 4
+          ccd: 'TPO'
+
+  - ligand:
+      id: 'C_op2'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'D_op2'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'E_op2'
+      ccd: 'MG'
+
+  - ligand:
+      id: 'F_op2'
+      ccd: 'GEH'
+
+  - ligand:
+      id: 'G_op2'
+      ccd: 'LF5'
+
+templates:
+  - cif: /workspace/examples/inpainting/8C04_chainALL_14chains.cif
+    chain_id: ['AA', 'B', 'AB', 'AC', 'AD', 'AE', 'AF', 'A_op2', 'B_op2', 'C_op2', 'D_op2', 'E_op2', 'F_op2', 'G_op2']
+    inpainting_metadata: /workspace/examples/inpainting/8c04_ALL_14chains_inpainting_metadata.json

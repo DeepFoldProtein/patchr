@@ -2,7 +2,7 @@ version: 1
 
 sequences:
   - rna:
-      id: AA
+      id: 'AA'
       sequence: XGCGGCAGGUGCUCCCGACCCUGCGGUCGGGAGUUAAAAGGGAAGCCGGUGCAAGUCCGGCACGGUCCCGCCACUGUGACGGGGAGUCGCCCCUCGGGAUGUGCCACUGGCCCGAAGGCCGGGAAGGCGGAGGGGCGGCGAGGAUCCGGAGUCAGGAAACCUGCCUGCCGUX
       modifications:
         - position: 1
@@ -11,49 +11,50 @@ sequences:
           ccd: 'CCC'
 
   - ligand:
-      id: AB
+      id: 'AB'
       ccd: 'B1Z'
 
   - ligand:
-      id: AC
+      id: 'AC'
       ccd: 'B1Z'
 
   - ligand:
-      id: AD
+      id: 'AD'
       ccd: 'IRI'
 
   - ligand:
-      id: AE
+      id: 'AE'
       ccd: 'IRI'
 
   - ligand:
-      id: AF
+      id: 'AF'
       ccd: 'IRI'
 
   - ligand:
-      id: AG
+      id: 'AG'
       ccd: 'IRI'
 
   - ligand:
-      id: AH
+      id: 'AH'
       ccd: 'IRI'
 
   - ligand:
-      id: AI
+      id: 'AI'
       ccd: 'IRI'
 
   - ligand:
-      id: AJ
+      id: 'AJ'
       ccd: 'IRI'
 
   - ligand:
-      id: AK
+      id: 'AK'
       ccd: 'MG'
 
   - ligand:
-      id: AL
+      id: 'AL'
       ccd: 'MG'
 
 templates:
-  - cif: examples/inpainting/4GXY_chainABCDEFGHIJKL.cif
+  - cif: /workspace/examples/inpainting/4GXY_chainABCDEFGHIJKL.cif
     chain_id: ['AA', 'AB', 'AC', 'AD', 'AE', 'AF', 'AG', 'AH', 'AI', 'AJ', 'AK', 'AL']
+    inpainting_metadata: /workspace/examples/inpainting/4gxy_ABCDEFGHIJKL_inpainting_metadata.json

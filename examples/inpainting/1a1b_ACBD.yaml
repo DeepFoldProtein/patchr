@@ -1,0 +1,41 @@
+version: 1
+
+sequences:
+  - protein:
+      id: 'A'
+      sequence: MDSIQAEEWYFGKITRRESERLLLNAENPRGTFLVRESETTKGAYCLSVSDFDNAKGLNVKHYKIRKLDSGGFYITSRTQFNSLQQLVAYYSKHADGLCHRLTTVCP
+      msa: empty
+
+  - protein:
+      id: 'B'
+      sequence: MDSIQAEEWYFGKITRRESERLLLNAENPRGTFLVRESETTKGAYCLSVSDFDNAKGLNVKHYKIRKLDSGGFYITSRTQFNSLQQLVAYYSKHADGLCHRLTTVCP
+      msa: empty
+
+  - protein:
+      id: 'C'
+      sequence: XXEX
+      msa: empty
+      modifications:
+        - position: 1
+          ccd: 'ACE'
+        - position: 2
+          ccd: 'PTR'
+        - position: 4
+          ccd: 'DIP'
+
+  - protein:
+      id: 'D'
+      sequence: XXEX
+      msa: empty
+      modifications:
+        - position: 1
+          ccd: 'ACE'
+        - position: 2
+          ccd: 'PTR'
+        - position: 4
+          ccd: 'DIP'
+
+templates:
+  - cif: /workspace/examples/inpainting/1A1B_chainACBD.cif
+    chain_id: ['A', 'B', 'C', 'D']
+    inpainting_metadata: /workspace/examples/inpainting/1a1b_ACBD_inpainting_metadata.json

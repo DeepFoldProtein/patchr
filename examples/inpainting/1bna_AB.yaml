@@ -2,13 +2,13 @@ version: 1
 
 sequences:
   - dna:
-      id: A
+      id: 'A'
       sequence: CGCGAATTCGCG
 
   - dna:
-      id: B
+      id: 'B'
       sequence: CGCGAATTCGCG
 
 templates:
-  - cif: examples/inpainting/1BNA_chainAB.cif
+  - cif: /workspace/examples/inpainting/1BNA_chainAB.cif
     chain_id: ['A', 'B']
