@@ -304,11 +304,9 @@ class Protenix(nn.Module):
         return s_inputs, s, z
 
     def _prepare_inpainting(self, input_feature_dict: dict[str, Any]) -> None:
-        """Log inpainting readiness.  No coordinate transforms needed here --
-        template coords stay in their original PDB frame and the diffusion
-        loop handles alignment via Kabsch at each step.
+        """Prepare inpainting template coordinates.
 
-        Modifies input_feature_dict in-place.  No-op if no inpainting keys present.
+        Logs fixed atom count.  No-op if no inpainting keys present.
         """
         coords = input_feature_dict.get("inpainting_template_coords")
         mask = input_feature_dict.get("inpainting_template_mask")
@@ -321,6 +319,93 @@ class Protenix(nn.Module):
             "[Inpainting] Template ready: %d / %d atoms fixed",
             int(mask_bool.sum()),
             int(mask_bool.numel()),
+        )
+
+    @staticmethod
+    def _inject_trunk_template_features(input_feature_dict: dict[str, Any]) -> None:
+        """Inject inpainting CIF as trunk-level template features for PairFormer.
+
+        Converts per-atom inpainting coords to token-level dense atom format,
+        computes distogram / unit_vector / pseudo_beta / backbone_frame features,
+        and injects them into input_feature_dict so TemplateEmbedder can use them.
+
+        No-op if no inpainting keys present.
+        """
+        coords = input_feature_dict.get("inpainting_template_coords")
+        mask = input_feature_dict.get("inpainting_template_mask")
+        if coords is None or mask is None:
+            return
+
+        from protenix.data.template.template_utils import (
+            DistogramFeaturesConfig,
+            TemplateFeatures,
+        )
+
+        atom_to_token = input_feature_dict["atom_to_token_idx"]  # [N_atom]
+        atom_to_tokatom = input_feature_dict["atom_to_tokatom_idx"]  # [N_atom]
+        N_token = input_feature_dict["residue_index"].shape[-1]
+        N_dense = 24
+
+        # Build dense atom positions [N_token, N_dense, 3] and mask [N_token, N_dense]
+        dense_pos = np.zeros((N_token, N_dense, 3), dtype=np.float32)
+        dense_mask = np.zeros((N_token, N_dense), dtype=np.int32)
+
+        coords_np = coords.cpu().numpy()
+        mask_np = mask.cpu().numpy()
+        tok_idx = atom_to_token.cpu().numpy()
+        tokatom_idx = atom_to_tokatom.cpu().numpy()
+
+        for i in range(len(coords_np)):
+            if mask_np[i] > 0:
+                t = tok_idx[i]
+                d = tokatom_idx[i]
+                if 0 <= t < N_token and 0 <= d < N_dense:
+                    dense_pos[t, d] = coords_np[i]
+                    dense_mask[t, d] = 1
+
+        # Get aatype from restype (one-hot [N_token, 32] → int [N_token])
+        restype = input_feature_dict["restype"]  # [N_token, 32]
+        aatype = restype.argmax(dim=-1).cpu().numpy().astype(np.int32)
+
+        # Compute template features using existing utilities
+        pb_pos, pb_mask = TemplateFeatures.pseudo_beta_fn(aatype, dense_pos, dense_mask)
+        pb_mask_2d = pb_mask[:, None] * pb_mask[None, :]
+
+        dgram = TemplateFeatures.dgram_from_positions(
+            pb_pos,
+            config=DistogramFeaturesConfig(min_bin=3.25, max_bin=50.75, num_bins=39),
+        )
+        dgram = dgram * pb_mask_2d[..., None]
+
+        uv, bb_mask_2d = TemplateFeatures.compute_template_unit_vector(
+            aatype, dense_pos, dense_mask
+        )
+        uv = uv * bb_mask_2d[..., None]
+
+        # Inject as single template [1, N_token, ...] into input_feature_dict
+        device = coords.device
+        dtype = coords.dtype
+
+        input_feature_dict["template_aatype"] = torch.from_numpy(
+            aatype[None]
+        ).long().to(device)
+        input_feature_dict["template_distogram"] = torch.from_numpy(
+            dgram[None]
+        ).to(dtype).to(device)
+        input_feature_dict["template_pseudo_beta_mask"] = torch.from_numpy(
+            pb_mask_2d[None]
+        ).to(dtype).to(device)
+        input_feature_dict["template_unit_vector"] = torch.from_numpy(
+            uv[None]
+        ).to(dtype).to(device)
+        input_feature_dict["template_backbone_frame_mask"] = torch.from_numpy(
+            bb_mask_2d[None]
+        ).to(dtype).to(device)
+
+        n_fixed_tokens = int((dense_mask.sum(axis=1) > 0).sum())
+        logger.info(
+            "[Inpainting] Injected trunk template features: %d/%d tokens have atoms",
+            n_fixed_tokens, N_token,
         )
 
     def sample_diffusion(self, **kwargs: Any) -> torch.Tensor:
@@ -522,6 +607,9 @@ class Protenix(nn.Module):
         log_dict = {}
         pred_dict = {}
         time_tracker = {}
+
+        # Inject inpainting CIF as trunk-level template (before PairFormer)
+        self._inject_trunk_template_features(input_feature_dict)
 
         s_inputs, s, z = self.get_pairformer_output(
             input_feature_dict=input_feature_dict,
