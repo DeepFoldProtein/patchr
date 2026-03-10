@@ -195,3 +195,4 @@ playground/
 reference_pr/
 
 *sandbox
+uv.lock

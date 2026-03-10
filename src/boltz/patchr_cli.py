@@ -628,9 +628,9 @@ def template(
 @click.option("--device-id", type=str, default=None, help="GPU device ID (e.g. '0').")
 @click.option(
     "--model",
-    type=click.Choice(["boltz2", "boltz2_inpaint", "protenix", "all"]),
+    type=click.Choice(["boltz2", "protenix", "all"]),
     default=None,
-    help="Model(s) to preload. Default: boltz2_inpaint.",
+    help="Model(s) to preload. Default: boltz2.",
 )
 @click.option("--work-dir", type=click.Path(), default="./patchr_jobs", help="Job working directory.")
 @click.option("--reload", is_flag=True, help="Enable auto-reload (dev mode).")
@@ -647,7 +647,7 @@ def serve(
     \b
     Examples:
       patchr serve
-      patchr serve --model boltz2_inpaint --device-id 0
+      patchr serve --model boltz2 --device-id 0
       patchr serve --model all --port 8080
     """
     import uvicorn
@@ -663,7 +663,7 @@ def serve(
     os.environ["PATCHR_WORK_DIR"] = str(work_path.resolve())
 
     click.echo(f"Starting PATCHR server on {host}:{port}")
-    click.echo(f"Model: {model or os.environ.get('PATCHR_DEFAULT_MODEL', 'boltz2_inpaint')}")
+    click.echo(f"Model: {model or os.environ.get('PATCHR_DEFAULT_MODEL', 'boltz2')}")
     click.echo(f"Work dir: {work_path.resolve()}")
     if device_id:
         click.echo(f"Device: {device_id}")
