@@ -316,15 +316,15 @@ def sample_diffusion(
             # ③ Kabsch alignment (inpainting: keep template in sync with frame)
             if enable_inpainting:
                 with torch.autocast("cuda", enabled=False):
-                    ones = torch.ones(
+                    _atom_w = torch.ones(
                         (*batch_shape, chunk_n_sample, N_atom),
                         device=device, dtype=torch.float32
                     )
                     x_noisy_aligned, rot, src_ctr, tgt_ctr = weighted_rigid_align(
                         x_noisy.float(),
                         x_denoised.float(),
-                        weights=ones,
-                        mask=ones,
+                        weights=_atom_w,
+                        mask=_atom_w,
                         return_transform=True,
                     )
                     template_coords = apply_rigid_transform(
@@ -607,7 +607,7 @@ def sample_diffusion(
         x_ref[boundary_mask_exp] = refinement_template[boundary_mask_exp] + boundary_noise[boundary_mask_exp]
 
         for ref_c_tau_last, ref_c_tau in zip(ref_schedule[:-1], ref_schedule[1:]):
-            # Inject noise into boundary atoms from template
+            # Inject noise into template atoms
             sigma_from = float(ref_c_tau_last)
             noise = torch.randn_like(x_ref) * sigma_from
             x_ref = x_ref.clone()
