@@ -25,8 +25,7 @@ PATCHR fills them in. It generates physically plausible coordinates for missing 
 ```bash
 git clone https://github.com/DeepFoldProtein/patchr.git
 cd patchr
-pip install -e .[cuda]          # Boltz-2 backend (default)
-pip install -e .[cuda,protenix] # + Protenix (AlphaFold 3) backend
+pip install -e .
 ```
 
 **Step 1.** Generate a template from a PDB structure:
@@ -158,7 +157,7 @@ Available at [patchr.deepfold.org](https://patchr.deepfold.org/).
 Start a REST API server for use with PATCHR-Studio or custom clients:
 
 ```bash
-patchr serve --model boltz2_inpaint --device-id 0
+patchr serve --model boltz2 --device-id 0
 patchr serve --model protenix --port 8080
 patchr serve --model all  # Load both backends
 ```

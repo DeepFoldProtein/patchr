@@ -77,7 +77,7 @@ DEFAULT_DEVICE_ID = os.environ.get("PATCHR_DEVICE_ID") or os.environ.get("BOLTZ_
 
 class ModelType(str, Enum):
     BOLTZ2 = "boltz2"
-    BOLTZ2_INPAINT = "boltz2_inpaint"
+    # Note: boltz2 always runs with inpainting enabled in PATCHR
     PROTENIX = "protenix"
 
 
@@ -257,7 +257,7 @@ app.add_middleware(
 
 def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: bool = True):
     """Preload Boltz2 model on GPU at server startup."""
-    model_key = "boltz2_inpaint" if enable_inpainting else "boltz2"
+    model_key = "boltz2"
     try:
         print(f"Preloading Boltz2 model (inpainting={enable_inpainting}) on GPU... (device_id={device_id})")
 
@@ -428,7 +428,7 @@ _startup_model: Optional[str] = None
 async def startup_event():
     """Load model(s) on server startup."""
     device_id = DEFAULT_DEVICE_ID or os.environ.get("PATCHR_DEVICE_ID") or os.environ.get("BOLTZ_DEVICE_ID")
-    startup = _startup_model or os.environ.get("PATCHR_DEFAULT_MODEL", "boltz2_inpaint")
+    startup = _startup_model or os.environ.get("PATCHR_DEFAULT_MODEL", "boltz2")
 
     print(f"Startup: device_id={device_id}, default_model={startup}")
 
@@ -437,9 +437,8 @@ async def startup_event():
 
     loop = asyncio.get_event_loop()
 
-    if startup in ("boltz2", "boltz2_inpaint"):
-        enable_inpainting = startup == "boltz2_inpaint"
-        await loop.run_in_executor(None, _preload_boltz_model, device_id, enable_inpainting)
+    if startup == "boltz2":
+        await loop.run_in_executor(None, _preload_boltz_model, device_id, True)
     elif startup == "protenix":
         await loop.run_in_executor(None, _preload_protenix_model, device_id)
     elif startup == "all":
@@ -779,7 +778,7 @@ def _run_boltz_prediction_sync(
             map_location = "cpu"
 
         # Check if we can reuse preloaded model
-        model_key = "boltz2_inpaint" if enable_inpainting else "boltz2"
+        model_key = "boltz2"
         preloaded = _model_registry.get(model_key)
         preloaded_params = _model_params.get(model_key)
 
@@ -1329,8 +1328,8 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default=None,
-        choices=["boltz2", "boltz2_inpaint", "protenix", "all"],
-        help="Model(s) to preload at startup (default: boltz2_inpaint, or PATCHR_DEFAULT_MODEL env)",
+        choices=["boltz2", "protenix", "all"],
+        help="Model(s) to preload at startup (default: boltz2, or PATCHR_DEFAULT_MODEL env)",
     )
 
     args = parser.parse_args()
@@ -1347,7 +1346,7 @@ if __name__ == "__main__":
 
     print(f"Starting Patchr API Server on {args.host}:{args.port}")
     print(f"Work directory: {WORK_DIR.absolute()}")
-    print(f"Default model: {args.model or os.environ.get('PATCHR_DEFAULT_MODEL', 'boltz2_inpaint')}")
+    print(f"Default model: {args.model or os.environ.get('PATCHR_DEFAULT_MODEL', 'boltz2')}")
     if DEFAULT_DEVICE_ID:
         print(f"Device ID: {DEFAULT_DEVICE_ID}")
     print(f"API docs: http://{args.host}:{args.port}/docs")
