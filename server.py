@@ -66,7 +66,7 @@ from boltz.model.models.boltz2 import Boltz2
 logger = logging.getLogger(__name__)
 
 # Constants
-WORK_DIR = Path("./patchr_jobs")
+WORK_DIR = Path(os.environ.get("PATCHR_WORK_DIR", "./patchr_jobs"))
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global server configuration
@@ -578,7 +578,7 @@ async def run_boltz_prediction(
             loop,
         )
 
-        pred_base_dir = out_dir / f"boltz_results_{yaml_file.stem}"
+        pred_base_dir = out_dir / f"patchr_results_{yaml_file.stem}"
         pred_dir = pred_base_dir / "predictions"
 
         if not pred_dir.exists():
@@ -631,7 +631,7 @@ def _run_boltz_prediction_sync(
         update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Validating inputs")
         data = check_inputs(yaml_file)
 
-        results_dir = out_dir / f"boltz_results_{yaml_file.stem}"
+        results_dir = out_dir / f"patchr_results_{yaml_file.stem}"
         results_dir.mkdir(parents=True, exist_ok=True)
 
         update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Processing inputs and generating MSAs")

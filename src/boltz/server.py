@@ -511,7 +511,7 @@ async def run_boltz_prediction(
         )
         
         # Find prediction results
-        pred_base_dir = out_dir / f"boltz_results_{yaml_file.stem}"
+        pred_base_dir = out_dir / f"patchr_results_{yaml_file.stem}"
         pred_dir = pred_base_dir / "predictions"
         
         if not pred_dir.exists():
@@ -577,7 +577,7 @@ def _run_boltz_prediction_sync(
         data = check_inputs(yaml_file)
         
         # Create output directory
-        results_dir = out_dir / f"boltz_results_{yaml_file.stem}"
+        results_dir = out_dir / f"patchr_results_{yaml_file.stem}"
         results_dir.mkdir(parents=True, exist_ok=True)
         
         # Process inputs

@@ -25,53 +25,81 @@ PATCHR fills them in. It generates physically plausible coordinates for missing 
 ```bash
 git clone https://github.com/DeepFoldProtein/patchr.git
 cd patchr
-pip install -e .[cuda]          # Boltz-2 backend
+pip install -e .[cuda]          # Boltz-2 backend (default)
 pip install -e .[cuda,protenix] # + Protenix (AlphaFold 3) backend
 ```
 
-**Step 1.** Generate a YAML template from a PDB structure:
+**Step 1.** Generate a template from a PDB structure:
 
 ```bash
-# Single chain
-python scripts/generate_inpainting_template.py 4ZLO A,B
+patchr template 4ZLO A,B
+```
 
+This auto-detects missing regions and writes a YAML + template CIF to `examples/inpainting/`.
+
+**Step 2.** Run inpainting:
+
+```bash
+patchr predict examples/inpainting/4zlo_AB.yaml --out_dir results
+```
+
+The first run downloads the model checkpoint automatically to `~/.boltz/`.
+
+<details>
+<summary><b>Template generation options</b></summary>
+
+```bash
 # With UniProt sequence (for terminal extensions)
-python scripts/generate_inpainting_template.py 4ZLO A,B --uniprot
+patchr template 4ZLO A,B --uniprot
 
 # From a local CIF file
-python scripts/generate_inpainting_template.py --input structure.cif A,B
+patchr template --input structure.cif A,B
+
+# All polymer chains (one per entity)
+patchr template 1CK4 all
+
+# All chains including duplicate copies
+patchr template 1CK4 all-copies
+
+# Custom output directory
+patchr template 1CK4 A,B -o my_templates/
+
+# Include solvent atoms
+patchr template 7EOQ A --include-solvent
+
+# Use biological assembly
+patchr template 1CK4 all --assembly best
 ```
 
-This auto-detects missing regions and outputs a YAML + template CIF to `examples/inpainting/`.
+</details>
 
-**Step 2.** Run inpainting with Boltz-2:
+<details>
+<summary><b>Prediction options</b></summary>
 
 ```bash
-boltz predict examples/inpainting/4zlo_AB.yaml \
-  --model boltz2_inpaint \
-  --accelerator gpu \
-  --out_dir results
+# Multiple diffusion samples
+patchr predict input.yaml --out_dir results --diffusion_samples 5
+
+# With MSA server
+patchr predict input.yaml --out_dir results --use_msa_server
+
+# With potentials
+patchr predict input.yaml --out_dir results --use_potentials
+
+# Disable boundary refinement
+patchr predict input.yaml --out_dir results --disable_boundary_refinement
+
+# Custom seed
+patchr predict input.yaml --out_dir results --seed 42
+
+# Protenix backend
+patchr predict input.yaml --out_dir results --backend protenix --seed 42
+
+# Protenix with multiple seeds
+patchr predict input.yaml --out_dir results --backend protenix --seeds 42,101,202
 ```
 
-Or with **Protenix** (AlphaFold 3-based):
-
-```bash
-# Generate a Protenix JSON instead of a YAML
-python scripts/generate_inpainting_template.py 4ZLO A,B --format protenix-json
-
-# Run inference (inpainting requires protenix_base_default_v1.0.0)
-PYTHONPATH="$(pwd)" python runner/inference.py \
-  --model_name protenix_base_default_v1.0.0 \
-  --input_path examples/inpainting/5k7g_AEFG.yaml \
-  --dump_dir results \
-  --seeds 42
-```
-
-The first run downloads the model checkpoint automatically to `~/checkpoint/`.
-
-> **Note:** Inpainting requires `protenix_base_default_v1.0.0`. Mini/tiny models use reduced diffusion parameters (5 steps, no stochastic noise) that cannot produce connected boundaries. If a different model is specified with an inpainting input, it will be automatically overridden.
-
-> For CPU-only or non-CUDA GPUs, use `pip install -e .` instead. See [prediction docs](docs/prediction.md) for all options.
+</details>
 
 <details>
 <summary><b>Mac installation</b></summary>
@@ -86,27 +114,22 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 
 </details>
 
-<details>
-<summary><b>More template generation options</b></summary>
+## Output Format
 
-```bash
-# All polymer chains (one per entity)
-python scripts/generate_inpainting_template.py 1CK4 all
+All backends produce the same output structure:
 
-# All chains including duplicate copies
-python scripts/generate_inpainting_template.py 1CK4 all-copies
-
-# Custom output directory
-python scripts/generate_inpainting_template.py 1CK4 A,B -o my_templates/
-
-# Include solvent atoms
-python scripts/generate_inpainting_template.py 7EOQ A --include-solvent
-
-# Use biological assembly
-python scripts/generate_inpainting_template.py 1CK4 all --assembly best
+```
+results/patchr_results_{input_name}/
+├── predictions/
+│   └── {input_name}/
+│       ├── {input_name}_model_0.cif          # Predicted structure
+│       ├── confidence_{input_name}_model_0.json  # Confidence scores
+│       ├── pae_{input_name}_model_0.npz      # PAE matrix (optional)
+│       └── pde_{input_name}_model_0.npz      # PDE matrix (optional)
+└── processed/                                 # Preprocessed data (Boltz only)
 ```
 
-</details>
+> **Note:** Protenix backend requires `protenix_base_default_v1.0.0`. Mini/tiny models cannot produce connected boundaries for inpainting. For CPU-only or non-CUDA GPUs, use `pip install -e .`.
 
 ## How It Works
 
@@ -129,6 +152,18 @@ Available at [patchr.deepfold.org](https://patchr.deepfold.org/).
 **No GPU?** Run the server on Google Colab for free and connect from PATCHR-Studio:
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb)
+
+## Server
+
+Start a REST API server for use with PATCHR-Studio or custom clients:
+
+```bash
+patchr serve --model boltz2_inpaint --device-id 0
+patchr serve --model protenix --port 8080
+patchr serve --model all  # Load both backends
+```
+
+See `patchr serve --help` for all options.
 
 ## PATCHR Atlas
 

@@ -3,10 +3,10 @@ requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "boltz"
-version = "2.2.1"
+name = "patchr"
+version = "1.0.0"
 requires-python = ">=3.10,<3.13"
-description = "Boltz"
+description = "PATCHR — diffusion-based structure completion for proteins, DNA, RNA, and complexes"
 readme = "README.md"
 dependencies = [
     "torch>=2.2",
@@ -41,6 +41,7 @@ dependencies = [
 ]
 
 [project.scripts]
+patchr = "boltz.patchr_cli:cli"
 boltz = "boltz.main:cli"
 
 [project.optional-dependencies]

@@ -1144,7 +1144,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     # Create output directories
     data = Path(data).expanduser()
     out_dir = Path(out_dir).expanduser()
-    out_dir = out_dir / f"boltz_results_{data.stem}"
+    out_dir = out_dir / f"patchr_results_{data.stem}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Download necessary data and model
