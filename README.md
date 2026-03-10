@@ -13,8 +13,9 @@
 
 Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. These gaps block molecular dynamics simulations, drug design pipelines, and structural analysis.
 
-PATCHR fills them in. It generates physically plausible coordinates for missing segments while keeping your existing experimental structure **exactly as-is**.
+PATCHR fills them in. It is a **model-agnostic inpainting method** that plugs into diffusion-based structure prediction models as a backend. Generate physically plausible coordinates for missing segments while keeping your existing experimental structure **exactly as-is**.
 
+- **Backend-agnostic** -- currently supports [Boltz-2](https://github.com/jwohlwend/boltz) and [Protenix](https://github.com/bytedance/protenix), with more models coming
 - Works with **proteins, DNA, RNA**, and multi-chain complexes
 - Preserves all original atomic coordinates -- zero drift
 - 99.4% of reconstructed structures have **no connectivity issues**
@@ -73,6 +74,25 @@ patchr template 1CK4 all --assembly best
 </details>
 
 <details>
+<summary><b>Prediction backends</b></summary>
+
+PATCHR works as a plugin on top of supported structure prediction models. Choose your backend with `--backend`:
+
+```bash
+# Boltz-2 (default)
+patchr predict input.yaml --out_dir results --backend boltz2
+
+# Protenix (AlphaFold 3-based)
+patchr predict input.yaml --out_dir results --backend protenix --seed 42
+
+# Protenix with multiple seeds
+patchr predict input.yaml --out_dir results --backend protenix --seeds 42,101,202
+```
+
+
+</details>
+
+<details>
 <summary><b>Prediction options</b></summary>
 
 ```bash
@@ -90,12 +110,6 @@ patchr predict input.yaml --out_dir results --disable_boundary_refinement
 
 # Custom seed
 patchr predict input.yaml --out_dir results --seed 42
-
-# Protenix backend
-patchr predict input.yaml --out_dir results --backend protenix --seed 42
-
-# Protenix with multiple seeds
-patchr predict input.yaml --out_dir results --backend protenix --seeds 42,101,202
 ```
 
 </details>
