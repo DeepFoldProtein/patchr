@@ -1,6 +1,7 @@
 // Repair Atoms - Repair Console 상태 관리
 import { atom } from "jotai";
 import { logger } from "../lib/logger";
+import { apiConnectionStatusAtom } from "./api-atoms";
 import type {
   MissingRegionInfo,
   RepairSegment,
@@ -71,7 +72,5 @@ export const repairConsoleExpandedAtom = atom<
   "missing-region-review" | "sequence" | "context" | "relax" | null
 >("missing-region-review");
 
-// API Connection Status
-export const apiConnectionStatusAtom = atom<
-  "idle" | "testing" | "connected" | "error"
->("idle");
+// API Connection Status — canonical source is api-atoms.ts
+export { apiConnectionStatusAtom } from "./api-atoms";

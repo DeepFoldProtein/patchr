@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAtom } from "jotai";
 import { themeClassAtom, themeAtom } from "@/store/app-atoms";
 import { AppLayout } from "@/components/AppLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Create a client
 const queryClient = new QueryClient({
@@ -63,11 +64,13 @@ function AppContent(): React.JSX.Element {
 
 function App(): React.JSX.Element {
   return (
-    <JotaiProvider>
-      <QueryClientProvider client={queryClient}>
-        <AppContent />
-      </QueryClientProvider>
-    </JotaiProvider>
+    <ErrorBoundary>
+      <JotaiProvider>
+        <QueryClientProvider client={queryClient}>
+          <AppContent />
+        </QueryClientProvider>
+      </JotaiProvider>
+    </ErrorBoundary>
   );
 }
 

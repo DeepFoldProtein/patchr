@@ -344,6 +344,39 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
     [plugin]
   );
 
+  // Load simulation system PDB (solvated box) into viewer
+  const loadSimulationSystem = useCallback(
+    async (filePath: string, fileContent: string, label: string) => {
+      if (!plugin) return;
+      try {
+        console.log("Loading simulation system:", label);
+
+        const dataNode = await plugin.builders.data.rawData({
+          data: fileContent,
+          label: `Sim: ${label}`
+        });
+
+        const trajectory =
+          await plugin.builders.structure.parseTrajectory(dataNode, "pdb");
+
+        await plugin.builders.structure.hierarchy.applyPreset(
+          trajectory,
+          "default",
+          {
+            showUnitcell: false,
+            representationPreset: "polymer-cartoon"
+          }
+        );
+
+        plugin.canvas3d?.requestCameraReset();
+        console.log("Simulation system loaded:", label);
+      } catch (err) {
+        console.error("Failed to load simulation system:", err);
+      }
+    },
+    [plugin]
+  );
+
   useEffect(() => {
     const handleLoadResult = (event: {
       filePath: string;
@@ -360,14 +393,24 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
       void toggleStructureVisibility(event.filePath, event.visible);
     };
 
+    const handleLoadSimSystem = (event: {
+      filePath: string;
+      fileContent: string;
+      label: string;
+    }): void => {
+      void loadSimulationSystem(event.filePath, event.fileContent, event.label);
+    };
+
     bus.on("inpainting:load-result", handleLoadResult);
     bus.on("inpainting:remove-result", handleRemoveResult);
+    bus.on("simulation:load-system", handleLoadSimSystem);
 
     return () => {
       bus.off("inpainting:load-result", handleLoadResult);
       bus.off("inpainting:remove-result", handleRemoveResult);
+      bus.off("simulation:load-system", handleLoadSimSystem);
     };
-  }, [loadAndSuperpose, toggleStructureVisibility]);
+  }, [loadAndSuperpose, toggleStructureVisibility, loadSimulationSystem]);
 }
 
 /**
