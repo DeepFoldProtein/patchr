@@ -134,21 +134,6 @@ export interface SimReadyRequest {
   keep_water: boolean;
 }
 
-export interface MembraneRequest {
-  job_id?: string;
-  cif_path?: string;
-  pdb_id?: string;
-  lipid_type: string;
-  engine: "gromacs" | "amber" | "openmm";
-  forcefield: string;
-  water_model: string;
-  ph: number;
-  padding: number;
-  ion_concentration: number;
-  skip_opm: boolean;
-  center_z?: number;
-}
-
 export interface SimReadyResult {
   atom_count?: number;
   box_size?: [number, number, number];
@@ -160,17 +145,6 @@ export interface SimReadyResult {
   n_waters?: number;
   n_ions?: { positive: number; negative: number };
   total_charge?: number;
-}
-
-export interface OpmInfo {
-  pdb_id: string;
-  thickness: number;
-  tilt_angle: number;
-  type: string;
-  topology: string;
-  family: string;
-  superfamily: string;
-  has_coordinates: boolean;
 }
 
 // Command for undo/redo

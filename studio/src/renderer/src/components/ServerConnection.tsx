@@ -72,9 +72,7 @@ export function ServerConnection(): React.ReactElement {
           const elapsed = Date.now() - startTime;
           if (elapsed >= 5000) {
             if (!healthCheckCompleted) {
-              logger.log(
-                `[Test Connection] Timeout fired after ${elapsed}ms`
-              );
+              logger.log(`[Test Connection] Timeout fired after ${elapsed}ms`);
               abortController.abort();
               reject(new Error("Connection timeout (5s)"));
             }
@@ -109,10 +107,7 @@ export function ServerConnection(): React.ReactElement {
       }
     } catch (err) {
       const totalElapsed = Date.now() - startTime;
-      logger.log(
-        `[Test Connection] Exception after ${totalElapsed}ms:`,
-        err
-      );
+      logger.log(`[Test Connection] Exception after ${totalElapsed}ms:`, err);
       setConnectionStatus("error");
     }
   };
@@ -186,11 +181,17 @@ function ServerSetupGuide({
 
       <Tabs defaultValue="colab">
         <TabsList className="w-full rounded-none border-b border-slate-200/50 dark:border-slate-800/50 bg-transparent p-0 h-auto">
-          <TabsTrigger value="colab" className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="colab"
+            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none"
+          >
             <Cloud className="h-3 w-3" />
             Google Colab
           </TabsTrigger>
-          <TabsTrigger value="local" className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="local"
+            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none"
+          >
             <Monitor className="h-3 w-3" />
             Local Setup
           </TabsTrigger>

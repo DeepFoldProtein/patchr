@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme } from "electron";
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, Menu } from "electron";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/icon.png?asset";
@@ -38,6 +38,26 @@ function createWindow(): void {
     }
   });
 
+  // Catch Cmd+- at the highest level before renderer can swallow it
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (!mainWindow) return;
+    const isMeta = process.platform === "darwin" ? input.meta : input.control;
+    if (isMeta && !input.shift && !input.alt) {
+      if (input.key === "-") {
+        event.preventDefault();
+        const level = mainWindow.webContents.getZoomLevel();
+        mainWindow.webContents.setZoomLevel(level - 0.5);
+      } else if (input.key === "=" || input.key === "+") {
+        event.preventDefault();
+        const level = mainWindow.webContents.getZoomLevel();
+        mainWindow.webContents.setZoomLevel(level + 0.5);
+      } else if (input.key === "0") {
+        event.preventDefault();
+        mainWindow.webContents.setZoomLevel(0);
+      }
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(details => {
     try {
       const url = new URL(details.url);
@@ -73,6 +93,63 @@ app.whenReady().then(() => {
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
+
+  // Set up application menu with standard zoom shortcuts
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" as const },
+              { type: "separator" as const },
+              { role: "hide" as const },
+              { role: "hideOthers" as const },
+              { role: "unhide" as const },
+              { type: "separator" as const },
+              { role: "quit" as const }
+            ]
+          }
+        ]
+      : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" }
+      ]
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "close" },
+        ...(process.platform === "darwin"
+          ? [{ type: "separator" as const }, { role: "front" as const }]
+          : [])
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 
   // Handle theme change for title bar
   ipcMain.handle("app:set-theme", (_event, theme: "light" | "dark") => {

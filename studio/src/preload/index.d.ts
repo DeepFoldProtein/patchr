@@ -80,6 +80,20 @@ export interface ProjectAPI {
     }>;
     error?: string;
   }>;
+  listSimulations: () => Promise<{
+    success: boolean;
+    simulations?: Array<{
+      id: string;
+      path: string;
+      files: string[];
+      engine?: string;
+      forcefield?: string;
+      n_atoms?: number;
+      n_waters?: number;
+      box_size?: number[];
+    }>;
+    error?: string;
+  }>;
   listDirectory: (dirPath: string) => Promise<{
     success: boolean;
     files?: string[];
@@ -167,14 +181,6 @@ export interface BoltzAPI {
     data?: { job_id: string; status: string };
     error?: string;
   }>;
-  membrane: (
-    apiUrl: string,
-    payload: unknown
-  ) => Promise<{
-    success: boolean;
-    data?: { job_id: string; status: string };
-    error?: string;
-  }>;
   simResult: (
     apiUrl: string,
     jobId: string
@@ -185,8 +191,7 @@ export interface BoltzAPI {
   }>;
   downloadAndSaveSimResults: (
     apiUrl: string,
-    jobId: string,
-    simType: "sim" | "membrane"
+    jobId: string
   ) => Promise<{
     success: boolean;
     simId?: string;
@@ -194,14 +199,6 @@ export interface BoltzAPI {
     files?: string[];
     systemPdbPath?: string;
     systemPdbContent?: string;
-    error?: string;
-  }>;
-  opmLookup: (
-    apiUrl: string,
-    pdbId: string
-  ) => Promise<{
-    success: boolean;
-    data?: unknown;
     error?: string;
   }>;
 }

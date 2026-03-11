@@ -14,14 +14,8 @@ import {
   CollapsibleTrigger,
   CollapsibleContent
 } from "./ui/collapsible";
-import { Alert, AlertDescription } from "./ui/alert";
-import {
-  apiUrlAtom,
-  apiConnectionStatusAtom,
-  panelModeAtom
-} from "../store/api-atoms";
+import { apiUrlAtom, apiConnectionStatusAtom } from "../store/api-atoms";
 import { DisconnectedHint } from "./DisconnectedHint";
-import { bus } from "../lib/event-bus";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -45,17 +39,8 @@ const WATER_MODELS = [
   { value: "tip3p", label: "TIP3P" },
   { value: "tip3pfb", label: "TIP3P-FB" },
   { value: "spce", label: "SPC/E" },
-  { value: "tip4pew", label: "TIP4P-Ew" }
-] as const;
-
-const LIPID_TYPES = [
-  { value: "POPC", label: "POPC" },
-  { value: "POPE", label: "POPE" },
-  { value: "DLPC", label: "DLPC" },
-  { value: "DLPE", label: "DLPE" },
-  { value: "DMPC", label: "DMPC" },
-  { value: "DOPC", label: "DOPC" },
-  { value: "DPPC", label: "DPPC" }
+  { value: "tip4pew", label: "TIP4P-Ew" },
+  { value: "tip5p", label: "TIP5P" }
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -69,7 +54,18 @@ interface RunResult {
   cifFiles: string[];
 }
 
-type SectionId = "source" | "sim-ready" | "membrane";
+export interface SavedSimulation {
+  id: string;
+  path: string;
+  files: string[];
+  engine?: string;
+  forcefield?: string;
+  n_atoms?: number;
+  n_waters?: number;
+  box_size?: number[];
+}
+
+type SectionId = "source" | "sim-ready";
 
 // ---------------------------------------------------------------------------
 // Collapsible Section
@@ -88,12 +84,8 @@ function Section({
 }): React.ReactElement {
   return (
     <Collapsible open={expanded} onOpenChange={() => onToggle()}>
-      <CollapsibleTrigger>
-        {title}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-4 pb-4">
-        {children}
-      </CollapsibleContent>
+      <CollapsibleTrigger>{title}</CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -103,9 +95,11 @@ function Section({
 // ---------------------------------------------------------------------------
 
 export function SimulationSection({
-  results
+  results,
+  savedSims
 }: {
   results: RunResult[];
+  savedSims: SavedSimulation[];
 }): React.ReactElement {
   const apiUrl = useAtomValue(apiUrlAtom);
   const [connectionStatus] = useAtom(apiConnectionStatusAtom);
@@ -133,17 +127,6 @@ export function SimulationSection({
   const [ionConcentration, setIonConcentration] = React.useState<number>(0.15);
   const [keepWater, setKeepWater] = React.useState<boolean>(false);
 
-  // --- Membrane parameters ---------------------------------------------------
-  const [lipidType, setLipidType] = React.useState<string>("POPC");
-  const [opmPdbId, setOpmPdbId] = React.useState<string>("");
-  const [opmInfo, setOpmInfo] = React.useState<{
-    thickness: number;
-    tilt_angle: number;
-    type: string;
-  } | null>(null);
-  const [opmLoading, setOpmLoading] = React.useState(false);
-  const [opmError, setOpmError] = React.useState<string | null>(null);
-
   // --- Sim-ready job state ---------------------------------------------------
   const [simJobId, setSimJobId] = React.useState<string | null>(null);
   const [simJobStatus, setSimJobStatus] = React.useState<string>("idle");
@@ -154,24 +137,6 @@ export function SimulationSection({
     unknown
   > | null>(null);
   const [simSavedDir, setSimSavedDir] = React.useState<string | null>(null);
-  const [simHistory, setSimHistory] = React.useState<
-    Array<{ result: Record<string, unknown>; savedDir: string | null }>
-  >([]);
-
-  // --- Membrane job state ----------------------------------------------------
-  const [memJobId, setMemJobId] = React.useState<string | null>(null);
-  const [memJobStatus, setMemJobStatus] = React.useState<string>("idle");
-  const [memProgress, setMemProgress] = React.useState<string | null>(null);
-  const [memError, setMemError] = React.useState<string | null>(null);
-  const [memResult, setMemResult] = React.useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [memSavedDir, setMemSavedDir] = React.useState<string | null>(null);
-  const [memHistory, setMemHistory] = React.useState<
-    Array<{ result: Record<string, unknown>; savedDir: string | null }>
-  >([]);
-
   // --- Run & CIF selection ---------------------------------------------------
   const [selectedRunIdx, setSelectedRunIdx] = React.useState<number>(-1);
   const [selectedCifIdx, setSelectedCifIdx] = React.useState<number>(0);
@@ -224,30 +189,6 @@ export function SimulationSection({
     },
     []
   );
-
-  const handleOpmLookup = React.useCallback(async () => {
-    if (!opmPdbId.trim() || opmPdbId.trim().length !== 4) return;
-    setOpmLoading(true);
-    setOpmError(null);
-    setOpmInfo(null);
-    try {
-      const result = await window.api.boltz.opmLookup(
-        apiUrl,
-        opmPdbId.trim().toUpperCase()
-      );
-      if (result.success && result.data) {
-        setOpmInfo(
-          result.data as { thickness: number; tilt_angle: number; type: string }
-        );
-      } else {
-        setOpmError(result.error || "No OPM data found");
-      }
-    } catch (err) {
-      setOpmError(err instanceof Error ? err.message : "OPM lookup failed");
-    } finally {
-      setOpmLoading(false);
-    }
-  }, [opmPdbId, apiUrl]);
 
   const pollJobStatus = React.useCallback(
     async (
@@ -313,22 +254,14 @@ export function SimulationSection({
     [apiUrl]
   );
 
-  const downloadAndView = React.useCallback(
-    async (jobId: string, simType: "sim" | "membrane") => {
+  const downloadResults = React.useCallback(
+    async (jobId: string) => {
       const dlResult = await window.api.boltz.downloadAndSaveSimResults(
         apiUrl,
-        jobId,
-        simType
+        jobId
       );
       if (!dlResult.success) {
         throw new Error(dlResult.error || "Download failed");
-      }
-      if (dlResult.systemPdbContent && dlResult.systemPdbPath) {
-        bus.emit("simulation:load-system", {
-          filePath: dlResult.systemPdbPath,
-          fileContent: dlResult.systemPdbContent,
-          label: dlResult.simId || simType
-        });
       }
       return dlResult;
     },
@@ -341,10 +274,6 @@ export function SimulationSection({
 
   const handleSimReady = React.useCallback(async () => {
     if (!selectedCif) return;
-    // Save previous result to history before starting new run
-    if (simResult) {
-      setSimHistory(prev => [...prev, { result: simResult, savedDir: simSavedDir }]);
-    }
     setSimError(null);
     setSimResult(null);
     setSimSavedDir(null);
@@ -381,7 +310,7 @@ export function SimulationSection({
       if (jobId) {
         try {
           setSimProgress("Downloading files...");
-          const dl = await downloadAndView(jobId, "sim");
+          const dl = await downloadResults(jobId);
           setSimSavedDir(dl.simDir || null);
         } catch (dlErr) {
           console.warn("Auto-download failed:", dlErr);
@@ -403,87 +332,10 @@ export function SimulationSection({
     keepWater,
     apiUrl,
     pollJobStatus,
-    downloadAndView,
-    simResult,
-    simSavedDir
-  ]);
-
-  const handleMembrane = React.useCallback(async () => {
-    if (!selectedCif) return;
-    // Save previous result to history before starting new run
-    if (memResult) {
-      setMemHistory(prev => [...prev, { result: memResult, savedDir: memSavedDir }]);
-    }
-    setMemError(null);
-    setMemResult(null);
-    setMemSavedDir(null);
-    setMemJobStatus("submitting");
-    setMemProgress(null);
-    try {
-      const cifContent = await readCifContent(selectedCif);
-      const cifFilename = selectedCif.split("/").pop() || "input.cif";
-      const payload: Record<string, unknown> = {
-        cif_content: cifContent,
-        cif_filename: cifFilename,
-        lipid_type: lipidType,
-        engine,
-        forcefield,
-        water_model: waterModel,
-        ph,
-        padding,
-        ion_concentration: ionConcentration,
-        skip_opm: !opmPdbId.trim()
-      };
-      if (opmPdbId.trim()) {
-        payload.pdb_id = opmPdbId.trim().toUpperCase();
-      }
-      const result = await window.api.boltz.membrane(apiUrl, payload);
-      if (!result.success || !result.data) {
-        throw new Error(result.error || "Membrane request failed");
-      }
-      const jobId = result.data.job_id;
-      setMemJobId(jobId);
-      setMemJobStatus("running");
-      await pollJobStatus(
-        jobId,
-        setMemJobStatus,
-        setMemProgress,
-        setMemError,
-        setMemResult
-      );
-      if (jobId) {
-        try {
-          setMemProgress("Downloading files...");
-          const dl = await downloadAndView(jobId, "membrane");
-          setMemSavedDir(dl.simDir || null);
-        } catch (dlErr) {
-          console.warn("Auto-download failed:", dlErr);
-        }
-      }
-    } catch (err) {
-      setMemJobStatus("failed");
-      setMemError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }, [
-    selectedCif,
-    readCifContent,
-    lipidType,
-    engine,
-    forcefield,
-    waterModel,
-    ph,
-    padding,
-    ionConcentration,
-    opmPdbId,
-    apiUrl,
-    pollJobStatus,
-    downloadAndView,
-    memResult,
-    memSavedDir
+    downloadResults
   ]);
 
   const isSimBusy = simJobStatus === "submitting" || simJobStatus === "running";
-  const isMemBusy = memJobStatus === "submitting" || memJobStatus === "running";
   const isDisconnected = connectionStatus !== "connected";
 
   // ---------------------------------------------------------------------------
@@ -492,7 +344,7 @@ export function SimulationSection({
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-auto">
-      {/* ── Source Structure ── */}
+      {/* -- Source Structure -- */}
       <Section
         title="Source Structure"
         expanded={expandedSections.has("source")}
@@ -561,7 +413,7 @@ export function SimulationSection({
         </div>
       </Section>
 
-      {/* ── Simulation-Ready Preparation ── */}
+      {/* -- Simulation-Ready Preparation -- */}
       <Section
         title="Simulation-Ready Preparation"
         expanded={expandedSections.has("sim-ready")}
@@ -704,149 +556,24 @@ export function SimulationSection({
             />
           )}
 
-          {simHistory.length > 0 && (
+          {savedSims.length > 0 && (
             <div className="space-y-1.5">
               <div className="text-[10px] font-medium text-muted-foreground">
-                Previous Runs ({simHistory.length})
+                Saved Runs ({savedSims.length})
               </div>
-              {[...simHistory].reverse().map((h, i) => (
+              {[...savedSims].reverse().map(sim => (
                 <SimResultCard
-                  key={`sim-hist-${simHistory.length - 1 - i}`}
-                  title={`Run ${simHistory.length - i}`}
-                  result={h.result}
-                  savedDir={h.savedDir}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </Section>
-
-      {/* ── Membrane Embedding ── */}
-      <Section
-        title="Membrane Embedding"
-        expanded={expandedSections.has("membrane")}
-        onToggle={() => toggleSection("membrane")}
-      >
-        <div className="space-y-3">
-          <p className="text-[10px] text-muted-foreground">
-            Embed the protein in a lipid bilayer membrane for MD simulation.
-          </p>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-[10px] font-medium text-muted-foreground">
-                Lipid Type
-              </label>
-              <Select value={lipidType} onValueChange={setLipidType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LIPID_TYPES.map(l => (
-                    <SelectItem key={l.value} value={l.value}>
-                      {l.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-medium text-muted-foreground">
-                OPM PDB ID
-              </label>
-              <div className="flex gap-1">
-                <input
-                  type="text"
-                  value={opmPdbId}
-                  onChange={e => setOpmPdbId(e.target.value.toUpperCase())}
-                  placeholder="e.g. 1OCC"
-                  maxLength={4}
-                  className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs uppercase font-mono"
-                />
-                <Button
-                  onClick={handleOpmLookup}
-                  disabled={opmLoading || opmPdbId.trim().length !== 4}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[10px] px-2"
-                >
-                  {opmLoading ? "..." : "Lookup"}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {opmInfo && (
-            <Alert variant="default">
-              <AlertDescription>
-                <div className="font-medium text-blue-600 dark:text-blue-400 mb-1">
-                  OPM Data Found
-                </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                  <span>Thickness:</span>
-                  <span className="font-mono">
-                    {opmInfo.thickness.toFixed(1)} A
-                  </span>
-                  <span>Tilt angle:</span>
-                  <span className="font-mono">
-                    {opmInfo.tilt_angle.toFixed(1)} deg
-                  </span>
-                  <span>Type:</span>
-                  <span>{opmInfo.type}</span>
-                </div>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {opmError && (
-            <Alert variant="warning">
-              <AlertDescription>
-                <p className="text-[10px]">
-                  {opmError}
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <Button
-            onClick={handleMembrane}
-            disabled={isDisconnected || !selectedCif || isMemBusy}
-            variant="outline"
-            className="w-full"
-          >
-            {isMemBusy ? "Building..." : "Build Membrane System"}
-          </Button>
-          {isDisconnected && <DisconnectedHint />}
-
-          <JobStatusCard
-            jobId={memJobId}
-            status={memJobStatus}
-            progress={memProgress}
-            error={memError}
-            label="Membrane"
-          />
-
-          {memResult && (
-            <SimResultCard
-              title="Membrane System Ready"
-              result={memResult}
-              savedDir={memSavedDir}
-              defaultExpanded
-            />
-          )}
-
-          {memHistory.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium text-muted-foreground">
-                Previous Runs ({memHistory.length})
-              </div>
-              {[...memHistory].reverse().map((h, i) => (
-                <SimResultCard
-                  key={`mem-hist-${memHistory.length - 1 - i}`}
-                  title={`Run ${memHistory.length - i}`}
-                  result={h.result}
-                  savedDir={h.savedDir}
+                  key={sim.id}
+                  title={sim.id}
+                  result={{
+                    engine: sim.engine,
+                    forcefield: sim.forcefield,
+                    n_atoms: sim.n_atoms,
+                    n_waters: sim.n_waters,
+                    box_size: sim.box_size,
+                    files: Object.fromEntries(sim.files.map(f => [f, f]))
+                  }}
+                  savedDir={sim.path}
                 />
               ))}
             </div>
@@ -954,7 +681,7 @@ function SimResultCard({
 
   return (
     <div className="rounded-md border border-green-500/30 bg-green-500/5 overflow-hidden">
-      {/* Header — always visible, clickable to toggle */}
+      {/* Header -- always visible, clickable to toggle */}
       <button
         onClick={() => setExpanded(e => !e)}
         className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-green-500/10 transition-colors"
@@ -985,7 +712,7 @@ function SimResultCard({
         )}
       </button>
 
-      {/* Detail — shown when expanded */}
+      {/* Detail -- shown when expanded */}
       {expanded && (
         <div className="px-3 pb-3 space-y-2">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">

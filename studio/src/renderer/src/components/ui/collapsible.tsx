@@ -27,7 +27,10 @@ function Collapsible({
   children,
   className
 }: CollapsibleProps): React.ReactElement {
-  const ctx = React.useMemo(() => ({ open, onOpenChange }), [open, onOpenChange]);
+  const ctx = React.useMemo(
+    () => ({ open, onOpenChange }),
+    [open, onOpenChange]
+  );
   return (
     <CollapsibleContext.Provider value={ctx}>
       <div className={cn("", className)}>{children}</div>

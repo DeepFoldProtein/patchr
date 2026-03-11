@@ -43,6 +43,7 @@ const api = {
     readFileByPath: (filePath: string) =>
       ipcRenderer.invoke("project:read-file-by-path", filePath),
     listResults: () => ipcRenderer.invoke("project:list-results"),
+    listSimulations: () => ipcRenderer.invoke("project:list-simulations"),
     listDirectory: (dirPath: string) =>
       ipcRenderer.invoke("project:list-directory", dirPath)
   },
@@ -78,23 +79,10 @@ const api = {
       ipcRenderer.invoke("boltz:download-and-save-results", apiUrl, jobId),
     simReady: (apiUrl: string, payload: unknown) =>
       ipcRenderer.invoke("boltz:sim-ready", apiUrl, payload),
-    membrane: (apiUrl: string, payload: unknown) =>
-      ipcRenderer.invoke("boltz:membrane", apiUrl, payload),
     simResult: (apiUrl: string, jobId: string) =>
       ipcRenderer.invoke("boltz:sim-result", apiUrl, jobId),
-    downloadAndSaveSimResults: (
-      apiUrl: string,
-      jobId: string,
-      simType: "sim" | "membrane"
-    ) =>
-      ipcRenderer.invoke(
-        "boltz:download-and-save-sim-results",
-        apiUrl,
-        jobId,
-        simType
-      ),
-    opmLookup: (apiUrl: string, pdbId: string) =>
-      ipcRenderer.invoke("boltz:opm-lookup", apiUrl, pdbId)
+    downloadAndSaveSimResults: (apiUrl: string, jobId: string) =>
+      ipcRenderer.invoke("boltz:download-and-save-sim-results", apiUrl, jobId)
   },
   // App settings
   app: {
