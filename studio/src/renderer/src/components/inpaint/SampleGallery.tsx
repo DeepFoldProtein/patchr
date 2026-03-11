@@ -50,8 +50,8 @@ export function SampleGallery({
               rounded border-2 transition-colors
               ${
                 selectedFrameId === frame.frameId
-                  ? "border-cyan-500 bg-cyan-500/20"
-                  : "border-slate-600 bg-slate-700 hover:border-slate-500"
+                  ? "border-neutral-300 bg-neutral-500/20"
+                  : "border-neutral-600 bg-neutral-700 hover:border-neutral-500"
               }
             `}
             title={`Seed ${frame.frameIndex}, pLDDT: ${frame.plddt_mean?.toFixed(1) ?? "N/A"}`}

@@ -180,17 +180,17 @@ function ServerSetupGuide({
       </div>
 
       <Tabs defaultValue="colab">
-        <TabsList className="w-full rounded-none border-b border-slate-200/50 dark:border-slate-800/50 bg-transparent p-0 h-auto">
+        <TabsList className="w-full rounded-none border-b border-neutral-200/50 dark:border-neutral-800/50 bg-transparent p-0 h-auto">
           <TabsTrigger
             value="colab"
-            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none"
+            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-neutral-500 data-[state=active]:text-neutral-700 dark:data-[state=active]:text-neutral-300 data-[state=active]:shadow-none"
           >
             <Cloud className="h-3 w-3" />
             Google Colab
           </TabsTrigger>
           <TabsTrigger
             value="local"
-            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none"
+            className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-neutral-500 data-[state=active]:text-neutral-700 dark:data-[state=active]:text-neutral-300 data-[state=active]:shadow-none"
           >
             <Monitor className="h-3 w-3" />
             Local Setup
@@ -199,7 +199,7 @@ function ServerSetupGuide({
 
         <TabsContent value="colab" className="mt-0 p-3">
           <div className="space-y-2.5">
-            <p className="text-xs text-slate-600 dark:text-slate-400">
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">
               Use a free GPU on Google Colab:
             </p>
             <div className="rounded px-2 py-1.5 bg-orange-500/10 border border-orange-500/20">
@@ -211,11 +211,11 @@ function ServerSetupGuide({
             </div>
             <div className="space-y-1.5">
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   1
                 </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <div className="text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Open the Colab notebook
                   </span>
                   <button
@@ -228,22 +228,22 @@ function ServerSetupGuide({
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   2
                 </span>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Run all cells
                   </span>{" "}
                   and copy the public URL
                 </p>
               </div>
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   3
                 </span>
-                <div className="flex-1 text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <div className="flex-1 text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Paste the URL here
                   </span>
                   <div className="flex gap-1.5 mt-1">
@@ -260,7 +260,7 @@ function ServerSetupGuide({
                     <button
                       onClick={handleColabUrlApply}
                       disabled={!colabUrl.trim()}
-                      className="rounded bg-blue-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center gap-0.5"
+                      className="rounded bg-neutral-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-neutral-700 disabled:opacity-40 transition-colors flex items-center gap-0.5"
                     >
                       Apply
                       <ChevronRight className="h-2.5 w-2.5" />
@@ -274,42 +274,42 @@ function ServerSetupGuide({
 
         <TabsContent value="local" className="mt-0 p-3">
           <div className="space-y-2.5">
-            <p className="text-xs text-slate-600 dark:text-slate-400">
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">
               Run the PATCHR server locally (requires GPU):
             </p>
             <div className="space-y-1.5">
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   1
                 </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <div className="text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Clone &amp; install
                   </span>
-                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all whitespace-pre-wrap">
+                  <code className="block mt-1 px-2 py-1 rounded bg-neutral-100 dark:bg-neutral-800/80 text-[10px] font-mono text-neutral-700 dark:text-neutral-300 select-all whitespace-pre-wrap">
                     {`git clone https://github.com/DeepFoldProtein/patchr.git\ncd patchr && pip install -e .`}
                   </code>
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   2
                 </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <div className="text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Start the server
                   </span>
-                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all">
+                  <code className="block mt-1 px-2 py-1 rounded bg-neutral-100 dark:bg-neutral-800/80 text-[10px] font-mono text-neutral-700 dark:text-neutral-300 select-all">
                     patchr serve --model boltz2
                   </code>
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
+                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-neutral-500/20 text-[10px] font-bold text-neutral-500">
                   3
                 </span>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
                     Click &quot;Connect&quot;
                   </span>{" "}
                   above with the default URL
