@@ -159,6 +159,38 @@ export interface BoltzAPI {
     cifFiles?: string[];
     error?: string;
   }>;
+  simReady: (
+    apiUrl: string,
+    payload: unknown
+  ) => Promise<{
+    success: boolean;
+    data?: { job_id: string; status: string };
+    error?: string;
+  }>;
+  membrane: (
+    apiUrl: string,
+    payload: unknown
+  ) => Promise<{
+    success: boolean;
+    data?: { job_id: string; status: string };
+    error?: string;
+  }>;
+  simResult: (
+    apiUrl: string,
+    jobId: string
+  ) => Promise<{
+    success: boolean;
+    data?: unknown;
+    error?: string;
+  }>;
+  opmLookup: (
+    apiUrl: string,
+    pdbId: string
+  ) => Promise<{
+    success: boolean;
+    data?: unknown;
+    error?: string;
+  }>;
 }
 
 export interface AppAPI {

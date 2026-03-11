@@ -54,7 +54,7 @@ export function useCanonicalMapping(
         }
 
         // Generate mapping from structure and missing regions
-        const mapping = generateMapping(structure, missingRegions);
+        generateMapping(structure, missingRegions);
         logger.log("✅ [Canonical Mapping] Mapping generated");
       } catch (error) {
         const message =

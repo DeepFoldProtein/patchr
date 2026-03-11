@@ -1,5 +1,5 @@
 import { app, dialog, ipcMain, shell, net } from "electron";
-import { join, basename, resolve, relative } from "path";
+import { join, basename, resolve } from "path";
 import { promises as fs } from "fs";
 import { existsSync } from "fs";
 import { randomBytes } from "crypto";
@@ -1001,6 +1001,113 @@ export function registerProjectIPC(): void {
     }
   );
 
+  // Sim-Ready & Membrane API handlers
+  ipcMain.handle(
+    "boltz:sim-ready",
+    async (_event, apiUrl: string, payload: unknown) => {
+      try {
+        validateApiUrl(apiUrl);
+        const response = await net.fetch(`${apiUrl}/api/v1/sim-ready`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Sim-ready request failed: ${response.statusText} - ${errorText}`
+          );
+        }
+
+        const data = await response.json();
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "boltz:membrane",
+    async (_event, apiUrl: string, payload: unknown) => {
+      try {
+        validateApiUrl(apiUrl);
+        const response = await net.fetch(`${apiUrl}/api/v1/membrane`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Membrane request failed: ${response.statusText} - ${errorText}`
+          );
+        }
+
+        const data = await response.json();
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "boltz:sim-result",
+    async (_event, apiUrl: string, jobId: string) => {
+      try {
+        validateApiUrl(apiUrl);
+        const response = await net.fetch(
+          `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/sim-result`
+        );
+
+        if (!response.ok) {
+          throw new Error(`Sim result fetch failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "boltz:opm-lookup",
+    async (_event, apiUrl: string, pdbId: string) => {
+      try {
+        validateApiUrl(apiUrl);
+        const response = await net.fetch(
+          `${apiUrl}/api/v1/opm/${encodeURIComponent(pdbId)}`
+        );
+
+        if (!response.ok) {
+          throw new Error(`OPM lookup failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
   // Boltz API handlers
   ipcMain.handle("boltz:health-check", async (_event, apiUrl: string) => {
     try {
@@ -1097,7 +1204,9 @@ export function registerProjectIPC(): void {
     async (_event, apiUrl: string, jobId: string) => {
       try {
         validateApiUrl(apiUrl);
-        const response = await net.fetch(`${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}`);
+        const response = await net.fetch(
+          `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}`
+        );
         if (!response.ok) {
           throw new Error(`Status check failed: ${response.statusText}`);
         }
@@ -1220,8 +1329,13 @@ export function registerProjectIPC(): void {
         // Validate all entries before extraction to prevent zip slip
         for (const entry of zip.getEntries()) {
           const entryPath = resolve(extractDir, entry.entryName);
-          if (!entryPath.startsWith(resolvedExtractDir + "/") && entryPath !== resolvedExtractDir) {
-            throw new Error(`Zip entry "${entry.entryName}" escapes target directory`);
+          if (
+            !entryPath.startsWith(resolvedExtractDir + "/") &&
+            entryPath !== resolvedExtractDir
+          ) {
+            throw new Error(
+              `Zip entry "${entry.entryName}" escapes target directory`
+            );
           }
         }
 

@@ -1,10 +1,4 @@
-import {
-  app,
-  shell,
-  BrowserWindow,
-  ipcMain,
-  nativeTheme
-} from "electron";
+import { app, shell, BrowserWindow, ipcMain, nativeTheme } from "electron";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/icon.png?asset";

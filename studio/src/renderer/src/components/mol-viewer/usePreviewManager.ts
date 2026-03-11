@@ -187,8 +187,11 @@ export function usePreviewManager(plugin: PluginContext | null): {
         // Reset reconnect attempts
         reconnectAttemptsRef.current = 0;
 
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const ws = new WebSocket(`${wsProtocol}//localhost:8000/api/inpaint/preview`);
+        const wsProtocol =
+          window.location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(
+          `${wsProtocol}//localhost:8000/api/inpaint/preview`
+        );
         ws.binaryType = "arraybuffer";
         wsRef.current = ws;
 

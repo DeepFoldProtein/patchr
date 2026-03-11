@@ -20,7 +20,7 @@ async function waitForRepresentations(
     // Check if any representations exist
     let foundRepresentations = false;
 
-    for (const [_ref, cell] of cells.entries()) {
+    for (const [, cell] of cells.entries()) {
       if (
         cell.transform.transformer ===
         StateTransforms.Representation.StructureRepresentation3D
