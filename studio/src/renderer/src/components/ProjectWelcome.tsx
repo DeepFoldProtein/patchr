@@ -151,7 +151,7 @@ export function ProjectWelcome(): React.ReactElement {
       <div className="relative z-10 w-full space-y-8 px-6 py-16 md:max-w-4xl mx-auto">
         {/* Hero Section */}
         <div className="text-center space-y-4 opacity-0 animate-[fadeInUp_0.7s_ease-out_0.1s_forwards]">
-          <div className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-2xl mb-4 group">
+          <div className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-2xl mb-4 mx-auto group">
             <img src={logoIcon} alt="Patchr" className="w-full h-full" />
             <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-transparent" />
             <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black/10" />
