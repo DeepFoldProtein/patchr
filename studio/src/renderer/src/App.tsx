@@ -5,6 +5,7 @@ import { useAtom } from "jotai";
 import { themeClassAtom, themeAtom } from "@/store/app-atoms";
 import { AppLayout } from "@/components/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 // Create a client
 const queryClient = new QueryClient({
@@ -67,7 +68,9 @@ function App(): React.JSX.Element {
     <ErrorBoundary>
       <JotaiProvider>
         <QueryClientProvider client={queryClient}>
-          <AppContent />
+          <TooltipProvider>
+            <AppContent />
+          </TooltipProvider>
         </QueryClientProvider>
       </JotaiProvider>
     </ErrorBoundary>

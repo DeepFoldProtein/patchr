@@ -11,6 +11,8 @@ import { useAutoYAMLGeneration } from "./mol-viewer/useAutoYAMLGeneration";
 import { useCanonicalMapping } from "./mol-viewer/useCanonicalMapping";
 import { useSuperpose } from "./mol-viewer/useSuperpose";
 import { useChainColors } from "./mol-viewer/useChainColors";
+import { AlertTriangle } from "lucide-react";
+import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { useCurrentProject, useStructureContent } from "../store/project-store";
 import { pluginAtom } from "../store/mol-viewer-atoms";
@@ -73,9 +75,10 @@ function MolViewerPanelInner({
   return (
     <div className="flex h-full flex-col bg-slate-950">
       {error && (
-        <div className="bg-red-900/50 text-red-100 p-2 text-sm border-b border-red-800">
-          ⚠️ {error}
-        </div>
+        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* Sequence panel container - 별도 영역에 표시 */}
@@ -123,27 +126,29 @@ export function MolViewerPanel(props: MolViewerPanelProps): React.ReactElement {
       key={key}
       fallback={
         <div className="flex h-full items-center justify-center bg-slate-950">
-          <div className="max-w-md rounded-lg border border-red-900/50 bg-red-950/20 p-6 text-center">
-            <div className="mb-4 text-4xl">⚠️</div>
-            <h2 className="mb-2 text-lg font-semibold text-red-400">
-              Viewer Error
-            </h2>
-            <p className="mb-4 text-sm text-slate-400">
-              Failed to initialize the molecular viewer. Please try reloading
-              the application.
-            </p>
-            <button
-              onClick={() => setKey(k => k + 1)}
-              className="mr-2 rounded-md bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 transition-colors"
-            >
-              Retry
-            </button>
-            <button
-              onClick={() => window.location.reload()}
-              className="rounded-md bg-red-900/50 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-900/70 transition-colors"
-            >
-              Reload App
-            </button>
+          <div className="max-w-md">
+            <Alert variant="destructive" className="text-center">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Viewer Error</AlertTitle>
+              <AlertDescription className="mb-4">
+                Failed to initialize the molecular viewer. Please try reloading
+                the application.
+              </AlertDescription>
+              <div className="flex justify-center gap-2 pt-2">
+                <button
+                  onClick={() => setKey(k => k + 1)}
+                  className="rounded-md bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 transition-colors"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="rounded-md bg-red-900/50 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-900/70 transition-colors"
+                >
+                  Reload App
+                </button>
+              </div>
+            </Alert>
           </div>
         </div>
       }

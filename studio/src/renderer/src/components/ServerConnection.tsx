@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ServerOff
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
 import { apiUrlAtom, apiConnectionStatusAtom } from "../store/api-atoms";
 import { logger } from "../lib/logger";
 
@@ -165,7 +166,6 @@ function ServerSetupGuide({
 }: {
   onUrlChange: (url: string) => void;
 }): React.ReactElement {
-  const [activeTab, setActiveTab] = React.useState<"local" | "colab">("colab");
   const [colabUrl, setColabUrl] = React.useState("");
 
   const handleColabUrlApply = (): void => {
@@ -184,33 +184,19 @@ function ServerSetupGuide({
         </div>
       </div>
 
-      <div className="flex border-b border-slate-200/50 dark:border-slate-800/50">
-        <button
-          onClick={() => setActiveTab("colab")}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "colab"
-              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Cloud className="h-3 w-3" />
-          Google Colab
-        </button>
-        <button
-          onClick={() => setActiveTab("local")}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "local"
-              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Monitor className="h-3 w-3" />
-          Local Setup
-        </button>
-      </div>
+      <Tabs defaultValue="colab">
+        <TabsList className="w-full rounded-none border-b border-slate-200/50 dark:border-slate-800/50 bg-transparent p-0 h-auto">
+          <TabsTrigger value="colab" className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none">
+            <Cloud className="h-3 w-3" />
+            Google Colab
+          </TabsTrigger>
+          <TabsTrigger value="local" className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent py-2 text-xs data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-none">
+            <Monitor className="h-3 w-3" />
+            Local Setup
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="p-3">
-        {activeTab === "colab" ? (
+        <TabsContent value="colab" className="mt-0 p-3">
           <div className="space-y-2.5">
             <p className="text-xs text-slate-600 dark:text-slate-400">
               Use a free GPU on Google Colab:
@@ -283,7 +269,9 @@ function ServerSetupGuide({
               </div>
             </div>
           </div>
-        ) : (
+        </TabsContent>
+
+        <TabsContent value="local" className="mt-0 p-3">
           <div className="space-y-2.5">
             <p className="text-xs text-slate-600 dark:text-slate-400">
               Run the PATCHR server locally (requires GPU):
@@ -328,8 +316,8 @@ function ServerSetupGuide({
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

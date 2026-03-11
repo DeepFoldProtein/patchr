@@ -14,7 +14,17 @@ import {
   CardHeader,
   CardTitle
 } from "./ui/card";
-import { FolderOpen, FolderPlus, X, Folder } from "lucide-react";
+import { Alert, AlertDescription } from "./ui/alert";
+import {
+  FolderOpen,
+  FolderPlus,
+  X,
+  Folder,
+  AlertTriangle,
+  Loader2,
+  FolderTree,
+  FileText
+} from "lucide-react";
 
 export function ProjectManager(): React.ReactElement {
   // Zustand store selectors
@@ -99,16 +109,18 @@ export function ProjectManager(): React.ReactElement {
       <CardContent className="space-y-4">
         {/* Error Display */}
         {error && (
-          <div className="p-3 bg-red-900/20 border border-red-700 rounded-lg text-sm text-red-200">
-            ⚠️ {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {/* Loading State */}
         {isLoading && (
-          <div className="p-3 bg-blue-900/20 border border-blue-700 rounded-lg text-sm text-blue-200">
-            ⏳ Loading...
-          </div>
+          <Alert>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <AlertDescription>Loading...</AlertDescription>
+          </Alert>
         )}
 
         {/* Current Project Info */}
@@ -135,20 +147,32 @@ export function ProjectManager(): React.ReactElement {
             <div className="p-4 bg-muted/50 rounded-lg">
               <div className="text-xs text-muted-foreground space-y-1">
                 <div className="font-semibold mb-2">Project Structure:</div>
-                <div>📁 structures/original/ - Original PDB/CIF files</div>
-                <div>📁 results/ - Inpainting results</div>
+                <div className="flex items-center gap-1.5">
+                  <FolderTree className="h-3 w-3 shrink-0" />
+                  structures/original/ - Original PDB/CIF files
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <FolderTree className="h-3 w-3 shrink-0" />
+                  results/ - Inpainting results
+                </div>
                 <div className="ml-4 mt-1 space-y-0.5 text-xs">
                   <div>└── run_XXX/ - Individual run directories</div>
                   <div className="ml-4">
                     └── predictions/ - Prediction CIF files and YAML
                   </div>
                 </div>
-                <div>📁 simulations/ - Simulation output files</div>
+                <div className="flex items-center gap-1.5">
+                  <FolderTree className="h-3 w-3 shrink-0" />
+                  simulations/ - Simulation output files
+                </div>
                 <div className="ml-4 mt-1 space-y-0.5 text-xs">
                   <div>├── sim_XXX/ - Sim-ready preparation results</div>
                   <div>└── mem_XXX/ - Membrane embedding results</div>
                 </div>
-                <div>📄 project.yaml - Configuration file</div>
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3 w-3 shrink-0" />
+                  project.yaml - Configuration file
+                </div>
               </div>
             </div>
 

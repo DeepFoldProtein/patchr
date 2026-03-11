@@ -7,6 +7,7 @@ import {
   selectedSegmentIdsAtom,
   missingRegionDetectionLoadingAtom
 } from "../../store/repair-atoms";
+import { CheckCircle, AlertTriangle } from "lucide-react";
 import { bus } from "../../lib/event-bus";
 import { logger } from "../../lib/logger";
 
@@ -41,7 +42,7 @@ export function MissingRegionReviewSection(): React.ReactElement {
   if (missingRegions.length === 0) {
     return (
       <div className="p-6 text-center">
-        <div className="mb-2 text-4xl">✓</div>
+        <CheckCircle className="mx-auto mb-2 h-8 w-8 text-green-500" />
         <h3 className="mb-1 text-sm font-semibold">
           No Missing Regions Detected
         </h3>
@@ -243,8 +244,13 @@ export function MissingRegionReviewSection(): React.ReactElement {
                         0
                       )}{" "}
                       region(s)
-                      {chainSegments.some(s => s.needsSequenceInput) &&
-                        " · ⚠ Sequence needed"}
+                      {chainSegments.some(s => s.needsSequenceInput) && (
+                        <span className="inline-flex items-center gap-0.5">
+                          {" · "}
+                          <AlertTriangle className="inline h-3 w-3 text-amber-500" />
+                          {" Sequence needed"}
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
