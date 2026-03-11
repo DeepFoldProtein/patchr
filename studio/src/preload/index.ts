@@ -82,6 +82,17 @@ const api = {
       ipcRenderer.invoke("boltz:membrane", apiUrl, payload),
     simResult: (apiUrl: string, jobId: string) =>
       ipcRenderer.invoke("boltz:sim-result", apiUrl, jobId),
+    downloadAndSaveSimResults: (
+      apiUrl: string,
+      jobId: string,
+      simType: "sim" | "membrane"
+    ) =>
+      ipcRenderer.invoke(
+        "boltz:download-and-save-sim-results",
+        apiUrl,
+        jobId,
+        simType
+      ),
     opmLookup: (apiUrl: string, pdbId: string) =>
       ipcRenderer.invoke("boltz:opm-lookup", apiUrl, pdbId)
   },

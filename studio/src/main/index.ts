@@ -33,6 +33,7 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     if (mainWindow) {
+      mainWindow.maximize();
       mainWindow.show();
     }
   });

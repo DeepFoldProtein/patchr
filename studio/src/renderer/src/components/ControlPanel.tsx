@@ -5,9 +5,14 @@ import { ProjectManager } from "./ProjectManager";
 import {
   selectedRepairSegmentsAtom,
   fastaInputAtom,
-  enableSequenceMappingAtom,
-  apiConnectionStatusAtom
+  enableSequenceMappingAtom
 } from "../store/repair-atoms";
+import {
+  apiUrlAtom,
+  apiConnectionStatusAtom,
+  panelModeAtom
+} from "../store/api-atoms";
+import type { PanelMode } from "../store/api-atoms";
 import { useCurrentProject } from "../store/project-store";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import { getSequencePanelData } from "./mol-viewer/useGapDetection";
@@ -20,12 +25,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  FolderOpen,
-  Monitor,
-  Cloud,
-  ExternalLink,
-  ChevronRight,
-  ServerOff
+  FolderOpen
 } from "lucide-react";
 import {
   Dialog,
@@ -35,52 +35,50 @@ import {
   DialogTitle
 } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { SimulationSection } from "./SimulationSection";
+import { ServerConnection } from "./ServerConnection";
+import { DisconnectedHint } from "./DisconnectedHint";
+
+const TAB_ITEMS: { key: PanelMode; label: string }[] = [
+  { key: "project", label: "Project" },
+  { key: "repair", label: "Repair" },
+  { key: "simulation", label: "Simulation" }
+];
 
 export function ControlPanel(): React.ReactElement {
-  const [panelMode, setPanelMode] = React.useState<"project" | "repair">(
-    "repair"
-  );
+  const [panelMode, setPanelMode] = useAtom(panelModeAtom);
 
   return (
     <div className="flex h-full flex-col bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl">
-      {/* 패널 모드 토글 */}
+      {/* Tab bar */}
       <div className="flex border-b border-slate-200/50 dark:border-slate-800/50 bg-slate-50/80 dark:bg-slate-900/60">
-        <button
-          onClick={() => setPanelMode("project")}
-          className={`relative flex-1 px-4 py-3 text-sm font-medium transition-all ${
-            panelMode === "project"
-              ? "text-slate-900 dark:text-white"
-              : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300"
-          }`}
-        >
-          <span className="relative z-10">Project</span>
-          {panelMode === "project" && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
-          )}
-        </button>
-        <button
-          onClick={() => setPanelMode("repair")}
-          className={`relative flex-1 px-4 py-3 text-sm font-medium transition-all ${
-            panelMode === "repair"
-              ? "text-slate-900 dark:text-white"
-              : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300"
-          }`}
-        >
-          <span className="relative z-10">Repair Console</span>
-          {panelMode === "repair" && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
-          )}
-        </button>
+        {TAB_ITEMS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setPanelMode(tab.key)}
+            className={`relative flex-1 px-3 py-3 text-xs font-medium transition-all ${
+              panelMode === tab.key
+                ? "text-slate-900 dark:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300"
+            }`}
+          >
+            <span className="relative z-10">{tab.label}</span>
+            {panelMode === tab.key && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Project Manager - always mounted, hidden with CSS */}
+      {/* Project Manager */}
       <div
-        className={`flex-1 overflow-auto p-4 ${panelMode === "project" ? "" : "hidden"}`}
+        className={`flex-1 overflow-auto p-4 space-y-4 ${panelMode === "project" ? "" : "hidden"}`}
       >
+        <ServerConnection />
         <ProjectManager />
       </div>
 
-      {/* Repair Console - always mounted, hidden with CSS */}
+      {/* Repair Console */}
       <div
         className={
           panelMode === "repair"
@@ -89,6 +87,17 @@ export function ControlPanel(): React.ReactElement {
         }
       >
         <RepairConsole />
+      </div>
+
+      {/* Simulation Panel */}
+      <div
+        className={
+          panelMode === "simulation"
+            ? "flex-1 flex flex-col overflow-auto p-4"
+            : "hidden"
+        }
+      >
+        <SimulationPanel />
       </div>
     </div>
   );
@@ -99,8 +108,7 @@ function RepairConsole(): React.ReactElement {
     | "missing-region-review"
     | "sequence"
     | "context"
-    | "results"
-    | "simulation";
+    | "results";
   const [expandedSections, setExpandedSections] = React.useState<
     Set<SectionId>
   >(new Set(["missing-region-review", "context", "results"]));
@@ -1301,17 +1309,6 @@ function RepairConsole(): React.ReactElement {
         </Section>
       )}
 
-      {/* Simulation Section */}
-      {currentProject && results.length > 0 && (
-        <Section
-          title="Simulation-Ready Output"
-          expanded={expandedSections.has("simulation")}
-          onToggle={() => toggleSection("simulation")}
-        >
-          <SimulationSection results={results} />
-        </Section>
-      )}
-
       {/* YAML Detail Dialog */}
       <Dialog
         open={detailRunId !== null && detailYaml !== null}
@@ -1806,196 +1803,6 @@ function SequenceMappingSection(): React.ReactElement {
   );
 }
 
-const COLAB_NOTEBOOK_URL =
-  "https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb";
-
-function ServerSetupGuide({
-  onUrlChange,
-  onDismiss
-}: {
-  onUrlChange: (url: string) => void;
-  onDismiss: () => void;
-}): React.ReactElement {
-  const [activeTab, setActiveTab] = React.useState<"local" | "colab">("colab");
-  const [colabUrl, setColabUrl] = React.useState("");
-
-  const handleColabUrlApply = (): void => {
-    const trimmed = colabUrl.trim().replace(/\/+$/, "");
-    if (trimmed) {
-      onUrlChange(trimmed);
-    }
-  };
-
-  return (
-    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border-b border-amber-500/20">
-        <div className="flex items-center gap-1.5">
-          <ServerOff className="h-3.5 w-3.5 text-amber-500" />
-          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-            Server not detected
-          </span>
-        </div>
-        <button
-          onClick={onDismiss}
-          className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
-        >
-          Dismiss
-        </button>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-slate-200/50 dark:border-slate-800/50">
-        <button
-          onClick={() => setActiveTab("colab")}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "colab"
-              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Cloud className="h-3 w-3" />
-          Google Colab
-        </button>
-        <button
-          onClick={() => setActiveTab("local")}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "local"
-              ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Monitor className="h-3 w-3" />
-          Local Setup
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="p-3">
-        {activeTab === "colab" ? (
-          <div className="space-y-2.5">
-            <p className="text-xs text-slate-600 dark:text-slate-400">
-              Use a free GPU on Google Colab:
-            </p>
-            <div className="rounded px-2 py-1.5 bg-orange-500/10 border border-orange-500/20">
-              <p className="text-[10px] text-orange-600 dark:text-orange-400">
-                Large targets may fail on Colab free tier due to limited GPU
-                memory (T4 15GB). For large complexes, use Local Setup or Colab
-                Pro.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  1
-                </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Open the Colab notebook
-                  </span>
-                  <button
-                    onClick={() => window.open(COLAB_NOTEBOOK_URL, "_blank")}
-                    className="flex items-center gap-1 mt-1 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
-                  >
-                    Open in Colab
-                    <ExternalLink className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  2
-                </span>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Run all cells
-                  </span>{" "}
-                  and copy the public URL
-                </p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  3
-                </span>
-                <div className="flex-1 text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Paste the URL here
-                  </span>
-                  <div className="flex gap-1.5 mt-1">
-                    <input
-                      type="text"
-                      value={colabUrl}
-                      onChange={e => setColabUrl(e.target.value)}
-                      placeholder="https://xxx.trycloudflare.com"
-                      className="flex-1 rounded border border-input bg-background px-2 py-1 text-[10px] font-mono"
-                      onKeyDown={e => {
-                        if (e.key === "Enter") handleColabUrlApply();
-                      }}
-                    />
-                    <button
-                      onClick={handleColabUrlApply}
-                      disabled={!colabUrl.trim()}
-                      className="rounded bg-blue-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center gap-0.5"
-                    >
-                      Apply
-                      <ChevronRight className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            <p className="text-xs text-slate-600 dark:text-slate-400">
-              Run the PATCHR server locally with a GPU:
-            </p>
-            <div className="space-y-1.5">
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  1
-                </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Clone & install
-                  </span>
-                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all whitespace-pre-wrap">
-                    {`git clone https://github.com/DeepFoldProtein/patchr.git && cd patchr && pip install -e .[cuda]`}
-                  </code>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  2
-                </span>
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Start the server
-                  </span>
-                  <code className="block mt-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800/80 text-[10px] font-mono text-slate-700 dark:text-slate-300 select-all">
-                    python -m boltz.server --port 31212
-                  </code>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-500">
-                  3
-                </span>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    Click &quot;Test Connection&quot;
-                  </span>{" "}
-                  above with the default URL
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function ContextInpaintSection({
   onJobCompleted
 }: {
@@ -2006,10 +1813,8 @@ function ContextInpaintSection({
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
 
-  const [apiUrl, setApiUrl] = React.useState("http://localhost:31212");
-  const [connectionStatus, setConnectionStatus] = useAtom(
-    apiConnectionStatusAtom
-  );
+  const apiUrl = useAtomValue(apiUrlAtom);
+  const connectionStatus = useAtomValue(apiConnectionStatusAtom);
   const [jobId, setJobId] = React.useState<string | null>(null);
   const [jobStatus, setJobStatus] = React.useState<string>("idle");
   const [progress, setProgress] = React.useState(0);
@@ -2017,39 +1822,6 @@ function ContextInpaintSection({
     null
   );
   const [error, setError] = React.useState<string | null>(null);
-  const [showSetupGuide, setShowSetupGuide] = React.useState(false);
-
-  // Auto-detect server on mount
-  React.useEffect(() => {
-    if (connectionStatus !== "idle") return;
-
-    let cancelled = false;
-    const autoDetect = async (): Promise<void> => {
-      try {
-        if (!window.api?.boltz?.healthCheck) return;
-        const result = await window.api.boltz.healthCheck(
-          "http://localhost:31212"
-        );
-        if (cancelled) return;
-        if (result.success) {
-          setConnectionStatus("connected");
-          logger.log("[Auto-detect] Server found at localhost:31212");
-        } else {
-          setShowSetupGuide(true);
-          logger.log("[Auto-detect] Server not responding");
-        }
-      } catch {
-        if (cancelled) return;
-        setShowSetupGuide(true);
-        logger.log("[Auto-detect] Server not found at localhost:31212");
-      }
-    };
-
-    void autoDetect();
-    return () => {
-      cancelled = true;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Get chains from selected repair segments
   const availableChains = React.useMemo(() => {
@@ -2100,118 +1872,6 @@ function ContextInpaintSection({
     },
     []
   );
-
-  // Test connection
-  const handleTestConnection = async (): Promise<void> => {
-    const startTime = Date.now();
-    logger.log(
-      `[Test Connection] Starting health check to ${apiUrl} at ${new Date().toISOString()}`
-    );
-
-    setConnectionStatus("testing");
-    setError(null);
-
-    try {
-      if (!window.api?.boltz?.healthCheck) {
-        throw new Error("Boltz API not available");
-      }
-
-      // Use AbortController for timeout instead of setTimeout
-      const abortController = new AbortController();
-      const timeoutSignal = abortController.signal;
-      let healthCheckCompleted = false;
-      const startTime = Date.now();
-
-      // Set timeout using AbortController
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        // Use requestAnimationFrame to check timeout without blocking
-        const checkTimeout = (): void => {
-          if (timeoutSignal.aborted) {
-            return;
-          }
-          const elapsed = Date.now() - startTime;
-          if (elapsed >= 5000) {
-            if (!healthCheckCompleted) {
-              logger.log(
-                `[Test Connection] ⏱️ Timeout fired after ${elapsed}ms`
-              );
-              abortController.abort();
-              reject(new Error("Connection timeout (5s)"));
-            }
-          } else {
-            requestAnimationFrame(checkTimeout);
-          }
-        };
-        requestAnimationFrame(checkTimeout);
-        logger.log(`[Test Connection] ⏱️ Timeout check started (5s limit)`);
-      });
-
-      logger.log(`[Test Connection] 📡 Calling healthCheck API...`);
-      const healthCheckStartTime = Date.now();
-
-      const healthCheckPromise = window.api.boltz.healthCheck(apiUrl).then(
-        result => {
-          const elapsed = Date.now() - healthCheckStartTime;
-          const totalElapsed = Date.now() - startTime;
-          healthCheckCompleted = true;
-          logger.log(
-            `[Test Connection] ✅ HealthCheck completed in ${elapsed}ms (total: ${totalElapsed}ms), success: ${result.success}`
-          );
-
-          // Abort timeout if still running
-          if (!timeoutSignal.aborted) {
-            abortController.abort();
-            logger.log(`[Test Connection] 🧹 Timeout aborted`);
-          }
-
-          return result;
-        },
-        error => {
-          const elapsed = Date.now() - healthCheckStartTime;
-          const totalElapsed = Date.now() - startTime;
-          healthCheckCompleted = true;
-          logger.log(
-            `[Test Connection] ❌ HealthCheck failed after ${elapsed}ms (total: ${totalElapsed}ms):`,
-            error
-          );
-
-          // Abort timeout if still running
-          if (!timeoutSignal.aborted) {
-            abortController.abort();
-            logger.log(`[Test Connection] 🧹 Timeout aborted after error`);
-          }
-
-          throw error;
-        }
-      );
-
-      logger.log(`[Test Connection] 🏁 Starting Promise.race...`);
-      const result = await Promise.race([healthCheckPromise, timeoutPromise]);
-      const totalElapsed = Date.now() - startTime;
-      logger.log(
-        `[Test Connection] 🎯 Promise.race resolved after ${totalElapsed}ms`
-      );
-
-      if (result.success) {
-        logger.log(`[Test Connection] ✅ Connection successful!`);
-        setConnectionStatus("connected");
-      } else {
-        logger.log(`[Test Connection] ❌ Connection failed: ${result.error}`);
-        setConnectionStatus("error");
-        setError(result.error || "Connection failed");
-      }
-    } catch (err) {
-      const totalElapsed = Date.now() - startTime;
-      logger.log(
-        `[Test Connection] 💥 Exception caught after ${totalElapsed}ms:`,
-        err
-      );
-      setConnectionStatus("error");
-      setError(
-        err instanceof Error ? err.message : "Failed to connect to server"
-      );
-    }
-  };
 
   // Start inpainting
   const handleStartInpainting = async (): Promise<void> => {
@@ -2548,49 +2208,6 @@ function ContextInpaintSection({
 
   return (
     <div className="space-y-4 p-4">
-      {/* API Configuration */}
-      <div className="space-y-2">
-        <label className="text-xs font-medium">API Server URL</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={apiUrl}
-            onChange={e => setApiUrl(e.target.value)}
-            placeholder="http://localhost:31212"
-            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs"
-          />
-          <button
-            onClick={handleTestConnection}
-            disabled={connectionStatus === "testing"}
-            className={`rounded-md px-3 py-2 text-xs font-medium ${
-              connectionStatus === "connected"
-                ? "bg-green-600 text-white"
-                : connectionStatus === "error"
-                  ? "bg-red-600 text-white hover:bg-red-700"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90"
-            } disabled:opacity-50`}
-          >
-            {connectionStatus === "testing"
-              ? "Testing..."
-              : connectionStatus === "connected"
-                ? "Connected"
-                : connectionStatus === "error"
-                  ? "Try Again"
-                  : "Test Connection"}
-          </button>
-        </div>
-      </div>
-
-      {/* Server Setup Guide - shown when server not detected */}
-      {showSetupGuide && connectionStatus !== "connected" && (
-        <ServerSetupGuide
-          onUrlChange={url => {
-            setApiUrl(url);
-          }}
-          onDismiss={() => setShowSetupGuide(false)}
-        />
-      )}
-
       {/* Status Display */}
       {jobStatus !== "idle" && (
         <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
@@ -2674,6 +2291,7 @@ function ContextInpaintSection({
             ? "Start Patch"
             : "Running..."}
         </button>
+        <DisconnectedHint />
       </div>
 
       {/* Info */}
@@ -2695,878 +2313,62 @@ function ContextInpaintSection({
 }
 
 // ========================================
-// Simulation Section
+// Simulation Panel (separate tab)
 // ========================================
 
-const ENGINES = [
-  { value: "gromacs", label: "GROMACS" },
-  { value: "amber", label: "Amber" },
-  { value: "openmm", label: "OpenMM" }
-] as const;
+function SimulationPanel(): React.ReactElement {
+  const currentProject = useCurrentProject();
+  const [results, setResults] = React.useState<
+    Array<{
+      runId: string;
+      runPath: string;
+      predictionsPath: string;
+      cifFiles: string[];
+    }>
+  >([]);
 
-const FORCEFIELDS = [
-  { value: "charmm36m", label: "CHARMM36m" },
-  { value: "charmm36", label: "CHARMM36" },
-  { value: "amber14sb", label: "Amber14SB" },
-  { value: "amber99sbildn", label: "Amber99SB-ILDN" },
-  { value: "amber19sb", label: "Amber19SB" }
-] as const;
+  const loadResults = React.useCallback(async () => {
+    if (!currentProject) {
+      setResults([]);
+      return;
+    }
+    try {
+      const result = await window.api.project.listResults();
+      if (result.success && result.results) {
+        setResults(
+          result.results.map(r => ({
+            runId: r.runId,
+            runPath: r.runPath,
+            predictionsPath:
+              (r as { predictionsPath?: string }).predictionsPath || r.runPath,
+            cifFiles: r.cifFiles
+          }))
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentProject]);
 
-const WATER_MODELS = [
-  { value: "tip3p", label: "TIP3P" },
-  { value: "tip3pfb", label: "TIP3P-FB" },
-  { value: "spce", label: "SPC/E" },
-  { value: "tip4pew", label: "TIP4P-Ew" }
-] as const;
-
-const LIPID_TYPES = [
-  { value: "POPC", label: "POPC" },
-  { value: "POPE", label: "POPE" },
-  { value: "DLPC", label: "DLPC" },
-  { value: "DLPE", label: "DLPE" },
-  { value: "DMPC", label: "DMPC" },
-  { value: "DOPC", label: "DOPC" },
-  { value: "DPPC", label: "DPPC" }
-] as const;
-
-function SimulationSection({
-  results
-}: {
-  results: Array<{
-    runId: string;
-    runPath: string;
-    predictionsPath: string;
-    cifFiles: string[];
-  }>;
-}): React.ReactElement {
-  const [connectionStatus] = useAtom(apiConnectionStatusAtom);
-
-  // Sim-ready parameters
-  const [engine, setEngine] = React.useState<string>("gromacs");
-  const [forcefield, setForcefield] = React.useState<string>("charmm36m");
-  const [waterModel, setWaterModel] = React.useState<string>("tip3p");
-  const [ph, setPh] = React.useState<number>(7.0);
-  const [padding, setPadding] = React.useState<number>(1.0);
-  const [ionConcentration, setIonConcentration] = React.useState<number>(0.15);
-  const [keepWater, setKeepWater] = React.useState<boolean>(false);
-
-  // Membrane parameters
-  const [lipidType, setLipidType] = React.useState<string>("POPC");
-  const [opmPdbId, setOpmPdbId] = React.useState<string>("");
-  const [opmInfo, setOpmInfo] = React.useState<{
-    thickness: number;
-    tilt_angle: number;
-    type: string;
-  } | null>(null);
-  const [opmLoading, setOpmLoading] = React.useState(false);
-  const [opmError, setOpmError] = React.useState<string | null>(null);
-
-  // Job state
-  const [simJobId, setSimJobId] = React.useState<string | null>(null);
-  const [simJobStatus, setSimJobStatus] = React.useState<string>("idle");
-  const [simProgress, setSimProgress] = React.useState<string | null>(null);
-  const [simError, setSimError] = React.useState<string | null>(null);
-  const [simResult, setSimResult] = React.useState<Record<
-    string,
-    unknown
-  > | null>(null);
-
-  const [memJobId, setMemJobId] = React.useState<string | null>(null);
-  const [memJobStatus, setMemJobStatus] = React.useState<string>("idle");
-  const [memProgress, setMemProgress] = React.useState<string | null>(null);
-  const [memError, setMemError] = React.useState<string | null>(null);
-  const [memResult, setMemResult] = React.useState<Record<
-    string,
-    unknown
-  > | null>(null);
-
-  // Membrane section toggle
-  const [showMembrane, setShowMembrane] = React.useState(false);
-
-  // Get API URL from ContextInpaintSection's default
-  const apiUrl = "http://localhost:31212";
-
-  // Run & CIF selection state
-  const [selectedRunIdx, setSelectedRunIdx] = React.useState<number>(-1);
-  const [selectedCifIdx, setSelectedCifIdx] = React.useState<number>(0);
-
-  // Auto-select latest run when results change
   React.useEffect(() => {
-    if (results.length > 0) {
-      setSelectedRunIdx(results.length - 1);
-      setSelectedCifIdx(0);
-    } else {
-      setSelectedRunIdx(-1);
-      setSelectedCifIdx(0);
-    }
-  }, [results.length]);
+    void loadResults();
+  }, [loadResults]);
 
-  // Get available CIF files for selected run (model files first)
-  const selectedRunCifs = React.useMemo(() => {
-    if (selectedRunIdx < 0 || selectedRunIdx >= results.length) return [];
-    const run = results[selectedRunIdx];
-    // Sort: model files first, then others
-    return [...run.cifFiles].sort((a, b) => {
-      const aModel =
-        a.toLowerCase().includes("model") &&
-        !a.toLowerCase().includes("template");
-      const bModel =
-        b.toLowerCase().includes("model") &&
-        !b.toLowerCase().includes("template");
-      if (aModel && !bModel) return -1;
-      if (!aModel && bModel) return 1;
-      return 0;
-    });
-  }, [results, selectedRunIdx]);
-
-  // Selected CIF path
-  const selectedCif = React.useMemo(() => {
-    if (selectedRunCifs.length === 0) return null;
-    const idx = Math.min(selectedCifIdx, selectedRunCifs.length - 1);
-    return selectedRunCifs[idx] || null;
-  }, [selectedRunCifs, selectedCifIdx]);
-
-  // OPM lookup
-  const handleOpmLookup = React.useCallback(async () => {
-    if (!opmPdbId.trim() || opmPdbId.trim().length !== 4) return;
-    setOpmLoading(true);
-    setOpmError(null);
-    setOpmInfo(null);
-
-    try {
-      const result = await window.api.boltz.opmLookup(
-        apiUrl,
-        opmPdbId.trim().toUpperCase()
-      );
-      if (result.success && result.data) {
-        const data = result.data as {
-          thickness: number;
-          tilt_angle: number;
-          type: string;
-        };
-        setOpmInfo(data);
-      } else {
-        setOpmError(result.error || "No OPM data found");
-      }
-    } catch (err) {
-      setOpmError(err instanceof Error ? err.message : "OPM lookup failed");
-    } finally {
-      setOpmLoading(false);
-    }
-  }, [opmPdbId, apiUrl]);
-
-  // Poll job status
-  const pollJobStatus = React.useCallback(
-    async (
-      jobId: string,
-      setStatus: (s: string) => void,
-      setProgressFn: (s: string | null) => void,
-      setErrorFn: (s: string | null) => void,
-      setResultFn: (r: Record<string, unknown> | null) => void
-    ) => {
-      const poll = async (): Promise<void> => {
-        try {
-          const statusResult = await window.api.boltz.getJobStatus(
-            apiUrl,
-            jobId
-          );
-          if (!statusResult.success || !statusResult.data) {
-            setStatus("failed");
-            setErrorFn(statusResult.error || "Status check failed");
-            return;
-          }
-
-          const status = statusResult.data;
-
-          if (typeof status.progress === "string") {
-            setProgressFn(status.progress);
-          }
-
-          if (status.status === "completed") {
-            setStatus("completed");
-            setProgressFn("Completed");
-            // Fetch result details
-            try {
-              const simResResult = await window.api.boltz.simResult(
-                apiUrl,
-                jobId
-              );
-              if (simResResult.success && simResResult.data) {
-                setResultFn(simResResult.data as Record<string, unknown>);
-              }
-            } catch {
-              // Result fetch is optional
-            }
-            return;
-          } else if (status.status === "failed") {
-            setStatus("failed");
-            setErrorFn(status.error || "Job failed");
-            return;
-          }
-
-          // Continue polling
-          await new Promise(resolve => {
-            let frames = 0;
-            const maxFrames = 180; // ~3 seconds at 60fps
-            const checkFrame = (): void => {
-              frames++;
-              if (frames >= maxFrames) {
-                resolve(undefined);
-              } else {
-                requestAnimationFrame(checkFrame);
-              }
-            };
-            requestAnimationFrame(checkFrame);
-          });
-          await poll();
-        } catch (err) {
-          setStatus("failed");
-          setErrorFn(err instanceof Error ? err.message : "Polling failed");
-        }
-      };
-      await poll();
-    },
-    [apiUrl]
-  );
-
-  // Read CIF file content from local filesystem
-  const readCifContent = React.useCallback(
-    async (cifPath: string): Promise<string> => {
-      const readResult = await window.api.project.readFileByPath(cifPath);
-      if (!readResult.success || !readResult.content) {
-        throw new Error(`Failed to read CIF file: ${readResult.error || cifPath}`);
-      }
-      return readResult.content;
-    },
-    []
-  );
-
-  // Start sim-ready
-  const handleSimReady = React.useCallback(async () => {
-    if (!selectedCif) return;
-    setSimError(null);
-    setSimResult(null);
-    setSimJobStatus("submitting");
-    setSimProgress(null);
-
-    try {
-      const cifContent = await readCifContent(selectedCif);
-      const cifFilename = selectedCif.split("/").pop() || "input.cif";
-
-      const payload = {
-        cif_content: cifContent,
-        cif_filename: cifFilename,
-        engine,
-        forcefield,
-        water_model: waterModel,
-        ph,
-        padding,
-        ion_concentration: ionConcentration,
-        keep_water: keepWater
-      };
-
-      const result = await window.api.boltz.simReady(apiUrl, payload);
-      if (!result.success || !result.data) {
-        throw new Error(result.error || "Sim-ready request failed");
-      }
-
-      const jobId = result.data.job_id;
-      setSimJobId(jobId);
-      setSimJobStatus("running");
-
-      await pollJobStatus(
-        jobId,
-        setSimJobStatus,
-        setSimProgress,
-        setSimError,
-        setSimResult
-      );
-    } catch (err) {
-      setSimJobStatus("failed");
-      setSimError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }, [
-    selectedCif,
-    readCifContent,
-    engine,
-    forcefield,
-    waterModel,
-    ph,
-    padding,
-    ionConcentration,
-    keepWater,
-    apiUrl,
-    pollJobStatus
-  ]);
-
-  // Start membrane
-  const handleMembrane = React.useCallback(async () => {
-    if (!selectedCif) return;
-    setMemError(null);
-    setMemResult(null);
-    setMemJobStatus("submitting");
-    setMemProgress(null);
-
-    try {
-      const cifContent = await readCifContent(selectedCif);
-      const cifFilename = selectedCif.split("/").pop() || "input.cif";
-
-      const payload: Record<string, unknown> = {
-        cif_content: cifContent,
-        cif_filename: cifFilename,
-        lipid_type: lipidType,
-        engine,
-        forcefield,
-        water_model: waterModel,
-        ph,
-        padding,
-        ion_concentration: ionConcentration,
-        skip_opm: !opmPdbId.trim()
-      };
-
-      if (opmPdbId.trim()) {
-        payload.pdb_id = opmPdbId.trim().toUpperCase();
-      }
-
-      const result = await window.api.boltz.membrane(apiUrl, payload);
-      if (!result.success || !result.data) {
-        throw new Error(result.error || "Membrane request failed");
-      }
-
-      const jobId = result.data.job_id;
-      setMemJobId(jobId);
-      setMemJobStatus("running");
-
-      await pollJobStatus(
-        jobId,
-        setMemJobStatus,
-        setMemProgress,
-        setMemError,
-        setMemResult
-      );
-    } catch (err) {
-      setMemJobStatus("failed");
-      setMemError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }, [
-    selectedCif,
-    readCifContent,
-    lipidType,
-    engine,
-    forcefield,
-    waterModel,
-    ph,
-    padding,
-    ionConcentration,
-    opmPdbId,
-    apiUrl,
-    pollJobStatus
-  ]);
-
-  const isSimBusy = simJobStatus === "submitting" || simJobStatus === "running";
-  const isMemBusy = memJobStatus === "submitting" || memJobStatus === "running";
-  const isDisconnected = connectionStatus !== "connected";
-
-  return (
-    <div className="space-y-4">
-      {/* Source run & CIF selector */}
-      <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium text-muted-foreground">
-            Source Run
-          </label>
-          <select
-            value={selectedRunIdx}
-            onChange={e => {
-              setSelectedRunIdx(Number(e.target.value));
-              setSelectedCifIdx(0);
-            }}
-            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            disabled={results.length === 0}
-          >
-            {results.length === 0 ? (
-              <option value={-1}>No runs available</option>
-            ) : (
-              results.map((r, idx) => (
-                <option key={r.runId} value={idx}>
-                  {r.runId} ({r.cifFiles.length} file{r.cifFiles.length !== 1 ? "s" : ""})
-                </option>
-              ))
-            )}
-          </select>
-        </div>
-        {selectedRunCifs.length > 0 && (
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              CIF File
-            </label>
-            <select
-              value={selectedCifIdx}
-              onChange={e => setSelectedCifIdx(Number(e.target.value))}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs font-mono"
-            >
-              {selectedRunCifs.map((cif, idx) => (
-                <option key={cif} value={idx}>
-                  {cif.split("/").pop()}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {selectedCif && (
-          <p className="text-[10px] text-muted-foreground font-mono truncate" title={selectedCif}>
-            {selectedCif}
-          </p>
-        )}
+  if (!currentProject) {
+    return (
+      <div className="text-sm text-muted-foreground text-center py-8">
+        Open a project to access simulation tools.
       </div>
+    );
+  }
 
-      {isDisconnected && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-          <p className="text-xs text-amber-600 dark:text-amber-400">
-            Server not connected. Connect in the Inference section first.
-          </p>
-        </div>
-      )}
-
-      {/* MD Engine & Force Field Settings */}
-      <div className="space-y-3">
-        <div className="text-xs font-semibold text-foreground">Parameters</div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              Engine
-            </label>
-            <select
-              value={engine}
-              onChange={e => setEngine(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            >
-              {ENGINES.map(e => (
-                <option key={e.value} value={e.value}>
-                  {e.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              Force Field
-            </label>
-            <select
-              value={forcefield}
-              onChange={e => setForcefield(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            >
-              {FORCEFIELDS.map(f => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              Water Model
-            </label>
-            <select
-              value={waterModel}
-              onChange={e => setWaterModel(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            >
-              {WATER_MODELS.map(w => (
-                <option key={w.value} value={w.value}>
-                  {w.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              pH
-            </label>
-            <input
-              type="number"
-              value={ph}
-              onChange={e => setPh(parseFloat(e.target.value) || 7.0)}
-              step={0.5}
-              min={0}
-              max={14}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              Box Padding (nm)
-            </label>
-            <input
-              type="number"
-              value={padding}
-              onChange={e => setPadding(parseFloat(e.target.value) || 1.0)}
-              step={0.1}
-              min={0.5}
-              max={5.0}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-medium text-muted-foreground">
-              Ion Conc. (mol/L)
-            </label>
-            <input
-              type="number"
-              value={ionConcentration}
-              onChange={e =>
-                setIonConcentration(parseFloat(e.target.value) || 0.15)
-              }
-              step={0.01}
-              min={0}
-              max={2.0}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="keep-water"
-            checked={keepWater}
-            onChange={e => setKeepWater(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
-          />
-          <label htmlFor="keep-water" className="text-xs cursor-pointer">
-            Keep crystallographic waters
-          </label>
-        </div>
+  if (results.length === 0) {
+    return (
+      <div className="text-sm text-muted-foreground text-center py-8">
+        Run a prediction first to generate simulation-ready files.
       </div>
+    );
+  }
 
-      {/* Prepare Simulation Files Button */}
-      <Button
-        onClick={handleSimReady}
-        disabled={isDisconnected || !selectedCif || isSimBusy}
-        className="w-full"
-      >
-        {isSimBusy ? "Preparing..." : "Prepare Simulation Files"}
-      </Button>
-
-      {/* Sim-ready status */}
-      {simJobStatus !== "idle" && (
-        <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
-          <div className="flex justify-between text-xs">
-            <span className="font-medium">Sim-Ready Status:</span>
-            <span
-              className={
-                simJobStatus === "completed"
-                  ? "text-green-500"
-                  : simJobStatus === "failed"
-                    ? "text-red-500"
-                    : "text-muted-foreground"
-              }
-            >
-              {simJobStatus === "submitting"
-                ? "Submitting..."
-                : simJobStatus === "running"
-                  ? "Running..."
-                  : simJobStatus === "completed"
-                    ? "Completed"
-                    : simJobStatus === "failed"
-                      ? "Failed"
-                      : simJobStatus}
-            </span>
-          </div>
-          {simJobId && (
-            <div className="text-[10px] text-muted-foreground font-mono truncate">
-              Job: {simJobId}
-            </div>
-          )}
-          {simProgress && simJobStatus === "running" && (
-            <div className="text-xs text-muted-foreground">{simProgress}</div>
-          )}
-        </div>
-      )}
-
-      {simError && (
-        <div className="rounded-md border border-red-500/50 bg-red-500/10 p-3">
-          <p className="text-xs text-red-400">{simError}</p>
-        </div>
-      )}
-
-      {/* Sim-ready results */}
-      {simResult && (
-        <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 space-y-2">
-          <div className="text-xs font-semibold text-green-600 dark:text-green-400">
-            Simulation Files Ready
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            {simResult.atom_count !== undefined && (
-              <>
-                <span>Atom count:</span>
-                <span className="font-mono">
-                  {String(simResult.atom_count)}
-                </span>
-              </>
-            )}
-            {!!simResult.box_size && Array.isArray(simResult.box_size) && (
-              <>
-                <span>Box size:</span>
-                <span className="font-mono">
-                  {(simResult.box_size as number[])
-                    .map(v => (typeof v === "number" ? v.toFixed(2) : v))
-                    .join(" x ")}{" "}
-                  nm
-                </span>
-              </>
-            )}
-            {simResult.n_waters !== undefined && (
-              <>
-                <span>Waters:</span>
-                <span className="font-mono">{String(simResult.n_waters)}</span>
-              </>
-            )}
-            {!!simResult.engine && (
-              <>
-                <span>Engine:</span>
-                <span className="font-mono">{String(simResult.engine)}</span>
-              </>
-            )}
-            {!!simResult.forcefield && (
-              <>
-                <span>Force field:</span>
-                <span className="font-mono">
-                  {String(simResult.forcefield)}
-                </span>
-              </>
-            )}
-          </div>
-          {!!simResult.files && Array.isArray(simResult.files) && (
-            <div className="mt-2">
-              <div className="text-[10px] font-medium text-muted-foreground mb-1">
-                Output files:
-              </div>
-              <div className="space-y-0.5">
-                {(simResult.files as string[]).map((file, idx) => (
-                  <div
-                    key={idx}
-                    className="text-[10px] font-mono text-muted-foreground truncate"
-                  >
-                    {typeof file === "string"
-                      ? file.split("/").pop()
-                      : String(file)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Membrane Embedding Subsection */}
-      <div className="border-t border-border pt-3">
-        <button
-          onClick={() => setShowMembrane(!showMembrane)}
-          className="flex w-full items-center justify-between text-left"
-        >
-          <span className="text-xs font-semibold text-foreground">
-            Membrane Embedding
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {showMembrane ? "▼" : "▶"}
-          </span>
-        </button>
-
-        {showMembrane && (
-          <div className="mt-3 space-y-3">
-            <p className="text-[10px] text-muted-foreground">
-              Embed the protein in a lipid bilayer membrane for MD simulation.
-            </p>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium text-muted-foreground">
-                  Lipid Type
-                </label>
-                <select
-                  value={lipidType}
-                  onChange={e => setLipidType(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                >
-                  {LIPID_TYPES.map(l => (
-                    <option key={l.value} value={l.value}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium text-muted-foreground">
-                  OPM PDB ID
-                </label>
-                <div className="flex gap-1">
-                  <input
-                    type="text"
-                    value={opmPdbId}
-                    onChange={e => setOpmPdbId(e.target.value.toUpperCase())}
-                    placeholder="e.g. 1OCC"
-                    maxLength={4}
-                    className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs uppercase font-mono"
-                  />
-                  <Button
-                    onClick={handleOpmLookup}
-                    disabled={opmLoading || opmPdbId.trim().length !== 4}
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-[10px] px-2"
-                  >
-                    {opmLoading ? "..." : "Lookup"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* OPM info display */}
-            {opmInfo && (
-              <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-2 text-xs text-muted-foreground">
-                <div className="font-medium text-blue-600 dark:text-blue-400 mb-1">
-                  OPM Data Found
-                </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                  <span>Thickness:</span>
-                  <span className="font-mono">
-                    {opmInfo.thickness.toFixed(1)} A
-                  </span>
-                  <span>Tilt angle:</span>
-                  <span className="font-mono">
-                    {opmInfo.tilt_angle.toFixed(1)} deg
-                  </span>
-                  <span>Type:</span>
-                  <span>{opmInfo.type}</span>
-                </div>
-              </div>
-            )}
-
-            {opmError && (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
-                <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                  {opmError}
-                </p>
-              </div>
-            )}
-
-            <Button
-              onClick={handleMembrane}
-              disabled={isDisconnected || !selectedCif || isMemBusy}
-              variant="outline"
-              className="w-full"
-            >
-              {isMemBusy ? "Building..." : "Build Membrane"}
-            </Button>
-
-            {/* Membrane status */}
-            {memJobStatus !== "idle" && (
-              <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
-                <div className="flex justify-between text-xs">
-                  <span className="font-medium">Membrane Status:</span>
-                  <span
-                    className={
-                      memJobStatus === "completed"
-                        ? "text-green-500"
-                        : memJobStatus === "failed"
-                          ? "text-red-500"
-                          : "text-muted-foreground"
-                    }
-                  >
-                    {memJobStatus === "submitting"
-                      ? "Submitting..."
-                      : memJobStatus === "running"
-                        ? "Building..."
-                        : memJobStatus === "completed"
-                          ? "Completed"
-                          : memJobStatus === "failed"
-                            ? "Failed"
-                            : memJobStatus}
-                  </span>
-                </div>
-                {memJobId && (
-                  <div className="text-[10px] text-muted-foreground font-mono truncate">
-                    Job: {memJobId}
-                  </div>
-                )}
-                {memProgress && memJobStatus === "running" && (
-                  <div className="text-xs text-muted-foreground">
-                    {memProgress}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {memError && (
-              <div className="rounded-md border border-red-500/50 bg-red-500/10 p-3">
-                <p className="text-xs text-red-400">{memError}</p>
-              </div>
-            )}
-
-            {/* Membrane results */}
-            {memResult && (
-              <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 space-y-2">
-                <div className="text-xs font-semibold text-green-600 dark:text-green-400">
-                  Membrane System Ready
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {memResult.atom_count !== undefined && (
-                    <>
-                      <span>Atom count:</span>
-                      <span className="font-mono">
-                        {String(memResult.atom_count)}
-                      </span>
-                    </>
-                  )}
-                  {!!memResult.box_size &&
-                    Array.isArray(memResult.box_size) && (
-                      <>
-                        <span>Box size:</span>
-                        <span className="font-mono">
-                          {(memResult.box_size as number[])
-                            .map(v =>
-                              typeof v === "number" ? v.toFixed(2) : v
-                            )
-                            .join(" x ")}{" "}
-                          nm
-                        </span>
-                      </>
-                    )}
-                  {memResult.n_waters !== undefined && (
-                    <>
-                      <span>Waters:</span>
-                      <span className="font-mono">
-                        {String(memResult.n_waters)}
-                      </span>
-                    </>
-                  )}
-                </div>
-                {!!memResult.files && Array.isArray(memResult.files) && (
-                  <div className="mt-2">
-                    <div className="text-[10px] font-medium text-muted-foreground mb-1">
-                      Output files:
-                    </div>
-                    <div className="space-y-0.5">
-                      {(memResult.files as string[]).map((file, idx) => (
-                        <div
-                          key={idx}
-                          className="text-[10px] font-mono text-muted-foreground truncate"
-                        >
-                          {typeof file === "string"
-                            ? file.split("/").pop()
-                            : String(file)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <SimulationSection results={results} />;
 }

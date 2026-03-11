@@ -183,6 +183,19 @@ export interface BoltzAPI {
     data?: unknown;
     error?: string;
   }>;
+  downloadAndSaveSimResults: (
+    apiUrl: string,
+    jobId: string,
+    simType: "sim" | "membrane"
+  ) => Promise<{
+    success: boolean;
+    simId?: string;
+    simDir?: string;
+    files?: string[];
+    systemPdbPath?: string;
+    systemPdbContent?: string;
+    error?: string;
+  }>;
   opmLookup: (
     apiUrl: string,
     pdbId: string
