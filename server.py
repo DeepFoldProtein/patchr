@@ -323,6 +323,7 @@ def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: boo
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
             enable_inpainting=enable_inpainting,
+            weights_only=False,
         )
         model_module.eval()
 
