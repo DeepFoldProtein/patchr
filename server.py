@@ -1286,7 +1286,7 @@ async def delete_job(job_id: str):
     return {"message": f"Job {job_id} deleted successfully"}
 
 
-# ── Sim-Ready & Membrane endpoints ─────────────────────────────────────────
+# ── Sim-Ready endpoint ─────────────────────────────────────────────────────
 
 class SimReadyRequest(BaseModel):
     job_id: Optional[str] = Field(None, description="Job ID of a completed prediction (uses its output CIF)")
@@ -1300,23 +1300,6 @@ class SimReadyRequest(BaseModel):
     padding: float = Field(1.0, description="Box padding in nm")
     ion_concentration: float = Field(0.15, description="Ion concentration in mol/L")
     keep_water: bool = Field(False, description="Keep crystallographic waters")
-
-
-class MembraneRequest(BaseModel):
-    job_id: Optional[str] = Field(None, description="Job ID of a completed prediction")
-    cif_path: Optional[str] = Field(None, description="Direct path to a CIF file")
-    cif_content: Optional[str] = Field(None, description="CIF file content string (uploaded from client)")
-    cif_filename: Optional[str] = Field(None, description="Original filename for uploaded CIF content")
-    pdb_id: Optional[str] = Field(None, description="PDB ID for OPM orientation lookup")
-    lipid_type: str = Field("POPC", description="Lipid type: POPC, POPE, DLPC, DLPE, DMPC, DOPC, DPPC")
-    engine: str = Field("gromacs", description="MD engine: gromacs, amber, openmm")
-    forcefield: str = Field("charmm36m", description="Force field")
-    water_model: str = Field("tip3p", description="Water model")
-    ph: float = Field(7.0, description="Protonation pH")
-    padding: float = Field(1.0, description="Membrane padding in nm")
-    ion_concentration: float = Field(0.15, description="Ion concentration in mol/L")
-    skip_opm: bool = Field(False, description="Skip OPM orientation lookup")
-    center_z: Optional[float] = Field(None, description="Manual membrane center Z in nm")
 
 
 def _resolve_cif_from_request(
@@ -1399,41 +1382,6 @@ def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: SimReadyRequest
         update_job_status(sim_job_id, JobStatus.FAILED, error=str(e))
 
 
-def _run_membrane_sync(mem_job_id: str, cif_path: str, request: MembraneRequest):
-    """Background worker for membrane embedding."""
-    try:
-        from boltz.membrane import MembraneConfig, build_membrane_system
-
-        out_dir = WORK_DIR / mem_job_id / "membrane"
-        config = MembraneConfig(
-            input_cif=cif_path,
-            output_dir=str(out_dir),
-            pdb_id=request.pdb_id,
-            lipid_type=request.lipid_type,
-            engine=request.engine,
-            forcefield=request.forcefield,
-            water_model=request.water_model,
-            ph=request.ph,
-            padding=request.padding,
-            ion_concentration=request.ion_concentration,
-            skip_opm=request.skip_opm,
-            manual_center_z=request.center_z,
-        )
-
-        def progress_cb(step, pct):
-            update_job_status(mem_job_id, JobStatus.RUNNING_PREDICTION, progress=f"{step} ({pct*100:.0f}%)")
-
-        result = build_membrane_system(config, progress_callback=progress_cb)
-
-        jobs_db[mem_job_id]["membrane_result"] = result.to_dict()
-        jobs_db[mem_job_id]["prediction_dir"] = str(out_dir)
-        update_job_status(mem_job_id, JobStatus.COMPLETED, progress="done")
-
-    except Exception as e:
-        logging.exception(f"Membrane embedding failed for job {mem_job_id}")
-        update_job_status(mem_job_id, JobStatus.FAILED, error=str(e))
-
-
 @app.post("/api/v1/sim-ready")
 async def sim_ready_endpoint(
     request: SimReadyRequest,
@@ -1459,32 +1407,6 @@ async def sim_ready_endpoint(
     return JobStatusResponse(**{k: v for k, v in jobs_db[sim_job_id].items() if k in JobStatusResponse.model_fields})
 
 
-@app.post("/api/v1/membrane")
-async def membrane_endpoint(
-    request: MembraneRequest,
-    background_tasks: BackgroundTasks,
-) -> JobStatusResponse:
-    """Embed a protein in a lipid membrane for MD simulation.
-
-    Fetches OPM orientation (if available), builds lipid bilayer, solvates, and ionizes.
-    """
-    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path, request.cif_content, request.cif_filename)
-
-    mem_job_id = str(uuid.uuid4())
-    jobs_db[mem_job_id] = {
-        "job_id": mem_job_id,
-        "status": JobStatus.PENDING,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-        "progress": "Preparing membrane embedding",
-        "source_cif": cif_path,
-        "pdb_id": request.pdb_id,
-    }
-
-    background_tasks.add_task(_run_membrane_sync, mem_job_id, cif_path, request)
-    return JobStatusResponse(**{k: v for k, v in jobs_db[mem_job_id].items() if k in JobStatusResponse.model_fields})
-
-
 @app.get("/api/v1/jobs/{job_id}/sim-result")
 async def get_sim_result(job_id: str):
     """Get simulation preparation result details."""
@@ -1492,32 +1414,11 @@ async def get_sim_result(job_id: str):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     job = jobs_db[job_id]
-    result = job.get("sim_ready_result") or job.get("membrane_result")
+    result = job.get("sim_ready_result")
     if not result:
         raise HTTPException(status_code=404, detail="No simulation result found for this job")
 
     return result
-
-
-@app.get("/api/v1/opm/{pdb_id}")
-async def get_opm_info(pdb_id: str):
-    """Fetch OPM (Orientations of Proteins in Membranes) data for a PDB ID."""
-    from boltz.membrane import fetch_opm_data
-
-    data = fetch_opm_data(pdb_id)
-    if not data:
-        raise HTTPException(status_code=404, detail=f"No OPM data found for {pdb_id}")
-
-    return {
-        "pdb_id": data.pdb_id,
-        "thickness": data.thickness,
-        "tilt_angle": data.tilt_angle,
-        "type": data.type_name,
-        "topology": data.topology,
-        "family": data.family,
-        "superfamily": data.superfamily,
-        "has_coordinates": data.coordinates_pdb is not None,
-    }
 
 
 @app.get("/api/v1/health")

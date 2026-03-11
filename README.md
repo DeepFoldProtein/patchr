@@ -145,7 +145,7 @@ results/patchr_results_{input_name}/
 
 ## Simulation-Ready Output
 
-Add `--sim-ready` or `--membrane` to `patchr predict` to go directly from structure completion to MD simulation input -- no manual steps.
+Add `--sim-ready` to `patchr predict` to go directly from structure completion to MD simulation input -- no manual steps.
 
 ```bash
 # Predict + prepare GROMACS input
@@ -153,25 +153,19 @@ patchr predict input.yaml --out_dir results --sim-ready gromacs
 
 # Predict + prepare AMBER input with AMBER ff
 patchr predict input.yaml --out_dir results --sim-ready amber --ff amber14sb
-
-# Predict + embed in POPC membrane (auto-orients via OPM)
-patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI
 ```
 
-Automatically adds hydrogens, solvates, neutralizes with counter ions. For `--membrane`, fetches orientation from the [OPM database](https://opm.phar.umich.edu/) and builds a lipid bilayer around the protein.
+Automatically adds hydrogens, solvates, and neutralizes with counter ions. Generates CHARMM-GUI-style output with topology (`toppar/` directory), coordinates, index file, MDP files for minimization/equilibration/production, and a run script.
 
 <details>
-<summary><b>Standalone sim-ready / membrane commands</b></summary>
+<summary><b>Standalone sim-ready command</b></summary>
 
-You can also run these on any existing CIF file:
+You can also run this on any existing CIF file:
 
 ```bash
 patchr sim-ready prediction.cif --engine gromacs --ff charmm36m
 patchr sim-ready prediction.cif --engine openmm --padding 1.2 --ion-conc 0.15
-patchr membrane prediction.cif --pdb-id 4HFI --lipid POPE --engine amber
 ```
-
-Supported lipids: POPC, POPE, DLPC, DLPE, DMPC, DOPC, DPPC.
 
 </details>
 
