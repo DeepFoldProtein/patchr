@@ -1,7 +1,7 @@
 <div align="center">
   <div>&nbsp;</div>
 
-<img src="docs/logo.png" width="120" style="border-radius: 20px;"/>
+<img src="docs/logo.png" width="120"/>
 
 [Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
 
