@@ -2786,17 +2786,45 @@ function SimulationSection({
   // Get API URL from ContextInpaintSection's default
   const apiUrl = "http://localhost:31212";
 
-  // Get latest result CIF path
-  const latestResultCif = React.useMemo(() => {
-    if (results.length === 0) return null;
-    const latest = results[results.length - 1];
-    const modelCif = latest.cifFiles.find(
-      f =>
-        f.toLowerCase().includes("model") &&
-        !f.toLowerCase().includes("template")
-    );
-    return modelCif || latest.cifFiles[0] || null;
-  }, [results]);
+  // Run & CIF selection state
+  const [selectedRunIdx, setSelectedRunIdx] = React.useState<number>(-1);
+  const [selectedCifIdx, setSelectedCifIdx] = React.useState<number>(0);
+
+  // Auto-select latest run when results change
+  React.useEffect(() => {
+    if (results.length > 0) {
+      setSelectedRunIdx(results.length - 1);
+      setSelectedCifIdx(0);
+    } else {
+      setSelectedRunIdx(-1);
+      setSelectedCifIdx(0);
+    }
+  }, [results.length]);
+
+  // Get available CIF files for selected run (model files first)
+  const selectedRunCifs = React.useMemo(() => {
+    if (selectedRunIdx < 0 || selectedRunIdx >= results.length) return [];
+    const run = results[selectedRunIdx];
+    // Sort: model files first, then others
+    return [...run.cifFiles].sort((a, b) => {
+      const aModel =
+        a.toLowerCase().includes("model") &&
+        !a.toLowerCase().includes("template");
+      const bModel =
+        b.toLowerCase().includes("model") &&
+        !b.toLowerCase().includes("template");
+      if (aModel && !bModel) return -1;
+      if (!aModel && bModel) return 1;
+      return 0;
+    });
+  }, [results, selectedRunIdx]);
+
+  // Selected CIF path
+  const selectedCif = React.useMemo(() => {
+    if (selectedRunCifs.length === 0) return null;
+    const idx = Math.min(selectedCifIdx, selectedRunCifs.length - 1);
+    return selectedRunCifs[idx] || null;
+  }, [selectedRunCifs, selectedCifIdx]);
 
   // OPM lookup
   const handleOpmLookup = React.useCallback(async () => {
@@ -2901,17 +2929,33 @@ function SimulationSection({
     [apiUrl]
   );
 
+  // Read CIF file content from local filesystem
+  const readCifContent = React.useCallback(
+    async (cifPath: string): Promise<string> => {
+      const readResult = await window.api.project.readFileByPath(cifPath);
+      if (!readResult.success || !readResult.content) {
+        throw new Error(`Failed to read CIF file: ${readResult.error || cifPath}`);
+      }
+      return readResult.content;
+    },
+    []
+  );
+
   // Start sim-ready
   const handleSimReady = React.useCallback(async () => {
-    if (!latestResultCif) return;
+    if (!selectedCif) return;
     setSimError(null);
     setSimResult(null);
     setSimJobStatus("submitting");
     setSimProgress(null);
 
     try {
+      const cifContent = await readCifContent(selectedCif);
+      const cifFilename = selectedCif.split("/").pop() || "input.cif";
+
       const payload = {
-        cif_path: latestResultCif,
+        cif_content: cifContent,
+        cif_filename: cifFilename,
         engine,
         forcefield,
         water_model: waterModel,
@@ -2942,7 +2986,8 @@ function SimulationSection({
       setSimError(err instanceof Error ? err.message : "Unknown error");
     }
   }, [
-    latestResultCif,
+    selectedCif,
+    readCifContent,
     engine,
     forcefield,
     waterModel,
@@ -2956,15 +3001,19 @@ function SimulationSection({
 
   // Start membrane
   const handleMembrane = React.useCallback(async () => {
-    if (!latestResultCif) return;
+    if (!selectedCif) return;
     setMemError(null);
     setMemResult(null);
     setMemJobStatus("submitting");
     setMemProgress(null);
 
     try {
+      const cifContent = await readCifContent(selectedCif);
+      const cifFilename = selectedCif.split("/").pop() || "input.cif";
+
       const payload: Record<string, unknown> = {
-        cif_path: latestResultCif,
+        cif_content: cifContent,
+        cif_filename: cifFilename,
         lipid_type: lipidType,
         engine,
         forcefield,
@@ -3000,7 +3049,8 @@ function SimulationSection({
       setMemError(err instanceof Error ? err.message : "Unknown error");
     }
   }, [
-    latestResultCif,
+    selectedCif,
+    readCifContent,
     lipidType,
     engine,
     forcefield,
@@ -3019,14 +3069,55 @@ function SimulationSection({
 
   return (
     <div className="space-y-4">
-      {/* Source file indicator */}
-      <div className="rounded-md border border-border bg-muted/20 p-3">
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Source:</span>{" "}
-          {latestResultCif
-            ? latestResultCif.split("/").pop()
-            : "No result CIF available"}
-        </p>
+      {/* Source run & CIF selector */}
+      <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-muted-foreground">
+            Source Run
+          </label>
+          <select
+            value={selectedRunIdx}
+            onChange={e => {
+              setSelectedRunIdx(Number(e.target.value));
+              setSelectedCifIdx(0);
+            }}
+            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+            disabled={results.length === 0}
+          >
+            {results.length === 0 ? (
+              <option value={-1}>No runs available</option>
+            ) : (
+              results.map((r, idx) => (
+                <option key={r.runId} value={idx}>
+                  {r.runId} ({r.cifFiles.length} file{r.cifFiles.length !== 1 ? "s" : ""})
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        {selectedRunCifs.length > 0 && (
+          <div className="space-y-1">
+            <label className="text-[10px] font-medium text-muted-foreground">
+              CIF File
+            </label>
+            <select
+              value={selectedCifIdx}
+              onChange={e => setSelectedCifIdx(Number(e.target.value))}
+              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs font-mono"
+            >
+              {selectedRunCifs.map((cif, idx) => (
+                <option key={cif} value={idx}>
+                  {cif.split("/").pop()}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {selectedCif && (
+          <p className="text-[10px] text-muted-foreground font-mono truncate" title={selectedCif}>
+            {selectedCif}
+          </p>
+        )}
       </div>
 
       {isDisconnected && (
@@ -3152,7 +3243,7 @@ function SimulationSection({
       {/* Prepare Simulation Files Button */}
       <Button
         onClick={handleSimReady}
-        disabled={isDisconnected || !latestResultCif || isSimBusy}
+        disabled={isDisconnected || !selectedCif || isSimBusy}
         className="w-full"
       >
         {isSimBusy ? "Preparing..." : "Prepare Simulation Files"}
@@ -3363,7 +3454,7 @@ function SimulationSection({
 
             <Button
               onClick={handleMembrane}
-              disabled={isDisconnected || !latestResultCif || isMemBusy}
+              disabled={isDisconnected || !selectedCif || isMemBusy}
               variant="outline"
               className="w-full"
             >
