@@ -1,6 +1,6 @@
 import React from "react";
 import { useAtomValue } from "jotai";
-import { apiConnectionStatusAtom } from "../store/repair-atoms";
+import { apiConnectionStatusAtom } from "../store/api-atoms";
 import { useCurrentProject } from "../store/project-store";
 
 export function StatusBar(): React.ReactElement {

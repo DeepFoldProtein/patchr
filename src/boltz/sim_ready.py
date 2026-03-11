@@ -174,12 +174,11 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
     fixer.findMissingResidues()
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
+    if not config.keep_water:
+        fixer.removeHeterogens(keepWater=False)
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(config.ph)
-
-    if not config.keep_water:
-        fixer.removeHeterogens(keepWater=False)
 
     _progress("parameterizing", 0.3)
 
