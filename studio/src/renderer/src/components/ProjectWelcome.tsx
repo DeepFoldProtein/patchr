@@ -3,10 +3,10 @@ import {
   FolderOpen,
   FolderPlus,
   FlaskConical,
-  Sparkles,
   Clock,
   ArrowRight
 } from "lucide-react";
+import logoIcon from "@/assets/logo-icon.png";
 import { Card, CardContent } from "./ui/card";
 import { useProject } from "../hooks/useProject";
 import { useProjectStore, useRecentProjects } from "../store/project-store";
@@ -151,8 +151,12 @@ export function ProjectWelcome(): React.ReactElement {
       <div className="relative z-10 w-full space-y-8 px-6 py-16 md:max-w-4xl mx-auto">
         {/* Hero Section */}
         <div className="text-center space-y-4 opacity-0 animate-[fadeInUp_0.7s_ease-out_0.1s_forwards]">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 mb-4">
-            <Sparkles className="h-8 w-8 text-blue-400" />
+          <div className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-2xl mb-4 group">
+            <img src={logoIcon} alt="Patchr" className="w-full h-full" />
+            <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black/10" />
+            <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/20" />
+            <div className="absolute -inset-full bg-gradient-to-r from-transparent via-white/20 to-transparent rotate-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-slate-900 via-blue-600 to-purple-600 dark:from-white dark:via-blue-100 dark:to-purple-100 bg-clip-text text-transparent">
             Patchr Studio
