@@ -27,8 +27,7 @@ import {
   ArrowDown,
   FolderOpen,
   CheckCircle,
-  XCircle,
-  AlertTriangle
+  XCircle
 } from "lucide-react";
 import {
   Dialog,
@@ -47,7 +46,7 @@ import {
   CollapsibleContent
 } from "./ui/collapsible";
 import { Switch } from "./ui/switch";
-import { SimulationSection } from "./SimulationSection";
+import { SimulationSection, type SavedSimulation } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
 
@@ -88,9 +87,7 @@ export function ControlPanel(): React.ReactElement {
             <ProjectManager />
           </div>
         )}
-        {panelMode === "repair" && (
-          <RepairConsole />
-        )}
+        {panelMode === "repair" && <RepairConsole />}
         {panelMode === "simulation" && (
           <div className="flex-1 overflow-auto p-4">
             <SimulationPanel />
@@ -102,11 +99,7 @@ export function ControlPanel(): React.ReactElement {
 }
 
 function RepairConsole(): React.ReactElement {
-  type SectionId =
-    | "missing-region-review"
-    | "sequence"
-    | "context"
-    | "results";
+  type SectionId = "missing-region-review" | "sequence" | "context" | "results";
   const [expandedSections, setExpandedSections] = React.useState<
     Set<SectionId>
   >(new Set(["missing-region-review", "context", "results"]));
@@ -1350,12 +1343,8 @@ function Section({
 }: SectionProps): React.ReactElement {
   return (
     <Collapsible open={expanded} onOpenChange={() => onToggle()}>
-      <CollapsibleTrigger>
-        {title}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-4 pb-4">
-        {children}
-      </CollapsibleContent>
+      <CollapsibleTrigger>{title}</CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -2251,9 +2240,7 @@ function ContextInpaintSection({
       {error && (
         <Alert variant="destructive">
           <XCircle className="h-3 w-3" />
-          <AlertDescription className="text-xs">
-            {error}
-          </AlertDescription>
+          <AlertDescription className="text-xs">{error}</AlertDescription>
         </Alert>
       )}
 
@@ -2312,17 +2299,22 @@ function SimulationPanel(): React.ReactElement {
       cifFiles: string[];
     }>
   >([]);
+  const [savedSims, setSavedSims] = React.useState<SavedSimulation[]>([]);
 
-  const loadResults = React.useCallback(async () => {
+  const loadData = React.useCallback(async () => {
     if (!currentProject) {
       setResults([]);
+      setSavedSims([]);
       return;
     }
     try {
-      const result = await window.api.project.listResults();
-      if (result.success && result.results) {
+      const [resultRes, simRes] = await Promise.all([
+        window.api.project.listResults(),
+        window.api.project.listSimulations()
+      ]);
+      if (resultRes.success && resultRes.results) {
         setResults(
-          result.results.map(r => ({
+          resultRes.results.map(r => ({
             runId: r.runId,
             runPath: r.runPath,
             predictionsPath:
@@ -2331,14 +2323,17 @@ function SimulationPanel(): React.ReactElement {
           }))
         );
       }
+      if (simRes.success && simRes.simulations) {
+        setSavedSims(simRes.simulations);
+      }
     } catch {
       // ignore
     }
   }, [currentProject]);
 
   React.useEffect(() => {
-    void loadResults();
-  }, [loadResults]);
+    void loadData();
+  }, [loadData]);
 
   if (!currentProject) {
     return (
@@ -2348,13 +2343,5 @@ function SimulationPanel(): React.ReactElement {
     );
   }
 
-  if (results.length === 0) {
-    return (
-      <div className="text-sm text-muted-foreground text-center py-8">
-        Run a prediction first to generate simulation-ready files.
-      </div>
-    );
-  }
-
-  return <SimulationSection results={results} />;
+  return <SimulationSection results={results} savedSims={savedSims} />;
 }

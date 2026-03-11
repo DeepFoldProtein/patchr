@@ -43,8 +43,7 @@ const SelectScrollUpButton = React.forwardRef<
     <ChevronUp className="h-3.5 w-3.5" />
   </SelectPrimitive.ScrollUpButton>
 ));
-SelectScrollUpButton.displayName =
-  SelectPrimitive.ScrollUpButton.displayName;
+SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName;
 
 const SelectScrollDownButton = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.ScrollDownButton>,

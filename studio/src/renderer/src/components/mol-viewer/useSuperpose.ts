@@ -356,8 +356,10 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           label: `Sim: ${label}`
         });
 
-        const trajectory =
-          await plugin.builders.structure.parseTrajectory(dataNode, "pdb");
+        const trajectory = await plugin.builders.structure.parseTrajectory(
+          dataNode,
+          "pdb"
+        );
 
         await plugin.builders.structure.hierarchy.applyPreset(
           trajectory,

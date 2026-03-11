@@ -166,8 +166,7 @@ export function ProjectManager(): React.ReactElement {
                   simulations/ - Simulation output files
                 </div>
                 <div className="ml-4 mt-1 space-y-0.5 text-xs">
-                  <div>├── sim_XXX/ - Sim-ready preparation results</div>
-                  <div>└── mem_XXX/ - Membrane embedding results</div>
+                  <div>└── sim_XXX/ - Sim-ready preparation results</div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <FileText className="h-3 w-3 shrink-0" />

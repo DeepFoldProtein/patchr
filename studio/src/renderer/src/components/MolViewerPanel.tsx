@@ -75,7 +75,10 @@ function MolViewerPanelInner({
   return (
     <div className="flex h-full flex-col bg-slate-950">
       {error && (
-        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+        <Alert
+          variant="destructive"
+          className="rounded-none border-x-0 border-t-0"
+        >
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>

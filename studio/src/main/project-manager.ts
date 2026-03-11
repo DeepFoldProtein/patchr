@@ -1001,7 +1001,104 @@ export function registerProjectIPC(): void {
     }
   );
 
-  // Sim-Ready & Membrane API handlers
+  // List saved simulation results from project simulations/ directory
+  ipcMain.handle("project:list-simulations", async () => {
+    try {
+      const project = projectManager.getCurrentProject();
+      if (!project) {
+        return { success: false, error: "No project open", simulations: [] };
+      }
+      const simulationsDir = join(project.path, "simulations");
+      let entries: import("fs").Dirent[];
+      try {
+        entries = await fs.readdir(simulationsDir, { withFileTypes: true });
+      } catch {
+        return { success: true, simulations: [] };
+      }
+      const simDirs = entries
+        .filter(e => e.isDirectory() && e.name.startsWith("sim_"))
+        .map(e => e.name)
+        .sort();
+
+      const simulations: Array<{
+        id: string;
+        path: string;
+        files: string[];
+        engine?: string;
+        forcefield?: string;
+        n_atoms?: number;
+        n_waters?: number;
+        box_size?: number[];
+      }> = [];
+
+      for (const dirName of simDirs) {
+        const dirPath = join(simulationsDir, dirName);
+        // List files recursively
+        const listAll = async (dir: string): Promise<string[]> => {
+          const result: string[] = [];
+          const items = await fs.readdir(dir, { withFileTypes: true });
+          for (const item of items) {
+            const fullPath = join(dir, item.name);
+            if (item.isDirectory()) {
+              result.push(...(await listAll(fullPath)));
+            } else {
+              result.push(item.name);
+            }
+          }
+          return result;
+        };
+        const files = await listAll(dirPath);
+
+        // Try to detect engine from files
+        let engine: string | undefined;
+        let forcefield: string | undefined;
+        if (files.some(f => f.endsWith(".gro") || f.endsWith(".top"))) {
+          engine = "gromacs";
+        } else if (
+          files.some(f => f.endsWith(".prmtop") || f.endsWith(".inpcrd"))
+        ) {
+          engine = "amber";
+        } else if (files.some(f => f.endsWith(".xml"))) {
+          engine = "openmm";
+        }
+
+        // Try to read metadata if exists
+        const metaPath = join(dirPath, "metadata.json");
+        try {
+          const metaContent = await fs.readFile(metaPath, "utf-8");
+          const meta = JSON.parse(metaContent);
+          simulations.push({
+            id: dirName,
+            path: dirPath,
+            files,
+            engine: meta.engine || engine,
+            forcefield: meta.forcefield || forcefield,
+            n_atoms: meta.n_atoms,
+            n_waters: meta.n_waters,
+            box_size: meta.box_size
+          });
+        } catch {
+          simulations.push({
+            id: dirName,
+            path: dirPath,
+            files,
+            engine,
+            forcefield
+          });
+        }
+      }
+
+      return { success: true, simulations };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+        simulations: []
+      };
+    }
+  });
+
+  // Sim-Ready API handlers
   ipcMain.handle(
     "boltz:sim-ready",
     async (_event, apiUrl: string, payload: unknown) => {
@@ -1017,35 +1114,6 @@ export function registerProjectIPC(): void {
           const errorText = await response.text();
           throw new Error(
             `Sim-ready request failed: ${response.statusText} - ${errorText}`
-          );
-        }
-
-        const data = await response.json();
-        return { success: true, data };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error"
-        };
-      }
-    }
-  );
-
-  ipcMain.handle(
-    "boltz:membrane",
-    async (_event, apiUrl: string, payload: unknown) => {
-      try {
-        validateApiUrl(apiUrl);
-        const response = await net.fetch(`${apiUrl}/api/v1/membrane`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(
-            `Membrane request failed: ${response.statusText} - ${errorText}`
           );
         }
 
@@ -1084,15 +1152,10 @@ export function registerProjectIPC(): void {
     }
   );
 
-  // Download and save sim-ready / membrane results to project
+  // Download and save sim-ready results to project
   ipcMain.handle(
     "boltz:download-and-save-sim-results",
-    async (
-      _event,
-      apiUrl: string,
-      jobId: string,
-      simType: "sim" | "membrane" = "sim"
-    ) => {
+    async (_event, apiUrl: string, jobId: string) => {
       const project = projectManager.getCurrentProject();
       if (!project) {
         return { success: false, error: "No project is currently open" };
@@ -1117,20 +1180,17 @@ export function registerProjectIPC(): void {
         const simulationsDir = join(projectDir, "simulations");
         await fs.mkdir(simulationsDir, { recursive: true });
 
-        // Find next available sim/membrane number
-        const prefix = simType === "membrane" ? "mem" : "sim";
+        // Find next available sim number
+        const prefix = "sim";
         const existingDirs = await fs.readdir(simulationsDir, {
           withFileTypes: true
         });
         const numbers = existingDirs
           .filter(
-            entry =>
-              entry.isDirectory() && entry.name.startsWith(`${prefix}_`)
+            entry => entry.isDirectory() && entry.name.startsWith(`${prefix}_`)
           )
           .map(entry => {
-            const match = entry.name.match(
-              new RegExp(`^${prefix}_(\\d+)$`)
-            );
+            const match = entry.name.match(new RegExp(`^${prefix}_(\\d+)$`));
             return match ? parseInt(match[1], 10) : 0;
           })
           .filter(num => num > 0);
@@ -1209,6 +1269,22 @@ export function registerProjectIPC(): void {
 
         const allFiles = await listAll(simDir);
 
+        // Save metadata from sim-result API for offline access
+        try {
+          const simResultResp = await net.fetch(
+            `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/sim-result`
+          );
+          if (simResultResp.ok) {
+            const simResultData = await simResultResp.json();
+            await fs.writeFile(
+              join(simDir, "metadata.json"),
+              JSON.stringify(simResultData, null, 2)
+            );
+          }
+        } catch {
+          // non-critical
+        }
+
         return {
           success: true,
           simId: `${prefix}_${String(nextNum).padStart(3, "0")}`,
@@ -1217,30 +1293,6 @@ export function registerProjectIPC(): void {
           systemPdbPath: systemPdb,
           systemPdbContent: pdbContent
         };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error"
-        };
-      }
-    }
-  );
-
-  ipcMain.handle(
-    "boltz:opm-lookup",
-    async (_event, apiUrl: string, pdbId: string) => {
-      try {
-        validateApiUrl(apiUrl);
-        const response = await net.fetch(
-          `${apiUrl}/api/v1/opm/${encodeURIComponent(pdbId)}`
-        );
-
-        if (!response.ok) {
-          throw new Error(`OPM lookup failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return { success: true, data };
       } catch (error) {
         return {
           success: false,
