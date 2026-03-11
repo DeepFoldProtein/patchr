@@ -1291,6 +1291,8 @@ async def delete_job(job_id: str):
 class SimReadyRequest(BaseModel):
     job_id: Optional[str] = Field(None, description="Job ID of a completed prediction (uses its output CIF)")
     cif_path: Optional[str] = Field(None, description="Direct path to a CIF file (alternative to job_id)")
+    cif_content: Optional[str] = Field(None, description="CIF file content string (uploaded from client)")
+    cif_filename: Optional[str] = Field(None, description="Original filename for uploaded CIF content")
     engine: str = Field("gromacs", description="MD engine: gromacs, amber, openmm")
     forcefield: str = Field("charmm36m", description="Force field: charmm36m, amber14sb, etc.")
     water_model: str = Field("tip3p", description="Water model: tip3p, tip3pfb, spce, tip4pew")
@@ -1303,6 +1305,8 @@ class SimReadyRequest(BaseModel):
 class MembraneRequest(BaseModel):
     job_id: Optional[str] = Field(None, description="Job ID of a completed prediction")
     cif_path: Optional[str] = Field(None, description="Direct path to a CIF file")
+    cif_content: Optional[str] = Field(None, description="CIF file content string (uploaded from client)")
+    cif_filename: Optional[str] = Field(None, description="Original filename for uploaded CIF content")
     pdb_id: Optional[str] = Field(None, description="PDB ID for OPM orientation lookup")
     lipid_type: str = Field("POPC", description="Lipid type: POPC, POPE, DLPC, DLPE, DMPC, DOPC, DPPC")
     engine: str = Field("gromacs", description="MD engine: gromacs, amber, openmm")
@@ -1315,14 +1319,32 @@ class MembraneRequest(BaseModel):
     center_z: Optional[float] = Field(None, description="Manual membrane center Z in nm")
 
 
-def _resolve_cif_from_request(job_id: Optional[str], cif_path: Optional[str]) -> str:
-    """Resolve CIF file path from either job_id or direct path."""
+def _resolve_cif_from_request(
+    job_id: Optional[str],
+    cif_path: Optional[str],
+    cif_content: Optional[str] = None,
+    cif_filename: Optional[str] = None,
+) -> str:
+    """Resolve CIF file path from job_id, direct path, or uploaded content."""
+    # Option 1: CIF content uploaded from client
+    if cif_content:
+        suffix = ".cif"
+        if cif_filename:
+            suffix = Path(cif_filename).suffix or ".cif"
+        tmp_dir = WORK_DIR / "_uploaded_cifs"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_file = tmp_dir / f"{uuid.uuid4()}{suffix}"
+        tmp_file.write_text(cif_content)
+        return str(tmp_file)
+
+    # Option 2: Direct path on the server filesystem
     if cif_path:
         p = Path(cif_path)
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"CIF file not found: {cif_path}")
         return str(p)
 
+    # Option 3: Job ID from a completed prediction
     if job_id:
         if job_id not in jobs_db:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -1342,7 +1364,7 @@ def _resolve_cif_from_request(job_id: Optional[str], cif_path: Optional[str]) ->
             raise HTTPException(status_code=404, detail="No CIF files found in prediction output")
         return str(cif_files[0])
 
-    raise HTTPException(status_code=400, detail="Either job_id or cif_path must be provided")
+    raise HTTPException(status_code=400, detail="Either job_id, cif_path, or cif_content must be provided")
 
 
 def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: SimReadyRequest):
@@ -1421,7 +1443,7 @@ async def sim_ready_endpoint(
 
     Adds hydrogens, solvates, ionizes, and exports files for the chosen MD engine.
     """
-    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path)
+    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path, request.cif_content, request.cif_filename)
 
     sim_job_id = str(uuid.uuid4())
     jobs_db[sim_job_id] = {
@@ -1446,7 +1468,7 @@ async def membrane_endpoint(
 
     Fetches OPM orientation (if available), builds lipid bilayer, solvates, and ionizes.
     """
-    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path)
+    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path, request.cif_content, request.cif_filename)
 
     mem_job_id = str(uuid.uuid4())
     jobs_db[mem_job_id] = {
