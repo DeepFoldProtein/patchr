@@ -1259,6 +1259,26 @@ async def download_file(job_id: str, file_type: str):
                     zipf.write(cif_path, cif_path.name)
 
         file_path = zip_path
+
+    elif file_type == "sim_ready":
+        # Package sim-ready or membrane output files as zip
+        result_data = job.get("sim_ready_result") or job.get("membrane_result")
+        if not result_data:
+            raise HTTPException(status_code=404, detail="No simulation result found for this job")
+
+        out_dir = Path(result_data.get("output_dir", ""))
+        if not out_dir.exists():
+            raise HTTPException(status_code=404, detail="Simulation output directory not found")
+
+        zip_path = WORK_DIR / job_id / f"{job_id}_sim_ready.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, _dirs, files in os.walk(out_dir):
+                for file in files:
+                    fp = Path(root) / file
+                    rel_path = fp.relative_to(out_dir)
+                    zipf.write(fp, str(rel_path))
+
+        file_path = zip_path
     else:
         raise HTTPException(status_code=400, detail=f"Invalid file_type: {file_type}")
 

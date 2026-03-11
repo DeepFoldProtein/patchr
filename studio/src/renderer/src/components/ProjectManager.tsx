@@ -143,6 +143,11 @@ export function ProjectManager(): React.ReactElement {
                     └── predictions/ - Prediction CIF files and YAML
                   </div>
                 </div>
+                <div>📁 simulations/ - Simulation output files</div>
+                <div className="ml-4 mt-1 space-y-0.5 text-xs">
+                  <div>├── sim_XXX/ - Sim-ready preparation results</div>
+                  <div>└── mem_XXX/ - Membrane embedding results</div>
+                </div>
                 <div>📄 project.yaml - Configuration file</div>
               </div>
             </div>

@@ -1084,6 +1084,148 @@ export function registerProjectIPC(): void {
     }
   );
 
+  // Download and save sim-ready / membrane results to project
+  ipcMain.handle(
+    "boltz:download-and-save-sim-results",
+    async (
+      _event,
+      apiUrl: string,
+      jobId: string,
+      simType: "sim" | "membrane" = "sim"
+    ) => {
+      const project = projectManager.getCurrentProject();
+      if (!project) {
+        return { success: false, error: "No project is currently open" };
+      }
+
+      try {
+        validateApiUrl(apiUrl);
+
+        // Download sim-ready zip from server
+        const response = await net.fetch(
+          `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/files/sim_ready`
+        );
+        if (!response.ok) {
+          throw new Error(`Download failed: ${response.statusText}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Create simulations directory
+        const projectDir = project.path;
+        const simulationsDir = join(projectDir, "simulations");
+        await fs.mkdir(simulationsDir, { recursive: true });
+
+        // Find next available sim/membrane number
+        const prefix = simType === "membrane" ? "mem" : "sim";
+        const existingDirs = await fs.readdir(simulationsDir, {
+          withFileTypes: true
+        });
+        const numbers = existingDirs
+          .filter(
+            entry =>
+              entry.isDirectory() && entry.name.startsWith(`${prefix}_`)
+          )
+          .map(entry => {
+            const match = entry.name.match(
+              new RegExp(`^${prefix}_(\\d+)$`)
+            );
+            return match ? parseInt(match[1], 10) : 0;
+          })
+          .filter(num => num > 0);
+        const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+        const simDir = join(
+          simulationsDir,
+          `${prefix}_${String(nextNum).padStart(3, "0")}`
+        );
+        await fs.mkdir(simDir, { recursive: true });
+
+        // Save and extract zip with path traversal protection
+        const zipPath = join(simDir, `${jobId}_sim_ready.zip`);
+        await fs.writeFile(zipPath, buffer);
+
+        const { default: AdmZip } = await import("adm-zip");
+        const zip = new AdmZip(zipPath);
+        const resolvedSimDir = resolve(simDir);
+
+        for (const entry of zip.getEntries()) {
+          const entryPath = resolve(simDir, entry.entryName);
+          if (
+            !entryPath.startsWith(resolvedSimDir + "/") &&
+            entryPath !== resolvedSimDir
+          ) {
+            throw new Error(
+              `Zip entry "${entry.entryName}" escapes target directory`
+            );
+          }
+        }
+
+        zip.extractAllTo(simDir, true);
+
+        // Delete the zip after extraction
+        await fs.unlink(zipPath);
+
+        // Find the system.pdb file for viewer
+        const findFile = async (
+          dir: string,
+          name: string
+        ): Promise<string | null> => {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+              const found = await findFile(fullPath, name);
+              if (found) return found;
+            } else if (entry.name === name) {
+              return fullPath;
+            }
+          }
+          return null;
+        };
+
+        const systemPdb = await findFile(simDir, "system.pdb");
+
+        // Read system.pdb content for viewer
+        let pdbContent: string | null = null;
+        if (systemPdb) {
+          pdbContent = await fs.readFile(systemPdb, "utf-8");
+        }
+
+        // List all files
+        const listAll = async (dir: string): Promise<string[]> => {
+          const result: string[] = [];
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+              result.push(...(await listAll(fullPath)));
+            } else {
+              result.push(fullPath);
+            }
+          }
+          return result;
+        };
+
+        const allFiles = await listAll(simDir);
+
+        return {
+          success: true,
+          simId: `${prefix}_${String(nextNum).padStart(3, "0")}`,
+          simDir,
+          files: allFiles,
+          systemPdbPath: systemPdb,
+          systemPdbContent: pdbContent
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
   ipcMain.handle(
     "boltz:opm-lookup",
     async (_event, apiUrl: string, pdbId: string) => {

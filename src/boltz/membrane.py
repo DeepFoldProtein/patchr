@@ -263,10 +263,10 @@ def build_membrane_system(config: MembraneConfig, progress_callback=None) -> Mem
     fixer.findMissingResidues()
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
+    fixer.removeHeterogens(keepWater=False)
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(config.ph)
-    fixer.removeHeterogens(keepWater=False)
 
     # Step 4: Load force field
     _progress("parameterizing", 0.25)
