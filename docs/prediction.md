@@ -13,6 +13,7 @@ Full reference for running structure predictions with PATCHR.
 - [Input Format (YAML)](#input-format-yaml)
 - [Output Format](#output-format)
 - [Backends](#backends)
+- [Simulation-Ready Output](#simulation-ready-output)
 - [CLI Reference](#cli-reference)
 - [Server Mode](#server-mode)
 - [Environment Variables](#environment-variables)
@@ -415,7 +416,25 @@ Both backends produce the same directory structure:
 
 ### Confidence JSON
 
-`confidence_{name}_model_0.json` contains:
+`confidence_{name}_model_0.json` contains confidence metrics. The exact fields vary by backend:
+
+**Boltz-2:**
+
+```json
+{
+    "complex_plddt": 85.42,
+    "complex_pde": 0.83,
+    "ptm": 0.78,
+    "iptm": 0.65,
+    "chains_ptm": [0.80, 0.75],
+    "pair_chains_iptm": [[0.0, 0.65], [0.65, 0.0]],
+    "confidence_score": 0.72,
+    "protein_iptm": 0.65,
+    "ligand_iptm": 0.0
+}
+```
+
+**Protenix:**
 
 ```json
 {
@@ -433,17 +452,34 @@ Both backends produce the same directory structure:
 }
 ```
 
+**Common fields (both backends):**
+
 | Field | Description |
 |---|---|
-| `plddt` | Per-token predicted lDDT (0-100). Higher = more confident. |
-| `gpde` | Global predicted distance error (Angstroms). Lower = better. |
 | `ptm` | Predicted TM-score (0-1). |
 | `iptm` | Interface predicted TM-score (0-1). Relevant for complexes. |
+
+**Boltz-2 specific:**
+
+| Field | Description |
+|---|---|
+| `complex_plddt` | Global pLDDT (0-100). Higher = more confident. |
+| `complex_pde` | Global predicted distance error. Lower = better. |
+| `chains_ptm` | Per-chain TM scores. |
+| `pair_chains_iptm` | Pairwise inter-chain scores. |
+| `confidence_score` | Aggregate ranking score. Higher = better. |
+
+**Protenix specific:**
+
+| Field | Description |
+|---|---|
+| `plddt` | Global pLDDT (0-100). Higher = more confident. |
+| `gpde` | Global predicted distance error. Lower = better. |
 | `chain_plddt` | Per-chain pLDDT scores. |
 | `chain_ptm` | Per-chain TM scores. |
 | `chain_pair_iptm` | Pairwise inter-chain scores. |
 | `has_clash` | Whether steric clashes were detected. |
-| `ranking_score` | Aggregate score for ranking multiple samples. Higher = better. |
+| `ranking_score` | Aggregate ranking score. Higher = better. |
 
 ### PAE / PDE Matrices
 
@@ -499,6 +535,84 @@ patchr predict input.yaml --out_dir results --backend protenix --seeds 42,101
 
 ---
 
+## Simulation-Ready Output
+
+PATCHR can go directly from structure completion to MD simulation input. Add `--sim-ready` or `--membrane` to `patchr predict` to run post-processing automatically.
+
+### Solvated System (`--sim-ready`)
+
+Adds hydrogens at target pH, solvates in a water box, and neutralizes with counter ions.
+
+```bash
+# Predict + GROMACS files
+patchr predict input.yaml --out_dir results --sim-ready gromacs
+
+# Predict + AMBER files with AMBER force field
+patchr predict input.yaml --out_dir results --sim-ready amber --ff amber14sb
+
+# Predict + OpenMM files
+patchr predict input.yaml --out_dir results --sim-ready openmm
+```
+
+Output is written to `patchr_results_{name}/sim_ready/`:
+
+| File | Engine | Description |
+|---|---|---|
+| `system.pdb` | All | Solvated system (PDB) |
+| `system.gro` | GROMACS | Coordinates (.gro) |
+| `system_for_gmx.pdb` | GROMACS | PDB for `gmx pdb2gmx` topology generation |
+| `system.xml` | GROMACS, OpenMM | OpenMM serialized system (complete parameterization) |
+| `topology.pdb` | OpenMM | Topology reference PDB |
+| `state.xml` | OpenMM | Serialized state (positions) |
+| `system_for_amber.pdb` | AMBER | PDB for tleap |
+| `sim_ready_summary.json` | All | System stats (atom counts, box size, etc.) |
+
+### Membrane Embedding (`--membrane`)
+
+For membrane proteins: fetches orientation from the [OPM database](https://opm.phar.umich.edu/), builds a lipid bilayer, solvates, and ionizes.
+
+```bash
+# Predict + embed in POPC membrane (auto-orients via OPM)
+patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI
+
+# Different lipid
+patchr predict input.yaml --out_dir results --membrane POPE --pdb-id 4HFI
+
+# Membrane + OpenMM output
+patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI --sim-ready openmm
+```
+
+Output is written to `patchr_results_{name}/membrane/`.
+
+Supported lipids: **POPC**, **POPE**, **DLPC**, **DLPE**, **DMPC**, **DOPC**, **DPPC**.
+
+### Standalone Commands
+
+You can also run sim-ready or membrane on any existing CIF file:
+
+```bash
+# Sim-ready
+patchr sim-ready prediction.cif --engine gromacs --ff charmm36m
+patchr sim-ready prediction.cif --engine openmm --padding 1.2 --ion-conc 0.15
+
+# Membrane
+patchr membrane prediction.cif --pdb-id 4HFI --lipid POPC
+patchr membrane prediction.cif --pdb-id 4HFI --lipid POPE
+patchr membrane prediction.cif --skip-opm --center-z 0.0
+```
+
+### Force Fields
+
+| Name | Description | Recommended for |
+|---|---|---|
+| `charmm36m` | CHARMM36m (default) | General purpose, membrane proteins |
+| `charmm36` | CHARMM36 | General purpose |
+| `amber14sb` | AMBER ff14SB | AMBER users |
+| `amber99sbildn` | AMBER ff99SB-ILDN | Legacy AMBER |
+| `amber19sb` | AMBER ff19SB | Latest AMBER |
+
+---
+
 ## CLI Reference
 
 ### `patchr predict`
@@ -538,6 +652,48 @@ Options:
   --no_kernels                    Disable custom CUDA kernels
   --write_embeddings              Write s/z embeddings
   --method TEXT                   Method conditioning (Boltz-2)
+  --sim-ready [gromacs|amber|openmm]
+                                  Post-processing: prepare simulation files
+  --membrane [POPC|POPE|DLPC|DLPE|DMPC|DOPC|DPPC]
+                                  Post-processing: embed in lipid membrane
+  --pdb-id TEXT                   PDB ID for OPM membrane orientation
+  --ff [charmm36m|charmm36|amber14sb|amber99sbildn|amber19sb]
+                                  Force field for sim-ready/membrane
+```
+
+### `patchr sim-ready`
+
+```
+Usage: patchr sim-ready [OPTIONS] INPUT_CIF
+
+Options:
+  -o, --out-dir PATH              Output directory
+  --engine [gromacs|amber|openmm] MD engine (default: gromacs)
+  --ff [charmm36m|...]            Force field (default: charmm36m)
+  --water [tip3p|tip3pfb|tip4pew|spce]  Water model (default: tip3p)
+  --ph FLOAT                      Protonation pH (default: 7.0)
+  --padding FLOAT                 Box padding in nm (default: 1.0)
+  --ion-conc FLOAT                Ion concentration in mol/L (default: 0.15)
+  --keep-water                    Keep crystallographic waters
+```
+
+### `patchr membrane`
+
+```
+Usage: patchr membrane [OPTIONS] INPUT_CIF
+
+Options:
+  -o, --out-dir PATH              Output directory
+  --pdb-id TEXT                   PDB ID for OPM orientation lookup
+  --lipid [POPC|POPE|...]         Lipid type (default: POPC)
+  --engine [gromacs|amber|openmm] MD engine (default: gromacs)
+  --ff [charmm36m|...]            Force field (default: charmm36m)
+  --water [tip3p|...]             Water model (default: tip3p)
+  --ph FLOAT                      Protonation pH (default: 7.0)
+  --padding FLOAT                 Padding in nm (default: 1.0)
+  --ion-conc FLOAT                Ion concentration (default: 0.15)
+  --skip-opm                      Skip OPM orientation lookup
+  --center-z FLOAT                Manual membrane center Z in nm
 ```
 
 ### `patchr template`
@@ -569,7 +725,7 @@ Options:
   --host TEXT                     Bind host (default: 0.0.0.0)
   --port INTEGER                  Bind port (default: 31212)
   --device-id TEXT                GPU device ID (e.g. '0')
-  --model [boltz2|boltz2|protenix|all]
+  --model [boltz2|protenix|all]
                                   Model(s) to preload (default: boltz2)
   --work-dir PATH                 Job working directory (default: ./patchr_jobs)
   --reload                        Enable auto-reload (dev mode)
@@ -610,6 +766,10 @@ patchr serve --model all
 | `GET` | `/api/v1/jobs/{job_id}/files/{type}` | Download results (cif/yaml/prediction) |
 | `GET` | `/api/v1/jobs` | List all jobs |
 | `DELETE` | `/api/v1/jobs/{job_id}` | Delete a job |
+| `POST` | `/api/v1/sim-ready` | Prepare simulation-ready files from prediction |
+| `POST` | `/api/v1/membrane` | Embed protein in lipid membrane |
+| `GET` | `/api/v1/jobs/{job_id}/sim-result` | Get sim-ready/membrane result details |
+| `GET` | `/api/v1/opm/{pdb_id}` | Fetch OPM orientation data |
 
 ### Example API Usage
 

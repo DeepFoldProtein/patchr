@@ -90,6 +90,14 @@ def cli() -> None:
 @click.option("--no_kernels", is_flag=True, help="Disable custom kernels (Boltz).")
 @click.option("--write_embeddings", is_flag=True, help="Write s/z embeddings (Boltz).")
 @click.option("--method", type=str, default=None, help="Method conditioning (Boltz-2 only).")
+# Post-processing options
+@click.option("--sim-ready", "sim_ready_engine", type=click.Choice(["gromacs", "amber", "openmm"]), default=None,
+              help="After prediction, prepare simulation-ready files for the given MD engine.")
+@click.option("--membrane", "membrane_lipid", type=click.Choice(["POPC", "POPE", "DLPC", "DLPE", "DMPC", "DOPC", "DPPC"]), default=None,
+              help="After prediction, embed in a lipid membrane of the given type.")
+@click.option("--pdb-id", "sim_pdb_id", type=str, default=None, help="PDB ID for OPM membrane orientation lookup.")
+@click.option("--ff", "sim_ff", type=click.Choice(["charmm36m", "charmm36", "amber14sb", "amber99sbildn", "amber19sb"]),
+              default="charmm36m", help="Force field for sim-ready/membrane. Default: charmm36m.")
 def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
     data: str,
     out_dir: str,
@@ -123,6 +131,10 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
     no_kernels: bool,
     write_embeddings: bool,
     method: Optional[str],
+    sim_ready_engine: Optional[str],
+    membrane_lipid: Optional[str],
+    sim_pdb_id: Optional[str],
+    sim_ff: str,
 ) -> None:
     """Run structure prediction.
 
@@ -131,8 +143,9 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
     \b
     Examples:
       patchr predict input.yaml --out_dir results
-      patchr predict input.yaml --out_dir results --inpainting
       patchr predict input.yaml --out_dir results --backend protenix --seed 42
+      patchr predict input.yaml --out_dir results --sim-ready gromacs
+      patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI
     """
     if backend == "protenix":
         _predict_protenix(
@@ -177,6 +190,79 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
             write_embeddings=write_embeddings,
             method=method,
         )
+
+    # Post-processing: sim-ready or membrane
+    if sim_ready_engine or membrane_lipid:
+        _run_post_processing(
+            data=data,
+            out_dir=out_dir,
+            sim_ready_engine=sim_ready_engine,
+            membrane_lipid=membrane_lipid,
+            pdb_id=sim_pdb_id,
+            ff=sim_ff,
+        )
+
+
+def _run_post_processing(
+    data: str,
+    out_dir: str,
+    sim_ready_engine: Optional[str],
+    membrane_lipid: Optional[str],
+    pdb_id: Optional[str],
+    ff: str,
+) -> None:
+    """Run sim-ready or membrane post-processing on prediction output."""
+    import glob
+
+    data_path = Path(data).expanduser()
+    out_path = Path(out_dir).expanduser()
+    results_dir = out_path / f"patchr_results_{data_path.stem}"
+    predictions_dir = results_dir / "predictions"
+
+    # Find all output CIF files
+    cif_files = sorted(glob.glob(str(predictions_dir / "**" / "*_model_*.cif"), recursive=True))
+    if not cif_files:
+        click.echo("Warning: No prediction CIF files found for post-processing.")
+        return
+
+    # Process only the first model (model_0)
+    cif_path = cif_files[0]
+    click.echo(f"\nPost-processing: {Path(cif_path).name}")
+
+    if membrane_lipid:
+        from boltz.membrane import MembraneConfig, build_membrane_system
+
+        engine = sim_ready_engine or "gromacs"
+        sim_dir = results_dir / "membrane"
+        config = MembraneConfig(
+            input_cif=cif_path,
+            output_dir=str(sim_dir),
+            pdb_id=pdb_id,
+            lipid_type=membrane_lipid,
+            engine=engine,
+            forcefield=ff,
+        )
+        result = build_membrane_system(config, progress_callback=lambda s, p: click.echo(f"  [{p*100:5.1f}%] {s}"))
+        click.echo(f"\nMembrane system: {result.n_atoms:,} atoms, {result.n_lipids} lipids, {result.n_waters:,} waters")
+        click.echo(f"  Box: {result.box_size[0]:.2f} x {result.box_size[1]:.2f} x {result.box_size[2]:.2f} nm")
+        for key, path in result.files.items():
+            click.echo(f"  {key}: {path}")
+
+    elif sim_ready_engine:
+        from boltz.sim_ready import SimReadyConfig, prepare_sim_ready
+
+        sim_dir = results_dir / "sim_ready"
+        config = SimReadyConfig(
+            input_cif=cif_path,
+            output_dir=str(sim_dir),
+            engine=sim_ready_engine,
+            forcefield=ff,
+        )
+        result = prepare_sim_ready(config, progress_callback=lambda s, p: click.echo(f"  [{p*100:5.1f}%] {s}"))
+        click.echo(f"\nSim-ready: {result.n_atoms:,} atoms, {result.n_waters:,} waters, {result.n_ions} ions")
+        click.echo(f"  Box: {result.box_size[0]:.2f} x {result.box_size[1]:.2f} x {result.box_size[2]:.2f} nm")
+        for key, path in result.files.items():
+            click.echo(f"  {key}: {path}")
 
 
 def _predict_boltz(
@@ -397,6 +483,7 @@ def _predict_boltz(
         model_module = Boltz2.load_from_checkpoint(
             checkpoint,
             strict=True,
+            weights_only=False,
             predict_args=predict_args,
             map_location="cpu",
             diffusion_process_args=asdict(diffusion_params),
@@ -679,6 +766,191 @@ def serve(
         from server import app  # noqa: E402
 
         uvicorn.run(app, host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
+# patchr sim-ready
+# ---------------------------------------------------------------------------
+
+@cli.command("sim-ready")
+@click.argument("input_cif", type=click.Path(exists=True))
+@click.option("-o", "--out-dir", type=click.Path(), default=None, help="Output directory. Default: ./sim_ready_{stem}/")
+@click.option(
+    "--engine",
+    type=click.Choice(["gromacs", "amber", "openmm"]),
+    default="gromacs",
+    help="MD engine output format. Default: gromacs.",
+)
+@click.option(
+    "--ff",
+    type=click.Choice(["charmm36m", "charmm36", "amber14sb", "amber99sbildn", "amber19sb"]),
+    default="charmm36m",
+    help="Force field. Default: charmm36m.",
+)
+@click.option("--water", type=click.Choice(["tip3p", "tip3pfb", "tip4pew", "spce"]), default="tip3p", help="Water model.")
+@click.option("--ph", type=float, default=7.0, help="Protonation pH. Default: 7.0.")
+@click.option("--padding", type=float, default=1.0, help="Box padding in nm. Default: 1.0.")
+@click.option("--ion-conc", type=float, default=0.15, help="Ion concentration in mol/L. Default: 0.15.")
+@click.option("--keep-water", is_flag=True, help="Keep crystallographic waters.")
+def sim_ready(
+    input_cif: str,
+    out_dir: Optional[str],
+    engine: str,
+    ff: str,
+    water: str,
+    ph: float,
+    padding: float,
+    ion_conc: float,
+    keep_water: bool,
+) -> None:
+    """Prepare a simulation-ready system from a predicted structure.
+
+    Takes a CIF file (e.g. from patchr predict) and produces force-field
+    parameterized, solvated, ionized files ready for MD simulation.
+
+    \b
+    Examples:
+      patchr sim-ready results/prediction.cif
+      patchr sim-ready prediction.cif --engine amber --ff amber14sb
+      patchr sim-ready prediction.cif --engine gromacs --ff charmm36m --ion-conc 0.15
+      patchr sim-ready prediction.cif --engine openmm --padding 1.2
+    """
+    from boltz.sim_ready import SimReadyConfig, prepare_sim_ready
+
+    if out_dir is None:
+        stem = Path(input_cif).stem
+        out_dir = f"./sim_ready_{stem}"
+
+    config = SimReadyConfig(
+        input_cif=input_cif,
+        output_dir=out_dir,
+        engine=engine,
+        forcefield=ff,
+        water_model=water,
+        ph=ph,
+        padding=padding,
+        ion_concentration=ion_conc,
+        keep_water=keep_water,
+    )
+
+    def progress(step, pct):
+        click.echo(f"  [{pct*100:5.1f}%] {step}")
+
+    click.echo(f"Preparing simulation-ready system: {input_cif}")
+    click.echo(f"  Engine: {engine} | FF: {ff} | Water: {water}")
+    click.echo(f"  pH: {ph} | Padding: {padding} nm | Ions: {ion_conc} M")
+
+    result = prepare_sim_ready(config, progress_callback=progress)
+
+    click.echo(f"\nSystem summary:")
+    click.echo(f"  Atoms: {result.n_atoms:,}")
+    click.echo(f"  Waters: {result.n_waters:,}")
+    click.echo(f"  Ions: {result.n_ions}")
+    click.echo(f"  Box: {result.box_size[0]:.2f} x {result.box_size[1]:.2f} x {result.box_size[2]:.2f} nm")
+    click.echo(f"\nOutput files:")
+    for key, path in result.files.items():
+        click.echo(f"  {key}: {path}")
+
+
+# ---------------------------------------------------------------------------
+# patchr membrane
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("input_cif", type=click.Path(exists=True))
+@click.option("-o", "--out-dir", type=click.Path(), default=None, help="Output directory.")
+@click.option("--pdb-id", type=str, default=None, help="PDB ID for OPM orientation lookup.")
+@click.option(
+    "--lipid",
+    type=click.Choice(["POPC", "POPE", "DLPC", "DLPE", "DMPC", "DOPC", "DPPC"]),
+    default="POPC",
+    help="Lipid type. Default: POPC.",
+)
+@click.option(
+    "--engine",
+    type=click.Choice(["gromacs", "amber", "openmm"]),
+    default="gromacs",
+    help="MD engine output format. Default: gromacs.",
+)
+@click.option(
+    "--ff",
+    type=click.Choice(["charmm36m", "charmm36", "amber14sb", "amber99sbildn", "amber19sb"]),
+    default="charmm36m",
+    help="Force field. Default: charmm36m.",
+)
+@click.option("--water", type=click.Choice(["tip3p", "tip3pfb", "tip4pew", "spce"]), default="tip3p", help="Water model.")
+@click.option("--ph", type=float, default=7.0, help="Protonation pH. Default: 7.0.")
+@click.option("--padding", type=float, default=1.0, help="Membrane padding in nm. Default: 1.0.")
+@click.option("--ion-conc", type=float, default=0.15, help="Ion concentration in mol/L. Default: 0.15.")
+@click.option("--skip-opm", is_flag=True, help="Skip OPM orientation lookup.")
+@click.option("--center-z", type=float, default=None, help="Manual membrane center Z in nm.")
+def membrane(
+    input_cif: str,
+    out_dir: Optional[str],
+    pdb_id: Optional[str],
+    lipid: str,
+    engine: str,
+    ff: str,
+    water: str,
+    ph: float,
+    padding: float,
+    ion_conc: float,
+    skip_opm: bool,
+    center_z: Optional[float],
+) -> None:
+    """Embed a protein in a lipid membrane for MD simulation.
+
+    Automatically fetches orientation from the OPM database (if available),
+    builds a lipid bilayer, solvates, and ionizes the system.
+
+    \b
+    Examples:
+      patchr membrane prediction.cif --pdb-id 4ZLO
+      patchr membrane prediction.cif --lipid POPE --engine amber
+      patchr membrane prediction.cif --pdb-id 1BNA --ff charmm36m --ion-conc 0.15
+    """
+    from boltz.membrane import MembraneConfig, build_membrane_system
+
+    if out_dir is None:
+        stem = Path(input_cif).stem
+        out_dir = f"./membrane_{stem}"
+
+    config = MembraneConfig(
+        input_cif=input_cif,
+        output_dir=out_dir,
+        pdb_id=pdb_id,
+        lipid_type=lipid,
+        engine=engine,
+        forcefield=ff,
+        water_model=water,
+        ph=ph,
+        padding=padding,
+        ion_concentration=ion_conc,
+        skip_opm=skip_opm,
+        manual_center_z=center_z,
+    )
+
+    def progress(step, pct):
+        click.echo(f"  [{pct*100:5.1f}%] {step}")
+
+    click.echo(f"Building membrane system: {input_cif}")
+    click.echo(f"  Lipid: {lipid} | Engine: {engine} | FF: {ff}")
+    if pdb_id:
+        click.echo(f"  OPM lookup: {pdb_id}")
+
+    result = build_membrane_system(config, progress_callback=progress)
+
+    click.echo(f"\nMembrane system summary:")
+    click.echo(f"  Atoms: {result.n_atoms:,}")
+    click.echo(f"  Lipids: {result.n_lipids}")
+    click.echo(f"  Waters: {result.n_waters:,}")
+    click.echo(f"  Ions: {result.n_ions}")
+    click.echo(f"  Box: {result.box_size[0]:.2f} x {result.box_size[1]:.2f} x {result.box_size[2]:.2f} nm")
+    if result.opm_used:
+        click.echo(f"  OPM: {result.opm_pdb_id} (thickness={result.membrane_thickness:.1f}A)")
+    click.echo(f"\nOutput files:")
+    for key, path in result.files.items():
+        click.echo(f"  {key}: {path}")
 
 
 # ---------------------------------------------------------------------------
