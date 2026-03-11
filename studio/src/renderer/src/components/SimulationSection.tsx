@@ -2,6 +2,20 @@ import React from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { Button } from "./ui/button";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem
+} from "./ui/select";
+import { Switch } from "./ui/switch";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent
+} from "./ui/collapsible";
+import { Alert, AlertDescription } from "./ui/alert";
+import {
   apiUrlAtom,
   apiConnectionStatusAtom,
   panelModeAtom
@@ -73,24 +87,14 @@ function Section({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div className="border-b border-slate-200/50 dark:border-slate-800/50">
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center justify-between px-4 py-3.5 text-left hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-all group"
-      >
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          {title}
-        </h3>
-        <span className="text-slate-500 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-400 transition-colors">
-          {expanded ? "\u25BC" : "\u25B6"}
-        </span>
-      </button>
-      {expanded && (
-        <div className="px-4 py-4 bg-slate-50/50 dark:bg-slate-900/20">
-          {children}
-        </div>
-      )}
-    </div>
+    <Collapsible open={expanded} onOpenChange={() => onToggle()}>
+      <CollapsibleTrigger>
+        {title}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -150,6 +154,9 @@ export function SimulationSection({
     unknown
   > | null>(null);
   const [simSavedDir, setSimSavedDir] = React.useState<string | null>(null);
+  const [simHistory, setSimHistory] = React.useState<
+    Array<{ result: Record<string, unknown>; savedDir: string | null }>
+  >([]);
 
   // --- Membrane job state ----------------------------------------------------
   const [memJobId, setMemJobId] = React.useState<string | null>(null);
@@ -161,6 +168,9 @@ export function SimulationSection({
     unknown
   > | null>(null);
   const [memSavedDir, setMemSavedDir] = React.useState<string | null>(null);
+  const [memHistory, setMemHistory] = React.useState<
+    Array<{ result: Record<string, unknown>; savedDir: string | null }>
+  >([]);
 
   // --- Run & CIF selection ---------------------------------------------------
   const [selectedRunIdx, setSelectedRunIdx] = React.useState<number>(-1);
@@ -331,6 +341,10 @@ export function SimulationSection({
 
   const handleSimReady = React.useCallback(async () => {
     if (!selectedCif) return;
+    // Save previous result to history before starting new run
+    if (simResult) {
+      setSimHistory(prev => [...prev, { result: simResult, savedDir: simSavedDir }]);
+    }
     setSimError(null);
     setSimResult(null);
     setSimSavedDir(null);
@@ -389,11 +403,17 @@ export function SimulationSection({
     keepWater,
     apiUrl,
     pollJobStatus,
-    downloadAndView
+    downloadAndView,
+    simResult,
+    simSavedDir
   ]);
 
   const handleMembrane = React.useCallback(async () => {
     if (!selectedCif) return;
+    // Save previous result to history before starting new run
+    if (memResult) {
+      setMemHistory(prev => [...prev, { result: memResult, savedDir: memSavedDir }]);
+    }
     setMemError(null);
     setMemResult(null);
     setMemSavedDir(null);
@@ -457,7 +477,9 @@ export function SimulationSection({
     opmPdbId,
     apiUrl,
     pollJobStatus,
-    downloadAndView
+    downloadAndView,
+    memResult,
+    memSavedDir
   ]);
 
   const isSimBusy = simJobStatus === "submitting" || simJobStatus === "running";
@@ -469,7 +491,7 @@ export function SimulationSection({
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex flex-col h-full overflow-auto">
+    <div className="flex flex-col h-full min-h-0 overflow-auto">
       {/* ── Source Structure ── */}
       <Section
         title="Source Structure"
@@ -481,43 +503,51 @@ export function SimulationSection({
             <label className="text-[10px] font-medium text-muted-foreground">
               Prediction Run
             </label>
-            <select
-              value={selectedRunIdx}
-              onChange={e => {
-                setSelectedRunIdx(Number(e.target.value));
+            <Select
+              value={String(selectedRunIdx)}
+              onValueChange={v => {
+                setSelectedRunIdx(Number(v));
                 setSelectedCifIdx(0);
               }}
-              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
               disabled={results.length === 0}
             >
-              {results.length === 0 ? (
-                <option value={-1}>No runs available</option>
-              ) : (
-                results.map((r, idx) => (
-                  <option key={r.runId} value={idx}>
-                    {r.runId} ({r.cifFiles.length} file
-                    {r.cifFiles.length !== 1 ? "s" : ""})
-                  </option>
-                ))
-              )}
-            </select>
+              <SelectTrigger>
+                <SelectValue placeholder="No runs available" />
+              </SelectTrigger>
+              <SelectContent>
+                {results.length === 0 ? (
+                  <SelectItem value="-1">No runs available</SelectItem>
+                ) : (
+                  results.map((r, idx) => (
+                    <SelectItem key={r.runId} value={String(idx)}>
+                      {r.runId} ({r.cifFiles.length} file
+                      {r.cifFiles.length !== 1 ? "s" : ""})
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
           {selectedRunCifs.length > 0 && (
             <div className="space-y-1">
               <label className="text-[10px] font-medium text-muted-foreground">
                 CIF File
               </label>
-              <select
-                value={selectedCifIdx}
-                onChange={e => setSelectedCifIdx(Number(e.target.value))}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs font-mono"
+              <Select
+                value={String(selectedCifIdx)}
+                onValueChange={v => setSelectedCifIdx(Number(v))}
               >
-                {selectedRunCifs.map((cif, idx) => (
-                  <option key={cif} value={idx}>
-                    {cif.split("/").pop()}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedRunCifs.map((cif, idx) => (
+                    <SelectItem key={cif} value={String(idx)}>
+                      {cif.split("/").pop()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
           {selectedCif && (
@@ -544,49 +574,52 @@ export function SimulationSection({
               <label className="text-[10px] font-medium text-muted-foreground">
                 Engine
               </label>
-              <select
-                value={engine}
-                onChange={e => setEngine(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-              >
-                {ENGINES.map(e => (
-                  <option key={e.value} value={e.value}>
-                    {e.label}
-                  </option>
-                ))}
-              </select>
+              <Select value={engine} onValueChange={setEngine}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENGINES.map(e => (
+                    <SelectItem key={e.value} value={e.value}>
+                      {e.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-medium text-muted-foreground">
                 Force Field
               </label>
-              <select
-                value={forcefield}
-                onChange={e => setForcefield(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-              >
-                {FORCEFIELDS.map(f => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
+              <Select value={forcefield} onValueChange={setForcefield}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FORCEFIELDS.map(f => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-medium text-muted-foreground">
                 Water Model
               </label>
-              <select
-                value={waterModel}
-                onChange={e => setWaterModel(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-              >
-                {WATER_MODELS.map(w => (
-                  <option key={w.value} value={w.value}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
+              <Select value={waterModel} onValueChange={setWaterModel}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WATER_MODELS.map(w => (
+                    <SelectItem key={w.value} value={w.value}>
+                      {w.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-medium text-muted-foreground">
@@ -635,12 +668,10 @@ export function SimulationSection({
           </div>
 
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Switch
               id="keep-water"
               checked={keepWater}
-              onChange={e => setKeepWater(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+              onCheckedChange={setKeepWater}
             />
             <label htmlFor="keep-water" className="text-xs cursor-pointer">
               Keep crystallographic waters
@@ -669,7 +700,24 @@ export function SimulationSection({
               title="Simulation Files Ready"
               result={simResult}
               savedDir={simSavedDir}
+              defaultExpanded
             />
+          )}
+
+          {simHistory.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium text-muted-foreground">
+                Previous Runs ({simHistory.length})
+              </div>
+              {[...simHistory].reverse().map((h, i) => (
+                <SimResultCard
+                  key={`sim-hist-${simHistory.length - 1 - i}`}
+                  title={`Run ${simHistory.length - i}`}
+                  result={h.result}
+                  savedDir={h.savedDir}
+                />
+              ))}
+            </div>
           )}
         </div>
       </Section>
@@ -690,17 +738,18 @@ export function SimulationSection({
               <label className="text-[10px] font-medium text-muted-foreground">
                 Lipid Type
               </label>
-              <select
-                value={lipidType}
-                onChange={e => setLipidType(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-              >
-                {LIPID_TYPES.map(l => (
-                  <option key={l.value} value={l.value}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
+              <Select value={lipidType} onValueChange={setLipidType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LIPID_TYPES.map(l => (
+                    <SelectItem key={l.value} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-medium text-muted-foreground">
@@ -729,31 +778,35 @@ export function SimulationSection({
           </div>
 
           {opmInfo && (
-            <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-2 text-xs text-muted-foreground">
-              <div className="font-medium text-blue-600 dark:text-blue-400 mb-1">
-                OPM Data Found
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                <span>Thickness:</span>
-                <span className="font-mono">
-                  {opmInfo.thickness.toFixed(1)} A
-                </span>
-                <span>Tilt angle:</span>
-                <span className="font-mono">
-                  {opmInfo.tilt_angle.toFixed(1)} deg
-                </span>
-                <span>Type:</span>
-                <span>{opmInfo.type}</span>
-              </div>
-            </div>
+            <Alert variant="default">
+              <AlertDescription>
+                <div className="font-medium text-blue-600 dark:text-blue-400 mb-1">
+                  OPM Data Found
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  <span>Thickness:</span>
+                  <span className="font-mono">
+                    {opmInfo.thickness.toFixed(1)} A
+                  </span>
+                  <span>Tilt angle:</span>
+                  <span className="font-mono">
+                    {opmInfo.tilt_angle.toFixed(1)} deg
+                  </span>
+                  <span>Type:</span>
+                  <span>{opmInfo.type}</span>
+                </div>
+              </AlertDescription>
+            </Alert>
           )}
 
           {opmError && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
-              <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                {opmError}
-              </p>
-            </div>
+            <Alert variant="warning">
+              <AlertDescription>
+                <p className="text-[10px]">
+                  {opmError}
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
 
           <Button
@@ -779,7 +832,24 @@ export function SimulationSection({
               title="Membrane System Ready"
               result={memResult}
               savedDir={memSavedDir}
+              defaultExpanded
             />
+          )}
+
+          {memHistory.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium text-muted-foreground">
+                Previous Runs ({memHistory.length})
+              </div>
+              {[...memHistory].reverse().map((h, i) => (
+                <SimResultCard
+                  key={`mem-hist-${memHistory.length - 1 - i}`}
+                  title={`Run ${memHistory.length - i}`}
+                  result={h.result}
+                  savedDir={h.savedDir}
+                />
+              ))}
+            </div>
           )}
         </div>
       </Section>
@@ -856,94 +926,133 @@ function JobStatusCard({
 function SimResultCard({
   title,
   result,
-  savedDir
+  savedDir,
+  defaultExpanded = false
 }: {
   title: string;
   result: Record<string, unknown>;
   savedDir: string | null;
+  defaultExpanded?: boolean;
 }): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(defaultExpanded);
+
   const handleOpenFolder = React.useCallback(() => {
     if (savedDir) {
       void window.api.project.openFolder(savedDir);
     }
   }, [savedDir]);
 
+  // Summary line
+  const summary = React.useMemo(() => {
+    const parts: string[] = [];
+    if (result.engine) parts.push(String(result.engine));
+    if (result.forcefield) parts.push(String(result.forcefield));
+    if (result.n_waters !== undefined)
+      parts.push(`${String(result.n_waters)} waters`);
+    return parts.join(" · ");
+  }, [result]);
+
   return (
-    <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 space-y-2">
-      <div className="text-xs font-semibold text-green-600 dark:text-green-400">
-        {title}
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {result.n_atoms !== undefined && (
-          <>
-            <span>Atom count:</span>
-            <span className="font-mono">{String(result.n_atoms)}</span>
-          </>
-        )}
-        {!!result.box_size && Array.isArray(result.box_size) && (
-          <>
-            <span>Box size:</span>
-            <span className="font-mono">
-              {(result.box_size as number[])
-                .map(v => (typeof v === "number" ? v.toFixed(2) : v))
-                .join(" x ")}{" "}
-              nm
+    <div className="rounded-md border border-green-500/30 bg-green-500/5 overflow-hidden">
+      {/* Header — always visible, clickable to toggle */}
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-green-500/10 transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] text-green-600 dark:text-green-400">
+            {expanded ? "▼" : "▶"}
+          </span>
+          <span className="text-xs font-semibold text-green-600 dark:text-green-400 truncate">
+            {title}
+          </span>
+          {!expanded && summary && (
+            <span className="text-[10px] text-muted-foreground truncate">
+              {summary}
             </span>
-          </>
-        )}
-        {result.n_waters !== undefined && (
-          <>
-            <span>Waters:</span>
-            <span className="font-mono">{String(result.n_waters)}</span>
-          </>
-        )}
-        {!!result.engine && (
-          <>
-            <span>Engine:</span>
-            <span className="font-mono">{String(result.engine)}</span>
-          </>
-        )}
-        {!!result.forcefield && (
-          <>
-            <span>Force field:</span>
-            <span className="font-mono">{String(result.forcefield)}</span>
-          </>
-        )}
-      </div>
-
-      {!!result.files && typeof result.files === "object" && (
-        <div className="mt-2">
-          <div className="text-[10px] font-medium text-muted-foreground mb-1">
-            Output files:
-          </div>
-          <div className="space-y-0.5">
-            {Object.entries(result.files as Record<string, string>).map(
-              ([key, val]) => (
-                <div
-                  key={key}
-                  className="text-[10px] font-mono text-muted-foreground truncate"
-                >
-                  {typeof val === "string" ? val.split("/").pop() : String(val)}
-                </div>
-              )
-            )}
-          </div>
+          )}
         </div>
-      )}
-
-      {savedDir && (
-        <div className="mt-2 flex items-center justify-between">
-          <p className="text-[10px] text-muted-foreground font-mono truncate flex-1 mr-2">
-            {savedDir.split("/").slice(-2).join("/")}
-          </p>
-          <Button
-            onClick={handleOpenFolder}
-            variant="outline"
-            size="sm"
-            className="h-6 text-[10px] px-2 shrink-0"
+        {savedDir && (
+          <span
+            onClick={e => {
+              e.stopPropagation();
+              handleOpenFolder();
+            }}
+            className="shrink-0 ml-2 text-[10px] font-medium text-blue-500 hover:text-blue-400 cursor-pointer"
           >
             Open Folder
-          </Button>
+          </span>
+        )}
+      </button>
+
+      {/* Detail — shown when expanded */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {result.n_atoms !== undefined && (
+              <>
+                <span>Atom count:</span>
+                <span className="font-mono">{String(result.n_atoms)}</span>
+              </>
+            )}
+            {!!result.box_size && Array.isArray(result.box_size) && (
+              <>
+                <span>Box size:</span>
+                <span className="font-mono">
+                  {(result.box_size as number[])
+                    .map(v => (typeof v === "number" ? v.toFixed(2) : v))
+                    .join(" x ")}{" "}
+                  nm
+                </span>
+              </>
+            )}
+            {result.n_waters !== undefined && (
+              <>
+                <span>Waters:</span>
+                <span className="font-mono">{String(result.n_waters)}</span>
+              </>
+            )}
+            {!!result.engine && (
+              <>
+                <span>Engine:</span>
+                <span className="font-mono">{String(result.engine)}</span>
+              </>
+            )}
+            {!!result.forcefield && (
+              <>
+                <span>Force field:</span>
+                <span className="font-mono">{String(result.forcefield)}</span>
+              </>
+            )}
+          </div>
+
+          {!!result.files && typeof result.files === "object" && (
+            <div>
+              <div className="text-[10px] font-medium text-muted-foreground mb-1">
+                Output files:
+              </div>
+              <div className="space-y-0.5">
+                {Object.entries(result.files as Record<string, string>).map(
+                  ([key, val]) => (
+                    <div
+                      key={key}
+                      className="text-[10px] font-mono text-muted-foreground truncate"
+                    >
+                      {typeof val === "string"
+                        ? val.split("/").pop()
+                        : String(val)}
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
+          {savedDir && (
+            <p className="text-[10px] text-muted-foreground font-mono truncate">
+              {savedDir.split("/").slice(-2).join("/")}
+            </p>
+          )}
         </div>
       )}
     </div>

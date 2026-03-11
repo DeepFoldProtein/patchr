@@ -25,7 +25,10 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  FolderOpen
+  FolderOpen,
+  CheckCircle,
+  XCircle,
+  AlertTriangle
 } from "lucide-react";
 import {
   Dialog,
@@ -35,6 +38,15 @@ import {
   DialogTitle
 } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { cn } from "../lib/utils";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Progress } from "./ui/progress";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent
+} from "./ui/collapsible";
+import { Switch } from "./ui/switch";
 import { SimulationSection } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
@@ -49,55 +61,41 @@ export function ControlPanel(): React.ReactElement {
   const [panelMode, setPanelMode] = useAtom(panelModeAtom);
 
   return (
-    <div className="flex h-full flex-col bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl">
-      {/* Tab bar */}
-      <div className="flex border-b border-slate-200/50 dark:border-slate-800/50 bg-slate-50/80 dark:bg-slate-900/60">
-        {TAB_ITEMS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setPanelMode(tab.key)}
-            className={`relative flex-1 px-3 py-3 text-xs font-medium transition-all ${
-              panelMode === tab.key
-                ? "text-slate-900 dark:text-white"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300"
-            }`}
-          >
-            <span className="relative z-10">{tab.label}</span>
-            {panelMode === tab.key && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
-            )}
-          </button>
-        ))}
-      </div>
+    <div className="relative h-full bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl">
+      <div className="absolute inset-0 flex flex-col">
+        {/* Tab bar */}
+        <div className="flex w-full shrink-0 items-center justify-center rounded-md border-b bg-slate-50/80 dark:bg-slate-900/60 p-1 text-muted-foreground">
+          {TAB_ITEMS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setPanelMode(tab.key)}
+              className={cn(
+                "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-xs font-medium transition-all",
+                panelMode === tab.key
+                  ? "bg-background text-foreground shadow-sm"
+                  : "hover:bg-background/50"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      {/* Project Manager */}
-      <div
-        className={`flex-1 overflow-auto p-4 space-y-4 ${panelMode === "project" ? "" : "hidden"}`}
-      >
-        <ServerConnection />
-        <ProjectManager />
-      </div>
-
-      {/* Repair Console */}
-      <div
-        className={
-          panelMode === "repair"
-            ? "flex-1 flex flex-col overflow-hidden"
-            : "hidden"
-        }
-      >
-        <RepairConsole />
-      </div>
-
-      {/* Simulation Panel */}
-      <div
-        className={
-          panelMode === "simulation"
-            ? "flex-1 flex flex-col overflow-auto p-4"
-            : "hidden"
-        }
-      >
-        <SimulationPanel />
+        {/* Tab content */}
+        {panelMode === "project" && (
+          <div className="flex-1 overflow-auto p-4 space-y-4">
+            <ServerConnection />
+            <ProjectManager />
+          </div>
+        )}
+        {panelMode === "repair" && (
+          <RepairConsole />
+        )}
+        {panelMode === "simulation" && (
+          <div className="flex-1 overflow-auto p-4">
+            <SimulationPanel />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -969,7 +967,7 @@ function RepairConsole(): React.ReactElement {
   );
 
   return (
-    <div className="flex-1 overflow-auto">
+    <div className="flex-1 min-h-0 overflow-auto">
       {/* Missing Region Review 섹션 */}
       <Section
         title="Missing Region Analysis"
@@ -1351,24 +1349,14 @@ function Section({
   children
 }: SectionProps): React.ReactElement {
   return (
-    <div className="border-b border-slate-200/50 dark:border-slate-800/50">
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center justify-between px-4 py-3.5 text-left hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-all group"
-      >
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          {title}
-        </h3>
-        <span className="text-slate-500 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-400 transition-colors">
-          {expanded ? "▼" : "▶"}
-        </span>
-      </button>
-      {expanded && (
-        <div className="px-4 py-4 bg-slate-50/50 dark:bg-slate-900/20">
-          {children}
-        </div>
-      )}
-    </div>
+    <Collapsible open={expanded} onOpenChange={() => onToggle()}>
+      <CollapsibleTrigger>
+        {title}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -1622,14 +1610,12 @@ function SequenceMappingSection(): React.ReactElement {
 
   return (
     <div className="space-y-4">
-      {/* Enable Sequence Mapping Checkbox */}
+      {/* Enable Sequence Mapping Switch */}
       <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
+        <Switch
           id="enable-sequence-mapping"
           checked={enableSequenceMapping}
-          onChange={e => setEnableSequenceMapping(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+          onCheckedChange={setEnableSequenceMapping}
         />
         <label
           htmlFor="enable-sequence-mapping"
@@ -1771,24 +1757,26 @@ function SequenceMappingSection(): React.ReactElement {
 
           {/* Search Status */}
           {searchStatus === "success" && (
-            <div className="rounded-md border border-green-500/50 bg-green-500/10 p-3">
-              <p className="text-xs text-green-400">
-                ✓ Found UniProt entries for {pdbId}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sequences updated in FASTA field above
-              </p>
-            </div>
+            <Alert variant="success">
+              <CheckCircle className="h-3 w-3" />
+              <AlertDescription className="text-xs">
+                <p>Found UniProt entries for {pdbId}</p>
+                <p className="mt-1 text-muted-foreground">
+                  Sequences updated in FASTA field above
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
           {searchStatus === "error" && (
-            <div className="rounded-md border border-red-500/50 bg-red-500/10 p-3">
-              <p className="text-xs text-red-400">
-                ✗ Failed to find UniProt entries for {pdbId}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                You can manually edit the FASTA sequence above
-              </p>
-            </div>
+            <Alert variant="destructive">
+              <XCircle className="h-3 w-3" />
+              <AlertDescription className="text-xs">
+                <p>Failed to find UniProt entries for {pdbId}</p>
+                <p className="mt-1 text-muted-foreground">
+                  You can manually edit the FASTA sequence above
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
         </>
       )}
@@ -2225,9 +2213,9 @@ function ContextInpaintSection({
                       : jobStatus === "downloading"
                         ? "Downloading results..."
                         : jobStatus === "completed"
-                          ? "✓ Completed"
+                          ? "Completed"
                           : jobStatus === "failed"
-                            ? "✗ Failed"
+                            ? "Failed"
                             : jobStatus.replace("_", " ")}
             </span>
           </div>
@@ -2236,12 +2224,7 @@ function ContextInpaintSection({
           )}
           {(progress > 0 || jobStatus === "running") && (
             <div className="mt-2">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              <Progress value={progress} className="h-2" />
               <div className="mt-1 text-xs text-muted-foreground">
                 {progressMessage ? (
                   <div>
@@ -2266,9 +2249,12 @@ function ContextInpaintSection({
 
       {/* Error Display */}
       {error && (
-        <div className="rounded-md border border-red-500/50 bg-red-500/10 p-3">
-          <p className="text-xs text-red-400">✗ {error}</p>
-        </div>
+        <Alert variant="destructive">
+          <XCircle className="h-3 w-3" />
+          <AlertDescription className="text-xs">
+            {error}
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Action Buttons */}
