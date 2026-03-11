@@ -1,7 +1,7 @@
 <div align="center">
   <div>&nbsp;</div>
 
-<img src="docs/e2e_demo.gif" width="480"/>
+<img src="docs/logo.png" width="120" style="border-radius: 20px;"/>
 
 [Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
 
@@ -10,6 +10,10 @@
 <br/>
 
 ## Why PATCHR?
+
+<div align="center">
+<img src="docs/e2e_demo.gif" width="480"/>
+</div>
 
 Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. These gaps block molecular dynamics simulations, drug design pipelines, and structural analysis.
 
