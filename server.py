@@ -114,7 +114,7 @@ class TemplateGenerateRequest(BaseModel):
 class PredictionRequest(BaseModel):
     job_id: str = Field(..., description="Job ID from template generation")
     model: ModelType = Field(
-        ModelType.BOLTZ2_INPAINT,
+        ModelType.BOLTZ2,
         description="Model to use for prediction",
     )
     recycling_steps: int = Field(3, description="Number of recycling steps (Boltz: recycling_steps, Protenix: model.N_cycle)")
@@ -550,7 +550,7 @@ async def run_boltz_prediction(
     devices: int,
     accelerator: str,
     use_msa_server: bool,
-    model_type: ModelType = ModelType.BOLTZ2_INPAINT,
+    model_type: ModelType = ModelType.BOLTZ2,
 ):
     """Background task to run Boltz prediction."""
     try:
@@ -611,7 +611,7 @@ def _run_boltz_prediction_sync(
     devices: int,
     accelerator: str,
     use_msa_server: bool,
-    model_type: ModelType = ModelType.BOLTZ2_INPAINT,
+    model_type: ModelType = ModelType.BOLTZ2,
     event_loop=None,
 ):
     """Synchronous function to run Boltz prediction."""
@@ -696,7 +696,7 @@ def _run_boltz_prediction_sync(
             use_paired_feature=True,
         )
 
-        enable_inpainting = model_type == ModelType.BOLTZ2_INPAINT
+        enable_inpainting = model_type == ModelType.BOLTZ2
 
         pred_writer = BoltzWriter(
             data_dir=str(processed.targets_dir),
@@ -1100,7 +1100,7 @@ async def run_prediction(
     update_job_status(request.job_id, JobStatus.PENDING, progress="Preparing to run prediction")
 
     # Dispatch based on model type
-    if request.model in (ModelType.BOLTZ2, ModelType.BOLTZ2_INPAINT):
+    if request.model == ModelType.BOLTZ2:
         background_tasks.add_task(
             run_boltz_prediction,
             job_id=request.job_id,
@@ -1283,6 +1283,218 @@ async def delete_job(job_id: str):
 
     del jobs_db[job_id]
     return {"message": f"Job {job_id} deleted successfully"}
+
+
+# ── Sim-Ready & Membrane endpoints ─────────────────────────────────────────
+
+class SimReadyRequest(BaseModel):
+    job_id: Optional[str] = Field(None, description="Job ID of a completed prediction (uses its output CIF)")
+    cif_path: Optional[str] = Field(None, description="Direct path to a CIF file (alternative to job_id)")
+    engine: str = Field("gromacs", description="MD engine: gromacs, amber, openmm")
+    forcefield: str = Field("charmm36m", description="Force field: charmm36m, amber14sb, etc.")
+    water_model: str = Field("tip3p", description="Water model: tip3p, tip3pfb, spce, tip4pew")
+    ph: float = Field(7.0, description="Protonation pH")
+    padding: float = Field(1.0, description="Box padding in nm")
+    ion_concentration: float = Field(0.15, description="Ion concentration in mol/L")
+    keep_water: bool = Field(False, description="Keep crystallographic waters")
+
+
+class MembraneRequest(BaseModel):
+    job_id: Optional[str] = Field(None, description="Job ID of a completed prediction")
+    cif_path: Optional[str] = Field(None, description="Direct path to a CIF file")
+    pdb_id: Optional[str] = Field(None, description="PDB ID for OPM orientation lookup")
+    lipid_type: str = Field("POPC", description="Lipid type: POPC, POPE, DLPC, DLPE, DMPC, DOPC, DPPC")
+    engine: str = Field("gromacs", description="MD engine: gromacs, amber, openmm")
+    forcefield: str = Field("charmm36m", description="Force field")
+    water_model: str = Field("tip3p", description="Water model")
+    ph: float = Field(7.0, description="Protonation pH")
+    padding: float = Field(1.0, description="Membrane padding in nm")
+    ion_concentration: float = Field(0.15, description="Ion concentration in mol/L")
+    skip_opm: bool = Field(False, description="Skip OPM orientation lookup")
+    center_z: Optional[float] = Field(None, description="Manual membrane center Z in nm")
+
+
+def _resolve_cif_from_request(job_id: Optional[str], cif_path: Optional[str]) -> str:
+    """Resolve CIF file path from either job_id or direct path."""
+    if cif_path:
+        p = Path(cif_path)
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"CIF file not found: {cif_path}")
+        return str(p)
+
+    if job_id:
+        if job_id not in jobs_db:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        job = jobs_db[job_id]
+        if job.get("status") != JobStatus.COMPLETED:
+            raise HTTPException(status_code=400, detail=f"Job {job_id} is not completed (status: {job.get('status')})")
+
+        # Find the prediction CIF
+        pred_dir = job.get("prediction_dir")
+        if not pred_dir or not Path(pred_dir).exists():
+            raise HTTPException(status_code=404, detail="Prediction directory not found")
+
+        cif_files = list(Path(pred_dir).rglob("*_model_0.cif"))
+        if not cif_files:
+            cif_files = list(Path(pred_dir).rglob("*.cif"))
+        if not cif_files:
+            raise HTTPException(status_code=404, detail="No CIF files found in prediction output")
+        return str(cif_files[0])
+
+    raise HTTPException(status_code=400, detail="Either job_id or cif_path must be provided")
+
+
+def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: SimReadyRequest):
+    """Background worker for sim-ready preparation."""
+    try:
+        from boltz.sim_ready import SimReadyConfig, prepare_sim_ready
+
+        out_dir = WORK_DIR / sim_job_id / "sim_ready"
+        config = SimReadyConfig(
+            input_cif=cif_path,
+            output_dir=str(out_dir),
+            engine=request.engine,
+            forcefield=request.forcefield,
+            water_model=request.water_model,
+            ph=request.ph,
+            padding=request.padding,
+            ion_concentration=request.ion_concentration,
+            keep_water=request.keep_water,
+        )
+
+        def progress_cb(step, pct):
+            update_job_status(sim_job_id, JobStatus.RUNNING_PREDICTION, progress=f"{step} ({pct*100:.0f}%)")
+
+        result = prepare_sim_ready(config, progress_callback=progress_cb)
+
+        jobs_db[sim_job_id]["sim_ready_result"] = result.to_dict()
+        jobs_db[sim_job_id]["prediction_dir"] = str(out_dir)
+        update_job_status(sim_job_id, JobStatus.COMPLETED, progress="done")
+
+    except Exception as e:
+        logging.exception(f"Sim-ready failed for job {sim_job_id}")
+        update_job_status(sim_job_id, JobStatus.FAILED, error=str(e))
+
+
+def _run_membrane_sync(mem_job_id: str, cif_path: str, request: MembraneRequest):
+    """Background worker for membrane embedding."""
+    try:
+        from boltz.membrane import MembraneConfig, build_membrane_system
+
+        out_dir = WORK_DIR / mem_job_id / "membrane"
+        config = MembraneConfig(
+            input_cif=cif_path,
+            output_dir=str(out_dir),
+            pdb_id=request.pdb_id,
+            lipid_type=request.lipid_type,
+            engine=request.engine,
+            forcefield=request.forcefield,
+            water_model=request.water_model,
+            ph=request.ph,
+            padding=request.padding,
+            ion_concentration=request.ion_concentration,
+            skip_opm=request.skip_opm,
+            manual_center_z=request.center_z,
+        )
+
+        def progress_cb(step, pct):
+            update_job_status(mem_job_id, JobStatus.RUNNING_PREDICTION, progress=f"{step} ({pct*100:.0f}%)")
+
+        result = build_membrane_system(config, progress_callback=progress_cb)
+
+        jobs_db[mem_job_id]["membrane_result"] = result.to_dict()
+        jobs_db[mem_job_id]["prediction_dir"] = str(out_dir)
+        update_job_status(mem_job_id, JobStatus.COMPLETED, progress="done")
+
+    except Exception as e:
+        logging.exception(f"Membrane embedding failed for job {mem_job_id}")
+        update_job_status(mem_job_id, JobStatus.FAILED, error=str(e))
+
+
+@app.post("/api/v1/sim-ready")
+async def sim_ready_endpoint(
+    request: SimReadyRequest,
+    background_tasks: BackgroundTasks,
+) -> JobStatusResponse:
+    """Prepare simulation-ready files from a prediction or CIF file.
+
+    Adds hydrogens, solvates, ionizes, and exports files for the chosen MD engine.
+    """
+    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path)
+
+    sim_job_id = str(uuid.uuid4())
+    jobs_db[sim_job_id] = {
+        "job_id": sim_job_id,
+        "status": JobStatus.PENDING,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "progress": "Preparing sim-ready pipeline",
+        "source_cif": cif_path,
+    }
+
+    background_tasks.add_task(_run_sim_ready_sync, sim_job_id, cif_path, request)
+    return JobStatusResponse(**{k: v for k, v in jobs_db[sim_job_id].items() if k in JobStatusResponse.model_fields})
+
+
+@app.post("/api/v1/membrane")
+async def membrane_endpoint(
+    request: MembraneRequest,
+    background_tasks: BackgroundTasks,
+) -> JobStatusResponse:
+    """Embed a protein in a lipid membrane for MD simulation.
+
+    Fetches OPM orientation (if available), builds lipid bilayer, solvates, and ionizes.
+    """
+    cif_path = _resolve_cif_from_request(request.job_id, request.cif_path)
+
+    mem_job_id = str(uuid.uuid4())
+    jobs_db[mem_job_id] = {
+        "job_id": mem_job_id,
+        "status": JobStatus.PENDING,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "progress": "Preparing membrane embedding",
+        "source_cif": cif_path,
+        "pdb_id": request.pdb_id,
+    }
+
+    background_tasks.add_task(_run_membrane_sync, mem_job_id, cif_path, request)
+    return JobStatusResponse(**{k: v for k, v in jobs_db[mem_job_id].items() if k in JobStatusResponse.model_fields})
+
+
+@app.get("/api/v1/jobs/{job_id}/sim-result")
+async def get_sim_result(job_id: str):
+    """Get simulation preparation result details."""
+    if job_id not in jobs_db:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    job = jobs_db[job_id]
+    result = job.get("sim_ready_result") or job.get("membrane_result")
+    if not result:
+        raise HTTPException(status_code=404, detail="No simulation result found for this job")
+
+    return result
+
+
+@app.get("/api/v1/opm/{pdb_id}")
+async def get_opm_info(pdb_id: str):
+    """Fetch OPM (Orientations of Proteins in Membranes) data for a PDB ID."""
+    from boltz.membrane import fetch_opm_data
+
+    data = fetch_opm_data(pdb_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"No OPM data found for {pdb_id}")
+
+    return {
+        "pdb_id": data.pdb_id,
+        "thickness": data.thickness,
+        "tilt_angle": data.tilt_angle,
+        "type": data.type_name,
+        "topology": data.topology,
+        "family": data.family,
+        "superfamily": data.superfamily,
+        "has_coordinates": data.coordinates_pdb is not None,
+    }
 
 
 @app.get("/api/v1/health")

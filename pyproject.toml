@@ -63,6 +63,11 @@ dependencies = [
     "optree>=0.13.0",
     "pdbeccdutils>=0.8.5",
     "ninja",
+
+    # Simulation preparation
+    "openmm>=8.0",
+    "pdbfixer>=1.9",
+    "parmed>=4.0",
 ]
 
 [project.scripts]

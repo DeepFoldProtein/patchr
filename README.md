@@ -142,7 +142,38 @@ results/patchr_results_{input_name}/
 └── processed/                                 # Preprocessed data (Boltz only)
 ```
 
-> **Note:** Protenix backend requires `protenix_base_default_v1.0.0`. Mini/tiny models cannot produce connected boundaries for inpainting. For CPU-only or non-CUDA GPUs, use `pip install -e .`.
+
+## Simulation-Ready Output
+
+Add `--sim-ready` or `--membrane` to `patchr predict` to go directly from structure completion to MD simulation input -- no manual steps.
+
+```bash
+# Predict + prepare GROMACS input
+patchr predict input.yaml --out_dir results --sim-ready gromacs
+
+# Predict + prepare AMBER input with AMBER ff
+patchr predict input.yaml --out_dir results --sim-ready amber --ff amber14sb
+
+# Predict + embed in POPC membrane (auto-orients via OPM)
+patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI
+```
+
+Automatically adds hydrogens, solvates, neutralizes with counter ions. For `--membrane`, fetches orientation from the [OPM database](https://opm.phar.umich.edu/) and builds a lipid bilayer around the protein.
+
+<details>
+<summary><b>Standalone sim-ready / membrane commands</b></summary>
+
+You can also run these on any existing CIF file:
+
+```bash
+patchr sim-ready prediction.cif --engine gromacs --ff charmm36m
+patchr sim-ready prediction.cif --engine openmm --padding 1.2 --ion-conc 0.15
+patchr membrane prediction.cif --pdb-id 4HFI --lipid POPE --engine amber
+```
+
+Supported lipids: POPC, POPE, DLPC, DLPE, DMPC, DOPC, DPPC.
+
+</details>
 
 ## How It Works
 

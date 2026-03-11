@@ -14,6 +14,7 @@
 import json
 import logging
 import os
+import shutil
 import time
 import traceback
 import urllib.request
@@ -489,6 +490,24 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                         if v != "non-polymer"
                     },
                 )
+
+                # Copy inpainting_metadata JSON to predictions dir (matching Boltz output)
+                for sample_entry in json_data:
+                    if sample_entry.get("name") == sample_name:
+                        meta_path = (
+                            sample_entry.get("inpainting", {}).get("metadata")
+                        )
+                        if meta_path and os.path.isfile(meta_path):
+                            dest = opjoin(
+                                runner.dumper._get_dump_dir(sample_name),
+                                f"inpainting_metadata_{sample_name}.json",
+                            )
+                            shutil.copy2(meta_path, dest)
+                            logger.info(
+                                f"Copied inpainting metadata to {dest}"
+                            )
+                        break
+
                 t2_end = time.time()
                 logger.info(
                     f"[Rank {DIST_WRAPPER.rank}] {sample_name} [seed:{seed}] succeeded. "
