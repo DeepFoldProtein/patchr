@@ -567,7 +567,7 @@ export function StructureUploadModal({
           {availableChains.length > 0 ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                   Select chains to import from {pdbId.toUpperCase()}
                 </p>
                 <div className="flex gap-2">
@@ -590,13 +590,13 @@ export function StructureUploadModal({
                 </div>
               </div>
 
-              <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div className="max-h-60 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
                 {availableChains.map(chain => (
                   <div
                     key={chain.id}
-                    className={`flex items-center gap-3 px-3 py-2 border-b border-slate-200 dark:border-slate-700/50 last:border-b-0 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                    className={`flex items-center gap-3 px-3 py-2 border-b border-neutral-200 dark:border-neutral-700/50 last:border-b-0 cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors ${
                       selectedChains.has(chain.id)
-                        ? "bg-slate-100 dark:bg-slate-700/30"
+                        ? "bg-neutral-100 dark:bg-neutral-700/30"
                         : ""
                     }`}
                     onClick={() => handleToggleChain(chain.id)}
@@ -604,22 +604,22 @@ export function StructureUploadModal({
                     {selectedChains.has(chain.id) ? (
                       <CheckSquare className="h-5 w-5 text-primary shrink-0" />
                     ) : (
-                      <Square className="h-5 w-5 text-slate-400 dark:text-slate-500 shrink-0" />
+                      <Square className="h-5 w-5 text-neutral-400 dark:text-neutral-500 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold text-slate-900 dark:text-slate-200">
+                        <span className="font-mono font-semibold text-neutral-900 dark:text-neutral-200">
                           Chain {chain.id}
                         </span>
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-600 text-neutral-700 dark:text-neutral-300">
                           {chain.type}
                         </span>
-                        <span className="text-xs text-slate-600 dark:text-slate-500">
+                        <span className="text-xs text-neutral-600 dark:text-neutral-500">
                           {chain.residueCount} residues
                         </span>
                       </div>
                       {chain.description && (
-                        <p className="text-xs text-slate-600 dark:text-slate-500 truncate">
+                        <p className="text-xs text-neutral-600 dark:text-neutral-500 truncate">
                           {chain.description}
                         </p>
                       )}
@@ -670,7 +670,7 @@ export function StructureUploadModal({
                   ${
                     isDragging
                       ? "border-primary bg-primary/10"
-                      : "border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50 hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      : "border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800/50 hover:border-neutral-400 dark:hover:border-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   }
                   ${isLoading ? "pointer-events-none opacity-50" : "cursor-pointer"}
                 `}
@@ -679,30 +679,30 @@ export function StructureUploadModal({
                 {isLoading ? (
                   <div className="flex flex-col items-center gap-3">
                     <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-neutral-400">
                       Loading structure...
                     </p>
                   </div>
                 ) : (
                   <>
                     <div
-                      className={`mb-4 rounded-full p-4 ${isDragging ? "bg-primary/20" : "bg-slate-200 dark:bg-slate-700"}`}
+                      className={`mb-4 rounded-full p-4 ${isDragging ? "bg-primary/20" : "bg-neutral-200 dark:bg-neutral-700"}`}
                     >
                       {isDragging ? (
                         <File className="h-8 w-8 text-primary" />
                       ) : (
-                        <Upload className="h-8 w-8 text-slate-500 dark:text-slate-400" />
+                        <Upload className="h-8 w-8 text-neutral-500 dark:text-neutral-400" />
                       )}
                     </div>
-                    <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-200">
+                    <p className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-200">
                       {isDragging
                         ? "Drop file here"
                         : "Drag and drop structure file"}
                     </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-500">
+                    <p className="text-xs text-neutral-600 dark:text-neutral-500">
                       or click to browse files
                     </p>
-                    <p className="mt-3 text-xs text-slate-500 dark:text-slate-600">
+                    <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-600">
                       Supported formats: PDB, mmCIF
                     </p>
                   </>
@@ -719,14 +719,14 @@ export function StructureUploadModal({
 
               {/* Divider */}
               <div className="flex items-center justify-center gap-4 pt-2">
-                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-                <span className="text-xs text-slate-500">or</span>
-                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
+                <span className="text-xs text-neutral-500">or</span>
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
               </div>
 
               {/* Fetch from PDB */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                   Fetch from RCSB PDB
                 </label>
                 <div className="flex gap-2 px-2">
@@ -736,7 +736,7 @@ export function StructureUploadModal({
                     onChange={e => setPdbId(e.target.value.toUpperCase())}
                     onKeyDown={handlePdbIdKeyDown}
                     disabled={isLoading}
-                    className="flex-1 bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 uppercase focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 focus-visible:border-primary"
+                    className="flex-1 bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 uppercase focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 focus-visible:border-primary"
                     maxLength={4}
                   />
                   <Button
@@ -752,9 +752,9 @@ export function StructureUploadModal({
 
               {/* Divider */}
               <div className="flex items-center justify-center gap-4 pt-2">
-                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-                <span className="text-xs text-slate-500">or</span>
-                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
+                <span className="text-xs text-neutral-500">or</span>
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
               </div>
 
               {/* Browse Files Button */}

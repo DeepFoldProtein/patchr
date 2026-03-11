@@ -119,9 +119,9 @@ export function AppLayout(): React.ReactElement {
   return (
     <div className="relative flex h-screen flex-col overflow-hidden">
       {/* Animated gradient background */}
-      <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 -z-10">
+      <div className="fixed inset-0 bg-gradient-to-br from-neutral-50 via-neutral-100 to-neutral-50 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 -z-10">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] dark:[mask-image:radial-gradient(ellipse_80%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-50/50 via-transparent to-transparent dark:from-slate-950/50" />
+        <div className="absolute inset-0 bg-gradient-to-t from-neutral-50/50 via-transparent to-transparent dark:from-neutral-950/50" />
       </div>
 
       <div className="relative z-10 flex h-screen flex-col">
@@ -131,7 +131,7 @@ export function AppLayout(): React.ReactElement {
             <Panel defaultSize={65} minSize={30}>
               <MolViewerPanel key={projectKey} />
             </Panel>
-            <PanelResizeHandle className="w-1 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400/30 dark:hover:bg-blue-500/30 transition-colors" />
+            <PanelResizeHandle className="w-1 bg-neutral-200/50 dark:bg-neutral-800/50 hover:bg-neutral-400/30 dark:hover:bg-neutral-500/30 transition-colors" />
             <Panel defaultSize={35} minSize={20} maxSize={50}>
               <ControlPanel key={projectKey} />
             </Panel>

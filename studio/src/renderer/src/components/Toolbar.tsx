@@ -1,7 +1,7 @@
 import React from "react";
 import { Button } from "./ui/button";
 import { Home, Moon, Sun } from "lucide-react";
-import logoIcon from "@/assets/logo-icon.png";
+import logoIcon from "@/assets/logo.png";
 import { useAtom } from "jotai";
 import { themeAtom } from "@/store/app-atoms";
 import { useCurrentProject, useProjectStore } from "@/store/project-store";
@@ -34,13 +34,13 @@ export function Toolbar(): React.ReactElement {
           <div className="absolute inset-0 rounded-lg ring-1 ring-inset ring-white/20" />
         </div>
         <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-slate-900 dark:text-white">
+          <div className="text-sm font-semibold text-neutral-900 dark:text-white">
             {currentProject ? currentProject.name : "Patchr Studio"}
           </div>
           {currentProject && (
             <div className="flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
-              <div className="text-xs text-slate-500 dark:text-slate-400">
+              <div className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+              <div className="text-xs text-neutral-500 dark:text-neutral-400">
                 Active
               </div>
             </div>
@@ -56,19 +56,19 @@ export function Toolbar(): React.ReactElement {
         size="sm"
         onClick={handleHome}
         disabled={!currentProject}
-        className="h-9 gap-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/50 dark:hover:bg-slate-800/50 disabled:opacity-40"
+        className="h-9 gap-2 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100/50 dark:hover:bg-neutral-800/50 disabled:opacity-40"
       >
         <Home className="h-4 w-4" />
         Home
       </Button>
 
-      <div className="mx-1 h-6 w-px bg-slate-300/50 dark:bg-slate-800/50" />
+      <div className="mx-1 h-6 w-px bg-neutral-300/50 dark:bg-neutral-800/50" />
 
       <Button
         variant="ghost"
         size="icon"
         onClick={toggleTheme}
-        className="h-9 w-9 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/50 dark:hover:bg-slate-800/50"
+        className="h-9 w-9 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100/50 dark:hover:bg-neutral-800/50"
       >
         {theme === "dark" ? (
           <Sun className="h-4 w-4" />

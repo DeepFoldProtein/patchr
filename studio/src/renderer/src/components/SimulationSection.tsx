@@ -705,7 +705,7 @@ function SimResultCard({
               e.stopPropagation();
               handleOpenFolder();
             }}
-            className="shrink-0 ml-2 text-[10px] font-medium text-blue-500 hover:text-blue-400 cursor-pointer"
+            className="shrink-0 ml-2 text-[10px] font-medium text-neutral-500 hover:text-neutral-400 cursor-pointer"
           >
             Open Folder
           </span>

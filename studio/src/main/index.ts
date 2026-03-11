@@ -1,12 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain, nativeTheme, Menu } from "electron";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import icon from "../../resources/icon.png?asset";
+import icon from "../../resources/logo.png?asset";
 import { registerProjectIPC } from "./project-manager";
 
 const WINDOW_WIDTH = 1536;
 const WINDOW_HEIGHT = 652;
-const DARK_BG = "#0f172a"; // slate-900
+const DARK_BG = "#0a0a0a"; // neutral-950
 const LIGHT_BG = "#ffffff";
 
 let mainWindow: BrowserWindow | null = null;

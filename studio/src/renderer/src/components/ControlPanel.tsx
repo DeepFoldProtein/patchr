@@ -60,10 +60,10 @@ export function ControlPanel(): React.ReactElement {
   const [panelMode, setPanelMode] = useAtom(panelModeAtom);
 
   return (
-    <div className="relative h-full bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl">
+    <div className="relative h-full bg-white/60 dark:bg-neutral-900/40 backdrop-blur-xl">
       <div className="absolute inset-0 flex flex-col">
         {/* Tab bar */}
-        <div className="flex w-full shrink-0 items-center justify-center rounded-md border-b bg-slate-50/80 dark:bg-slate-900/60 p-1 text-muted-foreground">
+        <div className="flex w-full shrink-0 items-center justify-center rounded-md border-b bg-neutral-50/80 dark:bg-neutral-900/60 p-1 text-muted-foreground">
           {TAB_ITEMS.map(tab => (
             <button
               key={tab.key}
@@ -1186,7 +1186,7 @@ function RepairConsole(): React.ReactElement {
                           {result.quality && (
                             <div className="flex items-center gap-1 text-[10px]">
                               <span
-                                className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium"
+                                className="px-1.5 py-0.5 rounded bg-neutral-500/20 text-neutral-400 font-medium"
                                 title={`Average pLDDT: ${result.quality.avgPLDDT.toFixed(1)}`}
                               >
                                 pLDDT: {result.quality.avgPLDDT.toFixed(1)}

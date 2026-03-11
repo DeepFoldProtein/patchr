@@ -231,7 +231,7 @@ export function MissingRegionReviewSection(): React.ReactElement {
                             : chainSegments.some(
                                   s => s.repairType === "backbone"
                                 )
-                              ? "bg-blue-500/20 text-blue-400"
+                              ? "bg-neutral-500/20 text-neutral-400"
                               : "bg-yellow-500/20 text-yellow-400"
                         }`}
                       >

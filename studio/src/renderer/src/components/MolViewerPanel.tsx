@@ -73,7 +73,7 @@ function MolViewerPanelInner({
   const error = pluginError || structureError;
 
   return (
-    <div className="flex h-full flex-col bg-slate-950">
+    <div className="flex h-full flex-col bg-neutral-950">
       {error && (
         <Alert
           variant="destructive"
@@ -87,7 +87,7 @@ function MolViewerPanelInner({
       {/* Sequence panel container - 별도 영역에 표시 */}
       <div
         id="sequence-panel-container"
-        className="bg-slate-900 border-b border-slate-700"
+        className="bg-neutral-900 border-b border-neutral-700"
         style={{ minHeight: "100px", maxHeight: "150px", overflow: "auto" }}
       />
 
@@ -128,7 +128,7 @@ export function MolViewerPanel(props: MolViewerPanelProps): React.ReactElement {
     <ErrorBoundary
       key={key}
       fallback={
-        <div className="flex h-full items-center justify-center bg-slate-950">
+        <div className="flex h-full items-center justify-center bg-neutral-950">
           <div className="max-w-md">
             <Alert variant="destructive" className="text-center">
               <AlertTriangle className="h-4 w-4" />
@@ -140,7 +140,7 @@ export function MolViewerPanel(props: MolViewerPanelProps): React.ReactElement {
               <div className="flex justify-center gap-2 pt-2">
                 <button
                   onClick={() => setKey(k => k + 1)}
-                  className="rounded-md bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 transition-colors"
+                  className="rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-600 transition-colors"
                 >
                   Retry
                 </button>
