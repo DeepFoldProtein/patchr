@@ -537,11 +537,9 @@ patchr predict input.yaml --out_dir results --backend protenix --seeds 42,101
 
 ## Simulation-Ready Output
 
-PATCHR can go directly from structure completion to MD simulation input. Add `--sim-ready` or `--membrane` to `patchr predict` to run post-processing automatically.
+PATCHR can go directly from structure completion to MD simulation input. Add `--sim-ready` to `patchr predict` to run post-processing automatically.
 
-### Solvated System (`--sim-ready`)
-
-Adds hydrogens at target pH, solvates in a water box, and neutralizes with counter ions.
+Adds hydrogens at target pH, solvates in a water box, and neutralizes with counter ions. For GROMACS, generates CHARMM-GUI-style output with `toppar/` directory, MDP files, and a run script.
 
 ```bash
 # Predict + GROMACS files
@@ -556,56 +554,47 @@ patchr predict input.yaml --out_dir results --sim-ready openmm
 
 Output is written to `patchr_results_{name}/sim_ready/`:
 
+**GROMACS output:**
+
+| File | Description |
+|---|---|
+| `topol.top` | Main topology with `#include` directives |
+| `toppar/forcefield.itp` | Force field parameters ([defaults], [atomtypes], [cmaptypes]) |
+| `toppar/PROA.itp` | Protein topology with position restraints |
+| `toppar/HOH.itp` | Water topology (with SETTLE) |
+| `toppar/NA.itp`, `toppar/CL.itp` | Ion topologies |
+| `step5_input.gro` | Coordinates (.gro) |
+| `step5_input.pdb` | Coordinates (.pdb) |
+| `index.ndx` | Index file (SOLU, SOLV, SYSTEM groups) |
+| `step6.0_minimization.mdp` | Energy minimization |
+| `step6.{1-6}_equilibration.mdp` | 6-step equilibration with progressive restraint release |
+| `step7_production.mdp` | Production MD |
+| `README` | GROMACS run script |
+| `system.xml` | OpenMM serialized system (backup) |
+| `sim_ready_summary.json` | System stats (atom counts, box size, etc.) |
+
+**Other engines:**
+
 | File | Engine | Description |
 |---|---|---|
-| `system.pdb` | All | Solvated system (PDB) |
-| `system.gro` | GROMACS | Coordinates (.gro) |
-| `system_for_gmx.pdb` | GROMACS | PDB for `gmx pdb2gmx` topology generation |
-| `system.xml` | GROMACS, OpenMM | OpenMM serialized system (complete parameterization) |
 | `topology.pdb` | OpenMM | Topology reference PDB |
 | `state.xml` | OpenMM | Serialized state (positions) |
 | `system_for_amber.pdb` | AMBER | PDB for tleap |
-| `sim_ready_summary.json` | All | System stats (atom counts, box size, etc.) |
 
-### Membrane Embedding (`--membrane`)
+### Standalone Command
 
-For membrane proteins: fetches orientation from the [OPM database](https://opm.phar.umich.edu/), builds a lipid bilayer, solvates, and ionizes.
-
-```bash
-# Predict + embed in POPC membrane (auto-orients via OPM)
-patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI
-
-# Different lipid
-patchr predict input.yaml --out_dir results --membrane POPE --pdb-id 4HFI
-
-# Membrane + OpenMM output
-patchr predict input.yaml --out_dir results --membrane POPC --pdb-id 4HFI --sim-ready openmm
-```
-
-Output is written to `patchr_results_{name}/membrane/`.
-
-Supported lipids: **POPC**, **POPE**, **DLPC**, **DLPE**, **DMPC**, **DOPC**, **DPPC**.
-
-### Standalone Commands
-
-You can also run sim-ready or membrane on any existing CIF file:
+You can also run sim-ready on any existing CIF file:
 
 ```bash
-# Sim-ready
 patchr sim-ready prediction.cif --engine gromacs --ff charmm36m
 patchr sim-ready prediction.cif --engine openmm --padding 1.2 --ion-conc 0.15
-
-# Membrane
-patchr membrane prediction.cif --pdb-id 4HFI --lipid POPC
-patchr membrane prediction.cif --pdb-id 4HFI --lipid POPE
-patchr membrane prediction.cif --skip-opm --center-z 0.0
 ```
 
 ### Force Fields
 
 | Name | Description | Recommended for |
 |---|---|---|
-| `charmm36m` | CHARMM36m (default) | General purpose, membrane proteins |
+| `charmm36m` | CHARMM36m (default) | General purpose |
 | `charmm36` | CHARMM36 | General purpose |
 | `amber14sb` | AMBER ff14SB | AMBER users |
 | `amber99sbildn` | AMBER ff99SB-ILDN | Legacy AMBER |
@@ -654,11 +643,8 @@ Options:
   --method TEXT                   Method conditioning (Boltz-2)
   --sim-ready [gromacs|amber|openmm]
                                   Post-processing: prepare simulation files
-  --membrane [POPC|POPE|DLPC|DLPE|DMPC|DOPC|DPPC]
-                                  Post-processing: embed in lipid membrane
-  --pdb-id TEXT                   PDB ID for OPM membrane orientation
   --ff [charmm36m|charmm36|amber14sb|amber99sbildn|amber19sb]
-                                  Force field for sim-ready/membrane
+                                  Force field for sim-ready
 ```
 
 ### `patchr sim-ready`
@@ -675,25 +661,6 @@ Options:
   --padding FLOAT                 Box padding in nm (default: 1.0)
   --ion-conc FLOAT                Ion concentration in mol/L (default: 0.15)
   --keep-water                    Keep crystallographic waters
-```
-
-### `patchr membrane`
-
-```
-Usage: patchr membrane [OPTIONS] INPUT_CIF
-
-Options:
-  -o, --out-dir PATH              Output directory
-  --pdb-id TEXT                   PDB ID for OPM orientation lookup
-  --lipid [POPC|POPE|...]         Lipid type (default: POPC)
-  --engine [gromacs|amber|openmm] MD engine (default: gromacs)
-  --ff [charmm36m|...]            Force field (default: charmm36m)
-  --water [tip3p|...]             Water model (default: tip3p)
-  --ph FLOAT                      Protonation pH (default: 7.0)
-  --padding FLOAT                 Padding in nm (default: 1.0)
-  --ion-conc FLOAT                Ion concentration (default: 0.15)
-  --skip-opm                      Skip OPM orientation lookup
-  --center-z FLOAT                Manual membrane center Z in nm
 ```
 
 ### `patchr template`
@@ -767,9 +734,7 @@ patchr serve --model all
 | `GET` | `/api/v1/jobs` | List all jobs |
 | `DELETE` | `/api/v1/jobs/{job_id}` | Delete a job |
 | `POST` | `/api/v1/sim-ready` | Prepare simulation-ready files from prediction |
-| `POST` | `/api/v1/membrane` | Embed protein in lipid membrane |
-| `GET` | `/api/v1/jobs/{job_id}/sim-result` | Get sim-ready/membrane result details |
-| `GET` | `/api/v1/opm/{pdb_id}` | Fetch OPM orientation data |
+| `GET` | `/api/v1/jobs/{job_id}/sim-result` | Get sim-ready result details |
 
 ### Example API Usage
 
