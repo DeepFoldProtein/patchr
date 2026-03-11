@@ -252,9 +252,7 @@ export function useChainColors(
         );
 
         if (allSucceeded) {
-          logger.log(
-            `[Chain Colors] ✅ All chain colors applied successfully`
-          );
+          logger.log(`[Chain Colors] ✅ All chain colors applied successfully`);
         } else {
           logger.warn(
             `[Chain Colors] ⚠️ WARNING: Some chain colors may not have been applied! Chains may appear in warm colors (yellow/orange/red).`
@@ -271,9 +269,7 @@ export function useChainColors(
     // Also check if structure is already loaded (for cases where event was missed)
     const structures = plugin.managers.structure.hierarchy.current.structures;
     if (structures && structures.length > 0) {
-      logger.log(
-        "[Chain Colors] Structure already loaded, applying colors..."
-      );
+      logger.log("[Chain Colors] Structure already loaded, applying colors...");
       void handleRepresentationsReady();
     }
 
@@ -546,9 +542,7 @@ async function applyOverpaintToRepresentations(
     findRepresentations(structureRef);
 
     if (representationRefs.length === 0) {
-      logger.warn(
-        "[Chain Colors] No representations found to apply overpaint"
-      );
+      logger.warn("[Chain Colors] No representations found to apply overpaint");
       return false;
     }
 

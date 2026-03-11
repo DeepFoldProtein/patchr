@@ -32,9 +32,7 @@ export function usePluginContext(): {
     if (!pluginInstanceRef.current) return;
 
     // Background color 변경
-    const bgColor = isDarkMode
-      ? THEME_COLORS.dark
-      : THEME_COLORS.light;
+    const bgColor = isDarkMode ? THEME_COLORS.dark : THEME_COLORS.light;
 
     if (pluginInstanceRef.current.canvas3d) {
       pluginInstanceRef.current.canvas3d.setProps({

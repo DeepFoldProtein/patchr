@@ -75,7 +75,15 @@ const api = {
     runPrediction: (apiUrl: string, payload: unknown) =>
       ipcRenderer.invoke("boltz:run-prediction", apiUrl, payload),
     downloadAndSaveResults: (apiUrl: string, jobId: string) =>
-      ipcRenderer.invoke("boltz:download-and-save-results", apiUrl, jobId)
+      ipcRenderer.invoke("boltz:download-and-save-results", apiUrl, jobId),
+    simReady: (apiUrl: string, payload: unknown) =>
+      ipcRenderer.invoke("boltz:sim-ready", apiUrl, payload),
+    membrane: (apiUrl: string, payload: unknown) =>
+      ipcRenderer.invoke("boltz:membrane", apiUrl, payload),
+    simResult: (apiUrl: string, jobId: string) =>
+      ipcRenderer.invoke("boltz:sim-result", apiUrl, jobId),
+    opmLookup: (apiUrl: string, pdbId: string) =>
+      ipcRenderer.invoke("boltz:opm-lookup", apiUrl, pdbId)
   },
   // App settings
   app: {

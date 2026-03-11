@@ -595,7 +595,9 @@ export function StructureUploadModal({
                   <div
                     key={chain.id}
                     className={`flex items-center gap-3 px-3 py-2 border-b border-slate-200 dark:border-slate-700/50 last:border-b-0 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
-                      selectedChains.has(chain.id) ? "bg-slate-100 dark:bg-slate-700/30" : ""
+                      selectedChains.has(chain.id)
+                        ? "bg-slate-100 dark:bg-slate-700/30"
+                        : ""
                     }`}
                     onClick={() => handleToggleChain(chain.id)}
                   >
@@ -661,7 +663,7 @@ export function StructureUploadModal({
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                  className={`
+                className={`
                   relative flex flex-col items-center justify-center
                   rounded-lg border-2 border-dashed p-8
                   transition-all duration-200
