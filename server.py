@@ -560,7 +560,9 @@ async def run_template_generation(
         cmd = [sys.executable, "scripts/generate_inpainting_template.py"]
 
         if cif_file_path:
-            cmd.extend(["--input", str(cif_file_path)])
+            # Match CLI behavior: pass CIF as positional arg + chain_ids
+            # CLI auto-adds --assembly 1 for CIF file input
+            cmd.append(str(cif_file_path))
             cmd.append(chain_ids)
         else:
             cmd.extend([pdb_id, chain_ids])
