@@ -1162,7 +1162,7 @@ async def stream_job_progress(job_id: str):
         try:
             while True:
                 try:
-                    update = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    update = await asyncio.wait_for(queue.get(), timeout=15.0)
                     if update is None:
                         break
                     yield f"data: {_json.dumps(update)}\n\n"
@@ -1285,10 +1285,23 @@ async def download_file(job_id: str, file_type: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(
-        path=str(file_path),
-        filename=file_path.name,
+    # Use streaming response with small chunks to keep the connection alive
+    # through Cloudflare tunnel (which has idle timeouts)
+    file_size = file_path.stat().st_size
+
+    def iter_file():
+        with open(file_path, "rb") as f:
+            while chunk := f.read(256 * 1024):  # 256KB chunks
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
         media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_path.name}"',
+            "Content-Length": str(file_size),
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
