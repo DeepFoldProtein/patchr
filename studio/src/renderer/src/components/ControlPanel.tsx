@@ -3,7 +3,6 @@ import { useAtom, useAtomValue } from "jotai";
 import { MissingRegionReviewSection } from "./repair/GapReviewSection";
 import { ProjectManager } from "./ProjectManager";
 import {
-  selectedRepairSegmentsAtom,
   fastaInputAtom,
   enableSequenceMappingAtom
 } from "../store/repair-atoms";
@@ -1372,7 +1371,6 @@ function Section({
 
 function SequenceMappingSection(): React.ReactElement {
   const plugin = useAtomValue(pluginAtom);
-  const [selectedSegments] = useAtom(selectedRepairSegmentsAtom);
   const [fastaInput, setFastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
     enableSequenceMappingAtom
@@ -1384,22 +1382,6 @@ function SequenceMappingSection(): React.ReactElement {
   const [selectedChainsForSearch, setSelectedChainsForSearch] = React.useState<
     Set<string>
   >(new Set());
-
-  // Get chains from selected repair segments (automatically)
-  const availableChains = React.useMemo(() => {
-    const chainSet = new Set<string>();
-    for (const segment of selectedSegments) {
-      for (const chainId of segment.chainIds) {
-        chainSet.add(chainId);
-      }
-    }
-    return Array.from(chainSet).sort();
-  }, [selectedSegments]);
-
-  // Update selected chains when available chains change
-  React.useEffect(() => {
-    setSelectedChainsForSearch(new Set(availableChains));
-  }, [availableChains]);
 
   // Get sequence data from structure using getSequencePanelData (includes polymerType)
   const chainSequenceData = React.useMemo(() => {
@@ -1442,7 +1424,18 @@ function SequenceMappingSection(): React.ReactElement {
     return sequences;
   }, [chainSequenceData]);
 
-  // Auto-populate FASTA from selected repair segments' chains
+  // All chains from the loaded structure
+  const availableChains = React.useMemo(
+    () => Array.from(chainSequenceData.keys()).sort(),
+    [chainSequenceData]
+  );
+
+  // Update selected chains when available chains change
+  React.useEffect(() => {
+    setSelectedChainsForSearch(new Set(availableChains));
+  }, [availableChains]);
+
+  // Auto-populate FASTA from structure chains
   React.useEffect(() => {
     if (availableChains.length === 0) {
       setFastaInput("");
@@ -1639,7 +1632,7 @@ function SequenceMappingSection(): React.ReactElement {
         <>
           <p className="text-xs text-muted-foreground">
             Provide sequence information for chains with missing regions.
-            Sequences are automatically loaded from selected repair groups.
+            Sequences are automatically loaded from the structure.
           </p>
 
           {/* Show chains with selection checkboxes */}
@@ -1718,8 +1711,7 @@ function SequenceMappingSection(): React.ReactElement {
           ) : (
             <div className="rounded-md border border-border bg-muted/20 p-3">
               <p className="text-xs text-muted-foreground">
-                No chains available. Select repair groups in Missing Region
-                Analysis first.
+                No chains available. Load a structure first.
               </p>
             </div>
           )}
@@ -1807,7 +1799,6 @@ function ContextInpaintSection({
   onJobCompleted?: () => void;
 }): React.ReactElement {
   const currentProject = useCurrentProject();
-  const [selectedSegments] = useAtom(selectedRepairSegmentsAtom);
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
 
@@ -1821,16 +1812,8 @@ function ContextInpaintSection({
   );
   const [error, setError] = React.useState<string | null>(null);
 
-  // Get chains from selected repair segments
-  const availableChains = React.useMemo(() => {
-    const chainSet = new Set<string>();
-    for (const segment of selectedSegments) {
-      for (const chainId of segment.chainIds) {
-        chainSet.add(chainId);
-      }
-    }
-    return Array.from(chainSet).sort();
-  }, [selectedSegments]);
+  // Always use ALL chains — server resolves automatically
+  const availableChains = React.useMemo(() => ["ALL"], []);
 
   // Parse FASTA sequences
   const parseFastaSequences = React.useCallback(
@@ -1884,10 +1867,7 @@ function ContextInpaintSection({
       return;
     }
 
-    if (availableChains.length === 0) {
-      setError("No chains selected. Please select repair groups first.");
-      return;
-    }
+    // availableChains is always ["ALL"] — no need to check
 
     // Reset state if starting a new job after completion
     if (jobStatus === "completed") {
@@ -2274,7 +2254,6 @@ function ContextInpaintSection({
             (jobStatus !== "idle" &&
               jobStatus !== "failed" &&
               jobStatus !== "completed") ||
-            availableChains.length === 0 ||
             (enableSequenceMapping && !fastaInput.trim())
           }
           className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
@@ -2291,10 +2270,7 @@ function ContextInpaintSection({
       {/* Info */}
       <div className="rounded-md border border-border bg-muted/20 p-3">
         <p className="text-xs text-muted-foreground">
-          Chains:{" "}
-          {availableChains.length > 0
-            ? availableChains.join(", ")
-            : "None selected"}
+          Chains: All (auto-detected by server)
         </p>
         {!currentProject && (
           <p className="mt-1 text-xs text-red-400">
