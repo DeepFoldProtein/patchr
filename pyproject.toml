@@ -15,6 +15,7 @@ dependencies = [
     "pytorch-lightning>=2.5.0",
     "scipy>=1.13.1",
     "click>=8.1.7",
+    "rich-click>=1.7.0",
     "pyyaml>=6.0.2",
     "requests>=2.32.3",
 
