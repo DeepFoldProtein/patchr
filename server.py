@@ -94,6 +94,7 @@ _model_params: Dict[str, Dict[str, Any]] = {}
 _GPU_QUEUE_MAX = int(os.environ.get("PATCHR_GPU_QUEUE_MAX", "4"))
 _gpu_job_queue: asyncio.Queue | None = None   # initialised in startup_event
 _gpu_worker_task: asyncio.Task | None = None  # handle for the background worker
+_model_loading: bool = False                  # True while models are being loaded at startup
 
 
 async def _gpu_worker():
@@ -470,13 +471,23 @@ _startup_model: Optional[str] = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Load model(s) on server startup and start GPU job queue worker."""
+    """Start GPU job queue worker and kick off model loading in background."""
     global _gpu_job_queue, _gpu_worker_task
 
     # Initialise the bounded GPU job queue and its consumer
     _gpu_job_queue = asyncio.Queue(maxsize=_GPU_QUEUE_MAX)
     _gpu_worker_task = asyncio.create_task(_gpu_worker())
     logger.info("[GPU-Queue] Worker started (max_depth=%d)", _GPU_QUEUE_MAX)
+
+    # Load models in background so the server can respond to health checks immediately
+    # (model download on first run can take 5-10 minutes on slow connections)
+    asyncio.create_task(_load_models_background())
+
+
+async def _load_models_background():
+    """Background model loading — server is already accepting HTTP while this runs."""
+    global _model_loading
+    _model_loading = True
 
     device_id = DEFAULT_DEVICE_ID or os.environ.get("PATCHR_DEVICE_ID") or os.environ.get("BOLTZ_DEVICE_ID")
     startup = _startup_model or os.environ.get("PATCHR_DEFAULT_MODEL", "boltz2")
@@ -488,13 +499,20 @@ async def startup_event():
 
     loop = asyncio.get_event_loop()
 
-    if startup == "boltz2":
-        await loop.run_in_executor(None, _preload_boltz_model, device_id, True)
-    elif startup == "protenix":
-        await loop.run_in_executor(None, _preload_protenix_model, device_id)
-    elif startup == "all":
-        await loop.run_in_executor(None, _preload_boltz_model, device_id, True)
-        await loop.run_in_executor(None, _preload_protenix_model, device_id)
+    try:
+        if startup == "boltz2":
+            await loop.run_in_executor(None, _preload_boltz_model, device_id, True)
+        elif startup == "protenix":
+            await loop.run_in_executor(None, _preload_protenix_model, device_id)
+        elif startup == "all":
+            await loop.run_in_executor(None, _preload_boltz_model, device_id, True)
+            await loop.run_in_executor(None, _preload_protenix_model, device_id)
+    except Exception as e:
+        print(f"WARNING: Background model loading failed: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        _model_loading = False
 
 
 # ── Job helpers ──────────────────────────────────────────────────────────────
@@ -1302,7 +1320,11 @@ async def download_file(job_id: str, file_type: str):
         if not result_data:
             raise HTTPException(status_code=404, detail="No simulation result found for this job")
 
-        out_dir = Path(result_data.get("output_dir", ""))
+        # Resolve sim-ready output directory from prediction_dir (stored relative to WORK_DIR)
+        sim_pred_dir = job.get("prediction_dir", "")
+        out_dir = Path(sim_pred_dir)
+        if not out_dir.is_absolute():
+            out_dir = WORK_DIR / out_dir
         if not out_dir.exists():
             raise HTTPException(status_code=404, detail="Simulation output directory not found")
 
@@ -1518,9 +1540,10 @@ async def queue_status():
 async def health_check():
     """Health check endpoint."""
     return {
-        "status": "healthy",
+        "status": "loading" if _model_loading else "healthy",
         "timestamp": datetime.now().isoformat(),
         "loaded_models": list(_model_registry.keys()),
+        "model_loading": _model_loading,
         "jobs_count": len(jobs_db),
         "work_dir": str(WORK_DIR),
     }
