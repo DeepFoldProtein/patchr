@@ -95,6 +95,7 @@ _GPU_QUEUE_MAX = int(os.environ.get("PATCHR_GPU_QUEUE_MAX", "4"))
 _gpu_job_queue: asyncio.Queue | None = None   # initialised in startup_event
 _gpu_worker_task: asyncio.Task | None = None  # handle for the background worker
 _model_loading: bool = False                  # True while models are being loaded at startup
+_model_loading_stage: str = ""                # Current loading stage for health endpoint
 
 
 async def _gpu_worker():
@@ -301,6 +302,7 @@ app.add_middleware(
 
 def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: bool = True):
     """Preload Boltz2 model on GPU at server startup."""
+    global _model_loading_stage
     model_key = "boltz2"
     try:
         print(f"Preloading Boltz2 model (inpainting={enable_inpainting}) on GPU... (device_id={device_id})")
@@ -313,6 +315,7 @@ def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: boo
         cache = Path(get_cache_path()).expanduser()
         cache.mkdir(parents=True, exist_ok=True)
 
+        _model_loading_stage = "Downloading model data (CCD + weights)"
         print("Downloading/verifying Boltz model checkpoint...")
         download_boltz2(cache)
 
@@ -354,6 +357,7 @@ def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: boo
         steering_args.contact_guidance_update = False
         steering_args.inpainting = enable_inpainting
 
+        _model_loading_stage = f"Loading checkpoint to {map_location}"
         print(f"Loading Boltz checkpoint to {map_location}...")
         model_module = Boltz2.load_from_checkpoint(
             str(checkpoint),
@@ -389,7 +393,9 @@ def _preload_boltz_model(device_id: Optional[str] = None, enable_inpainting: boo
 
 def _preload_protenix_model(device_id: Optional[str] = None):
     """Preload Protenix model on GPU at server startup."""
+    global _model_loading_stage
     try:
+        _model_loading_stage = "Loading Protenix model"
         print(f"Preloading Protenix model... (device_id={device_id})")
 
         from protenix_configs.configs_base import configs as configs_base
@@ -1539,7 +1545,7 @@ async def queue_status():
 @app.get("/api/v1/health")
 async def health_check():
     """Health check endpoint."""
-    return {
+    resp = {
         "status": "loading" if _model_loading else "healthy",
         "timestamp": datetime.now().isoformat(),
         "loaded_models": list(_model_registry.keys()),
@@ -1547,6 +1553,9 @@ async def health_check():
         "jobs_count": len(jobs_db),
         "work_dir": str(WORK_DIR),
     }
+    if _model_loading and _model_loading_stage:
+        resp["loading_stage"] = _model_loading_stage
+    return resp
 
 
 # ── CLI entrypoint ──────────────────────────────────────────────────────────
