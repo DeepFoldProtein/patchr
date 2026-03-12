@@ -1,7 +1,13 @@
 import { useEffect, useCallback } from "react";
 import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { bus } from "../../lib/event-bus";
-import { pathBasename, pathDirname, pathSplit, pathIncludes, pathJoin } from "../../lib/path-utils";
+import {
+  pathBasename,
+  pathDirname,
+  pathSplit,
+  pathIncludes,
+  pathJoin
+} from "../../lib/path-utils";
 import {
   Structure,
   StructureElement,
@@ -262,15 +268,27 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         return;
       }
 
-      // Try to get cached reference first
+      // Try to get cached reference first, but validate it's still in the current hierarchy
+      const hierarchy = plugin.managers.structure.hierarchy;
+      const structures = hierarchy.current.structures;
       let hierarchyRef = loadedStructures.get(filePath);
+
+      // Validate cached ref is still present in the current hierarchy
+      if (
+        hierarchyRef &&
+        !structures.some(s => s.cell === hierarchyRef!.cell)
+      ) {
+        console.log(
+          `[Visibility] Cached ref stale for: ${filePath}, re-searching`
+        );
+        loadedStructures.delete(filePath);
+        hierarchyRef = undefined;
+      }
 
       // If not cached, find in current hierarchy
       if (!hierarchyRef) {
         const fileName = pathBasename(filePath) || "";
         const fileNameWithoutExt = fileName.replace(/\.[^.]*$/, "");
-        const hierarchy = plugin.managers.structure.hierarchy;
-        const structures = hierarchy.current.structures;
         const isBaseStructure = pathIncludes(filePath, "/structures/original/");
 
         console.log(
@@ -282,33 +300,57 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           // 1. Exact label match
           // 2. Label contains filename
           // 3. First structure if no results loaded yet
-          const hasResults = structures.some(
-            s =>
-              s.cell?.obj?.label?.startsWith("run_") ||
-              s.cell?.obj?.label?.includes("Inpainting Result")
-          );
+          const hasResults = structures.some(s => {
+            const label = s.cell?.obj?.label || "";
+            const trajLabel = s.model?.trajectory?.cell?.obj?.label || "";
+            return (
+              label.startsWith("run_") ||
+              label.includes("Inpainting Result") ||
+              trajLabel.startsWith("run_") ||
+              trajLabel.includes("Inpainting Result")
+            );
+          });
 
           hierarchyRef =
             structures.find(s => {
               const label = s.cell?.obj?.label || "";
+              const trajLabel = s.model?.trajectory?.cell?.obj?.label || "";
               return (
                 label === fileName ||
                 label.includes(fileNameWithoutExt) ||
-                fileNameWithoutExt.includes(label.replace(/\.[^.]*$/, ""))
+                fileNameWithoutExt.includes(label.replace(/\.[^.]*$/, "")) ||
+                trajLabel === fileName ||
+                trajLabel.includes(fileNameWithoutExt)
               );
             }) ||
-            // If no results loaded, first structure is likely the base
+            // Fallback: find the structure that is NOT a result (no run_ prefix in trajectory label)
+            structures.find(s => {
+              const trajLabel = s.model?.trajectory?.cell?.obj?.label || "";
+              return (
+                !trajLabel.startsWith("run_") &&
+                !trajLabel.includes("Inpainting Result")
+              );
+            }) ||
+            // Last resort: first structure if no results loaded
             (!hasResults && structures.length > 0 ? structures[0] : null);
         } else {
           // Inpainting results: match by label or run_XXX pattern
+          // Check both the structure label and the parent trajectory label
+          // (the custom label is applied to the trajectory node, not the structure)
           hierarchyRef =
             structures.find(s => {
               const label = s.cell?.obj?.label || "";
+              const trajectoryLabel =
+                s.model?.trajectory?.cell?.obj?.label || "";
               return (
                 label === fileName ||
                 label.includes(fileNameWithoutExt) ||
+                trajectoryLabel.includes(fileNameWithoutExt) ||
                 (filePath.includes("run_") &&
-                  label.startsWith(filePath.match(/run_\d+/)?.[0] || ""))
+                  (label.startsWith(filePath.match(/run_\d+/)?.[0] || "") ||
+                    trajectoryLabel.startsWith(
+                      filePath.match(/run_\d+/)?.[0] || ""
+                    )))
               );
             }) || null;
         }
@@ -322,7 +364,10 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           console.warn(`[Visibility] ✗ Structure not found: ${filePath}`);
           console.log(
             `[Visibility] Available:`,
-            structures.map(s => s.cell?.obj?.label)
+            structures.map(s => ({
+              label: s.cell?.obj?.label,
+              trajectory: s.model?.trajectory?.cell?.obj?.label
+            }))
           );
           return;
         }
@@ -347,7 +392,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
   // Load simulation system PDB (solvated box) into viewer
   const loadSimulationSystem = useCallback(
-    async (filePath: string, fileContent: string, label: string) => {
+    async (_filePath: string, fileContent: string, label: string) => {
       if (!plugin) return;
       try {
         console.log("Loading simulation system:", label);
@@ -384,16 +429,20 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
     const handleLoadResult = (event: {
       filePath: string;
       fileContent: string;
-      superpose: boolean;
+      superpose?: boolean;
     }): void => {
-      void loadAndSuperpose(event.filePath, event.fileContent, event.superpose);
+      void loadAndSuperpose(
+        event.filePath,
+        event.fileContent,
+        event.superpose ?? true
+      );
     };
 
     const handleRemoveResult = (event: {
       filePath: string;
-      visible: boolean;
+      visible?: boolean;
     }): void => {
-      void toggleStructureVisibility(event.filePath, event.visible);
+      void toggleStructureVisibility(event.filePath, event.visible ?? false);
     };
 
     const handleLoadSimSystem = (event: {
@@ -758,47 +807,60 @@ async function applyInpaintingMetadataColors(
       cifFileName.match(/_([A-Z])_/) || cifFileName.match(/_([A-Z])\./);
     const chainId = chainMatch ? chainMatch[1] : "A";
 
-    // Extract chain prefix from path (e.g., "1ton_A" from path parts)
-    const chainPrefixMatch = pathParts.find(
-      part =>
-        part.includes("_") &&
-        /[A-Z]/.test(part) &&
-        !part.includes("run_") &&
-        !part.includes("predictions") &&
-        !part.endsWith(".cif")
-    );
+    // Use the parent directory name as chain prefix (e.g., "4j76_ABCDEF" from ".../4j76_ABCDEF/file.cif")
+    const parentDirName =
+      pathParts.length >= 2 ? pathParts[pathParts.length - 2] : null;
+    const chainPrefixFromDir =
+      parentDirName &&
+      parentDirName.includes("_") &&
+      /[A-Z]/.test(parentDirName) &&
+      !parentDirName.includes("run_") &&
+      !parentDirName.includes("predictions")
+        ? parentDirName
+        : null;
+
+    // Chain prefix from filename (e.g., "4j76_ABCDEF" from "4j76_ABCDEF_model_0.cif")
+    const chainPrefixFromFile = cifFileName.includes("_")
+      ? cifFileName.split("_").slice(0, 2).join("_")
+      : null;
 
     // Parent directory (one level above cifDir)
     const parentDir = pathParts.slice(0, -2).join("/");
 
-    // Try multiple possible metadata file names
+    // Try multiple possible metadata file names (most specific first)
     const possibleMetadataPaths = [
-      // Same directory with chain prefix (e.g., inpainting_metadata_1ton_A.json)
-      chainPrefixMatch
-        ? pathJoin(cifDir, `inpainting_metadata_${chainPrefixMatch}.json`)
+      // 1. Same directory, prefix from parent dir name (e.g., inpainting_metadata_4j76_ABCDEF.json)
+      chainPrefixFromDir
+        ? pathJoin(cifDir, `inpainting_metadata_${chainPrefixFromDir}.json`)
         : null,
-      // Same directory with chain ID only (e.g., inpainting_metadata_A.json)
+      // 2. Same directory, prefix from filename (e.g., inpainting_metadata_4j76_ABCDEF.json)
+      chainPrefixFromFile
+        ? pathJoin(cifDir, `inpainting_metadata_${chainPrefixFromFile}.json`)
+        : null,
+      // 3. Same directory with chain ID only (e.g., inpainting_metadata_a.json)
       pathJoin(cifDir, `inpainting_metadata_${chainId.toLowerCase()}.json`),
-      // Parent directory
-      parentDir
-        ? pathJoin(parentDir, `inpainting_metadata_${chainId.toLowerCase()}.json`)
+      // 4. Parent directory with prefix
+      chainPrefixFromDir && parentDir
+        ? pathJoin(parentDir, `inpainting_metadata_${chainPrefixFromDir}.json`)
         : null,
-      // Also try with full chain prefix from filename (e.g., "1ton_A" from "1ton_A_model_0.cif")
-      cifFileName.includes("_")
-        ? pathJoin(cifDir, `inpainting_metadata_${cifFileName
-            .split("_")
-            .slice(0, 2)
-            .join("_")}.json`)
+      // 5. Parent directory with chain ID
+      parentDir
+        ? pathJoin(
+            parentDir,
+            `inpainting_metadata_${chainId.toLowerCase()}.json`
+          )
         : null
     ].filter((path): path is string => path !== null);
+    // Deduplicate
+    const uniqueMetadataPaths = Array.from(new Set(possibleMetadataPaths));
 
     console.log(
-      `[Inpainting Metadata] Searching for metadata file. CIF dir: ${cifDir}, chainId: ${chainId}, chainPrefix: ${chainPrefixMatch || "none"}`
+      `[Inpainting Metadata] Searching for metadata file. CIF dir: ${cifDir}, chainId: ${chainId}, dirPrefix: ${chainPrefixFromDir || "none"}, filePrefix: ${chainPrefixFromFile || "none"}`
     );
-    console.log(`[Inpainting Metadata] Trying paths:`, possibleMetadataPaths);
+    console.log(`[Inpainting Metadata] Trying paths:`, uniqueMetadataPaths);
 
     let metadataContent: string | null = null;
-    for (const metadataPath of possibleMetadataPaths) {
+    for (const metadataPath of uniqueMetadataPaths) {
       try {
         const result = await window.api.project.readFileByPath(metadataPath);
         if (result.success && result.content) {
@@ -1011,13 +1073,14 @@ async function applyInpaintingMetadataColors(
         }
       }
 
-      // 2. Color partially fixed residues (Orange: #f97316) - Medium priority
+      // 2. Partially fixed residues (Orange: #f97316)
       if (
         chainData.partially_fixed_residues &&
         chainData.partially_fixed_residues.length > 0
       ) {
-        const partiallyResidues = chainData.partially_fixed_residues.map(
-          r => r.residue
+        const partialResidues = chainData.partially_fixed_residues.map(
+          (r: { residue: number } | number) =>
+            typeof r === "number" ? r : r.residue
         );
         const colorValue = 0xf97316; // Orange
         const colorHex = `#${colorValue.toString(16).padStart(6, "0")}`;
@@ -1027,13 +1090,13 @@ async function applyInpaintingMetadataColors(
         const layer = createOverpaintLayer(
           structure,
           currentChainId,
-          partiallyResidues,
+          partialResidues,
           colorValue
         );
         if (layer) {
           overpaintLayers.push(layer);
           console.log(
-            `[Inpainting Metadata] Added partially fixed layer for chain ${currentChainId}: ${partiallyResidues.length} residues -> ${colorHex} (RGB=${r},${g},${b}) [Orange]`
+            `[Inpainting Metadata] Added partially fixed layer for chain ${currentChainId}: ${partialResidues.length} residues -> ${colorHex} (RGB=${r},${g},${b}) [Orange]`
           );
         }
       }
@@ -1102,6 +1165,7 @@ function createOverpaintLayer(
 } | null {
   try {
     // Create selection for residues using Script
+    // Use core.set.has for efficient set membership test (much faster than nested or)
     const script = Script.getStructureSelection(
       Q =>
         Q.struct.generator.atomGroups({
@@ -1115,14 +1179,10 @@ function createOverpaintLayer(
                   Q.struct.atomProperty.macromolecular.auth_seq_id(),
                   residueNumbers[0]
                 ])
-              : Q.core.logic.or(
-                  residueNumbers.map(num =>
-                    Q.core.rel.eq([
-                      Q.struct.atomProperty.macromolecular.auth_seq_id(),
-                      num
-                    ])
-                  )
-                )
+              : Q.core.set.has([
+                  Q.core.type.set(residueNumbers),
+                  Q.struct.atomProperty.macromolecular.auth_seq_id()
+                ])
         }),
       structure
     );

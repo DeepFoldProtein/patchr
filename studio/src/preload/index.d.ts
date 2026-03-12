@@ -205,7 +205,9 @@ export interface BoltzAPI {
 
 export interface AppAPI {
   setTheme: (theme: "light" | "dark") => Promise<{ success: boolean }>;
-  readSample: (filename: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  readSample: (
+    filename: string
+  ) => Promise<{ success: boolean; content?: string; error?: string }>;
 }
 
 declare global {

@@ -203,24 +203,35 @@ export function useChainColors(
           const structure = hierarchyRef.cell?.obj?.data;
           if (!structure) continue;
 
-          // Check if this structure already has chain colors applied
-          // by checking if overpaint exists
+          // Check if this structure already has overpaint applied anywhere
+          // in its subtree (structure → representations → overpaint)
           const structureRef = hierarchyRef.cell?.transform?.ref;
           if (structureRef) {
             const state = plugin.state.data;
             const cells = state.cells;
             let hasOverpaint = false;
-            for (const childCell of cells.values()) {
-              if (
-                childCell.transform.parent === structureRef &&
-                childCell.transform.transformer ===
-                  StateTransforms.Representation
-                    .OverpaintStructureRepresentation3DFromBundle
-              ) {
-                hasOverpaint = true;
-                break;
+
+            const checkOverpaintRecursive = (ref: string, depth = 0): void => {
+              if (hasOverpaint || depth > 10) return;
+              for (const childCell of cells.values()) {
+                if (childCell.transform.parent === ref) {
+                  if (
+                    childCell.transform.transformer ===
+                    StateTransforms.Representation
+                      .OverpaintStructureRepresentation3DFromBundle
+                  ) {
+                    hasOverpaint = true;
+                    return;
+                  }
+                  const childRef = childCell.transform.ref;
+                  if (childRef) {
+                    checkOverpaintRecursive(childRef, depth + 1);
+                  }
+                }
               }
-            }
+            };
+
+            checkOverpaintRecursive(structureRef);
 
             if (hasOverpaint) {
               const label = hierarchyRef.cell?.obj?.label || "unknown";

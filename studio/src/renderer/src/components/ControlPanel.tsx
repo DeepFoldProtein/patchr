@@ -18,7 +18,13 @@ import { pluginAtom } from "../store/mol-viewer-atoms";
 import { getSequencePanelData } from "./mol-viewer/useGapDetection";
 import { bus } from "../lib/event-bus";
 import { logger } from "../lib/logger";
-import { pathBasename, pathDirname, pathJoin, pathIncludes, pathSplit } from "../lib/path-utils";
+import {
+  pathBasename,
+  pathDirname,
+  pathJoin,
+  pathIncludes,
+  pathSplit
+} from "../lib/path-utils";
 import {
   Eye,
   EyeOff,
@@ -81,19 +87,26 @@ export function ControlPanel(): React.ReactElement {
           ))}
         </div>
 
-        {/* Tab content */}
-        {panelMode === "project" && (
-          <div className="flex-1 overflow-auto p-4 space-y-4">
-            <ServerConnection />
-            <ProjectManager />
-          </div>
-        )}
-        {panelMode === "repair" && <RepairConsole />}
-        {panelMode === "simulation" && (
-          <div className="flex-1 overflow-auto p-4">
-            <SimulationPanel />
-          </div>
-        )}
+        {/* Tab content — all panels stay mounted, hidden via CSS */}
+        <div
+          className="flex-1 overflow-auto p-4 space-y-4"
+          style={panelMode === "project" ? undefined : { display: "none" }}
+        >
+          <ServerConnection />
+          <ProjectManager />
+        </div>
+        <div
+          style={panelMode === "repair" ? undefined : { display: "none" }}
+          className="flex-1 min-h-0 overflow-auto"
+        >
+          <RepairConsole />
+        </div>
+        <div
+          className="flex-1 overflow-auto p-4"
+          style={panelMode === "simulation" ? undefined : { display: "none" }}
+        >
+          <SimulationPanel />
+        </div>
       </div>
     </div>
   );
@@ -206,8 +219,8 @@ function RepairConsole(): React.ReactElement {
       const result = await window.api.project.listOriginalStructures();
       if (result.success && result.files) {
         // Convert filenames to full paths
-        const basePaths = result.files.map(
-          filename => pathJoin(currentProject.structuresPath, "original", filename)
+        const basePaths = result.files.map(filename =>
+          pathJoin(currentProject.structuresPath, "original", filename)
         );
         setBaseStructures(basePaths);
 
@@ -513,7 +526,10 @@ function RepairConsole(): React.ReactElement {
           // 3. Try with single chain ID (e.g., "A")
           if (singleChainId) {
             possibleMetadataPaths.push(
-              pathJoin(cifDir, `inpainting_metadata_${singleChainId.toLowerCase()}.json`)
+              pathJoin(
+                cifDir,
+                `inpainting_metadata_${singleChainId.toLowerCase()}.json`
+              )
             );
           }
 
@@ -521,7 +537,10 @@ function RepairConsole(): React.ReactElement {
           const parentDir = pathDirname(cifFile);
           if (chainPrefixMatch) {
             possibleMetadataPaths.push(
-              pathJoin(parentDir, `inpainting_metadata_${chainPrefixMatch}.json`)
+              pathJoin(
+                parentDir,
+                `inpainting_metadata_${chainPrefixMatch}.json`
+              )
             );
           }
           if (chainPrefix) {
@@ -546,8 +565,12 @@ function RepairConsole(): React.ReactElement {
           }
 
           // 6. Try generic names (for multi-chain files)
-          possibleMetadataPaths.push(pathJoin(cifDir, "inpainting_metadata.json"));
-          possibleMetadataPaths.push(pathJoin(parentDir, "inpainting_metadata.json"));
+          possibleMetadataPaths.push(
+            pathJoin(cifDir, "inpainting_metadata.json")
+          );
+          possibleMetadataPaths.push(
+            pathJoin(parentDir, "inpainting_metadata.json")
+          );
 
           // Remove duplicates
           const uniquePaths = Array.from(new Set(possibleMetadataPaths));
@@ -613,12 +636,8 @@ function RepairConsole(): React.ReactElement {
 
                 const inpaintedResidues = new Set<number>();
 
-                // Add all types of inpainted residues
-                if (chainInfo.fully_fixed_residues) {
-                  chainInfo.fully_fixed_residues.forEach(r =>
-                    inpaintedResidues.add(r)
-                  );
-                }
+                // Add partially fixed and fully inpainted residues
+                // (fully_fixed residues are not inpainted)
                 if (chainInfo.partially_fixed_residues) {
                   chainInfo.partially_fixed_residues.forEach(r =>
                     inpaintedResidues.add(typeof r === "number" ? r : r.residue)

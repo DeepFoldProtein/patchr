@@ -84,12 +84,18 @@ function CollapsibleContent({
   open: openProp,
   children,
   className
-}: CollapsibleContentProps): React.ReactElement | null {
+}: CollapsibleContentProps): React.ReactElement {
   const ctx = React.useContext(CollapsibleContext);
   const open = openProp ?? ctx.open;
 
-  if (!open) return null;
-  return <div className={cn("", className)}>{children}</div>;
+  return (
+    <div
+      className={cn("", className)}
+      style={open ? undefined : { display: "none" }}
+    >
+      {children}
+    </div>
+  );
 }
 
 export { Collapsible, CollapsibleTrigger, CollapsibleContent };
