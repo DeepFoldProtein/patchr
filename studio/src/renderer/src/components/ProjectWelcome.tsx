@@ -14,16 +14,16 @@ import { useProjectStore, useRecentProjects } from "../store/project-store";
 // Sample structures available
 const SAMPLE_STRUCTURES = [
   {
-    id: "4j76",
-    name: "4J76",
-    description: "multimer protein",
-    file: "4J76.cif"
-  },
-  {
     id: "1ton",
     name: "1TON",
     description: "monomer protein",
     file: "1TON.cif"
+  },
+  {
+    id: "2r27",
+    name: "2R27",
+    description: "homodimer protein (SOD1)",
+    file: "2R27.cif"
   },
   {
     id: "1de9",

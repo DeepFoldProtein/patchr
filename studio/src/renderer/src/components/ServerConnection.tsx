@@ -20,7 +20,7 @@ export function ServerConnection(): React.ReactElement {
     apiConnectionStatusAtom
   );
 
-  // Auto-detect server on mount
+  // Auto-detect server on mount using persisted URL
   React.useEffect(() => {
     if (connectionStatus !== "idle") return;
 
@@ -28,19 +28,17 @@ export function ServerConnection(): React.ReactElement {
     const autoDetect = async (): Promise<void> => {
       try {
         if (!window.api?.boltz?.healthCheck) return;
-        const result = await window.api.boltz.healthCheck(
-          "http://localhost:31212"
-        );
+        const result = await window.api.boltz.healthCheck(apiUrl);
         if (cancelled) return;
         if (result.success) {
           setConnectionStatus("connected");
-          logger.log("[Auto-detect] Server found at localhost:31212");
+          logger.log(`[Auto-detect] Server found at ${apiUrl}`);
         } else {
           logger.log("[Auto-detect] Server not responding");
         }
       } catch {
         if (cancelled) return;
-        logger.log("[Auto-detect] Server not found at localhost:31212");
+        logger.log(`[Auto-detect] Server not found at ${apiUrl}`);
       }
     };
 
