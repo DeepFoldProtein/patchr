@@ -5,9 +5,6 @@ sequences:
       id: 'AA'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
-      modifications:
-        - position: 175
-          ccd: 'TPO'
 
   - ligand:
       id: 'AB'
@@ -21,11 +18,8 @@ sequences:
       id: 'B_op2'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
-      modifications:
-        - position: 175
-          ccd: 'TPO'
 
 templates:
-  - cif: /workspace/examples/inpainting/4ZLO_chainACDB_op2.cif
+  - cif: /store/wowjason/tools/patchr/examples/inpainting/4ZLO_chainACDB_op2.cif
     chain_id: ['AA', 'AB', 'AC', 'B_op2']
-    inpainting_metadata: /workspace/examples/inpainting/4zlo_ACDB_op2_inpainting_metadata.json
+    inpainting_metadata: /store/wowjason/tools/patchr/examples/inpainting/4zlo_ACDB_op2_inpainting_metadata.json
