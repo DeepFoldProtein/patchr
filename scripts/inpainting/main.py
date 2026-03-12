@@ -6,182 +6,210 @@ import re
 import sys
 from pathlib import Path
 
+import rich_click as click
+
 from .structure_processor import StructureProcessor
 
+click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.SHOW_ARGUMENTS = True
+click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
+click.rich_click.STYLE_ERRORS_SUGGESTION = "bold italic"
+click.rich_click.ERRORS_SUGGESTION = "Try the '--help' flag for more information."
+click.rich_click.OPTION_GROUPS = {
+    "main": [
+        {
+            "name": "Input",
+            "options": ["pdb_id", "chain_ids", "--input"],
+        },
+        {
+            "name": "Sequence",
+            "options": ["--uniprot", "--sequence", "--interactive"],
+        },
+        {
+            "name": "Assembly",
+            "options": ["--assembly", "--list-assemblies"],
+        },
+        {
+            "name": "Output",
+            "options": ["--output", "--format", "--skip-terminal",
+                        "--include-solvent", "--exclude-ligands"],
+        },
+        {
+            "name": "Other",
+            "options": ["--cache", "--verbose", "--help"],
+        },
+    ],
+}
 
-def main() -> None:
-    import argparse
 
-    parser = argparse.ArgumentParser(
-        description='Generate YAML and template CIF files for inpainting',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Single chain without UniProt (use SEQRES)
-  python generate_inpainting_template.py 7EOQ A
+@click.command(
+    "main",
+    epilog="""
+[bold]Examples:[/bold]
 
-  # Single chain with UniProt
-  python generate_inpainting_template.py 7EOQ A --uniprot
+  [dim]# Single chain[/dim]
+  python -m inpainting.main 7EOQ A
 
-  # Multimeric (multiple chains)
-  python generate_inpainting_template.py 1CK4 A,B
+  [dim]# Multiple chains with UniProt[/dim]
+  python -m inpainting.main 1CK4 A,B --uniprot
 
-  # All polymer chains (one per entity, excludes duplicate copies)
-  python generate_inpainting_template.py 1CK4 all
+  [dim]# All polymer chains[/dim]
+  python -m inpainting.main 1CK4 all
 
-  # All polymer chains including duplicate copies
-  python generate_inpainting_template.py 1CK4 all-copies
+  [dim]# All polymer chains including duplicate copies[/dim]
+  python -m inpainting.main 1CK4 all-copies
 
-  # Multimeric with UniProt
-  python generate_inpainting_template.py 1CK4 A,B --uniprot
+  [dim]# Biological assembly[/dim]
+  python -m inpainting.main 4ZLO --assembly best
 
-  # All chains with UniProt
-  python generate_inpainting_template.py 1CK4 all --uniprot
+  [dim]# Local CIF file[/dim]
+  python -m inpainting.main --input structure.cif A,B
 
-  # Specify output directory
-  python generate_inpainting_template.py 1CK4 A,B --uniprot -o output/
+  [dim]# Custom sequences[/dim]
+  python -m inpainting.main 1CK4 A,B --sequence A:ACDEFG,B:MNOPQR
 
-  # Use local CIF file
-  python generate_inpainting_template.py --input structure.cif A
+  [dim]# Skip terminal missing residues[/dim]
+  python -m inpainting.main 7EOQ A --skip-terminal
+""",
+)
+@click.argument("pdb_id", required=False, default=None)
+@click.argument("chain_ids", required=False, default=None)
+@click.option(
+    "--input", "-i", "-f", "input_file", type=click.Path(exists=True), default=None,
+    help="Local CIF file path (alternative to PDB_ID).",
+)
+@click.option(
+    "--uniprot", is_flag=True,
+    help="Use UniProt sequence instead of SEQRES.",
+)
+@click.option(
+    "--interactive", is_flag=True,
+    help="Prompt for manual sequence input for each chain.",
+)
+@click.option(
+    "--sequence", "-s", type=str, default=None,
+    help='Custom sequence(s). Single: "ACDEFG". Multiple: "A:ACDEFG,B:MNOPQR".',
+)
+@click.option(
+    "-o", "--output", "out_dir", type=click.Path(), default="examples/inpainting",
+    help="Output directory.",
+)
+@click.option(
+    "--cache", type=click.Path(), default=None,
+    help="Boltz cache directory for ccd.pkl.",
+)
+@click.option(
+    "--include-solvent", is_flag=True,
+    help="Include water/solvent atoms in output CIF.",
+)
+@click.option(
+    "--exclude-ligands", is_flag=True,
+    help="Exclude non-polymer (ligand) chains from output.",
+)
+@click.option(
+    "--assembly", type=str, default=None, metavar="ID",
+    help='Biological assembly ID or "best" for auto-selection.',
+)
+@click.option(
+    "--list-assemblies", is_flag=True,
+    help="List available biological assemblies and exit.",
+)
+@click.option(
+    "--skip-terminal", is_flag=True,
+    help="Skip terminal missing residues (only inpaint internal gaps).",
+)
+@click.option(
+    "--verbose", "-v", is_flag=True,
+    help="Print detailed inpainting region analysis.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["yaml", "protenix-json"]),
+    default="yaml",
+    help="Output format.",
+)
+def main(
+    pdb_id,
+    chain_ids,
+    input_file,
+    uniprot,
+    interactive,
+    sequence,
+    out_dir,
+    cache,
+    include_solvent,
+    exclude_ligands,
+    assembly,
+    list_assemblies,
+    skip_terminal,
+    verbose,
+    output_format,
+) -> None:
+    """Generate YAML and template CIF files for inpainting."""
 
-  # Use local CIF file with all chains
-  python generate_inpainting_template.py --input structure.cif all
-
-  # Interactive sequence input (prompts for each chain)
-  python generate_inpainting_template.py 7EOQ A --interactive
-
-  # Custom sequence via CLI (single chain)
-  python generate_inpainting_template.py 7EOQ A --sequence ACDEFGHIKLMNPQRSTVWY
-
-  # Custom sequences for multiple chains
-  python generate_inpainting_template.py 1CK4 A,B --sequence A:ACDEFG,B:MNOPQR
-
-  # Custom sequence with local file
-  python generate_inpainting_template.py --input structure.cif A --sequence ACDEFGHIKLMNPQRSTVWY
-
-  # Skip terminal missing residues (only inpaint internal gaps)
-  python generate_inpainting_template.py 7EOQ A --skip-terminal
-
-  # Skip terminal + UniProt sequence
-  python generate_inpainting_template.py 7EOQ A --uniprot --skip-terminal
-        """
-    )
-
-    parser.add_argument('pdb_id', nargs='?', help='PDB ID (e.g., 7EOQ) or local CIF file path')
-    parser.add_argument('chain_ids', nargs='?', help='Chain ID(s) (e.g., A or A,B for multimeric)')
-    parser.add_argument('--input', '--file', '-i', '-f', type=str,
-                        help='Local CIF file path (alternative to pdb_id)')
-    parser.add_argument('--uniprot', action='store_true',
-                        help='Use UniProt sequence instead of SEQRES (not available for local files)')
-    parser.add_argument('--interactive', '--manual-sequence', action='store_true',
-                        help='Prompt for manual sequence input for each chain')
-    parser.add_argument('--sequence', '--seq', '-s', type=str,
-                        help='Custom sequence(s). For single chain: "ACDEFG...". For multiple: "A:ACDEFG,B:MNOPQR"')
-    parser.add_argument('-o', '--output', '--out_dir', type=Path,
-                        default=Path('examples/inpainting'),
-                        help='Output directory (default: examples/inpainting)')
-    parser.add_argument('--cache', type=Path, default=None,
-                        help='Boltz cache directory for ccd.pkl (default: BOLTZ_CACHE or ~/.boltz)')
-    parser.add_argument('--include-solvent', action='store_true',
-                        help='Include water/solvent atoms in output CIF for full structure transfer')
-    parser.add_argument('--exclude-ligands', action='store_true',
-                        help='Do not include non-polymer (ligand) chains in YAML and template (default: include ligands)')
-    parser.add_argument('--assembly', '--bio-assembly', type=str, default=None,
-                        metavar='ID',
-                        help='Biological assembly to use. "best" auto-selects the first '
-                             'author_and_software_defined assembly. Integer N selects assembly N. '
-                             'If omitted, uses manually-provided chain IDs or ALL (current behaviour).')
-    parser.add_argument('--list-assemblies', action='store_true',
-                        help='List available biological assemblies and exit without processing.')
-    parser.add_argument('--skip-terminal', action='store_true',
-                        help='Skip terminal missing residues: trim the sequence to span only from the first '
-                             'residue with structure to the last, so N/C-terminal disordered tails are '
-                             'excluded from inpainting and only internal (non-terminal) gaps are inpainted.')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Print detailed inpainting region analysis and missing atom checks')
-    parser.add_argument('--format', choices=['yaml', 'protenix-json'], default='yaml',
-                        help='Output format: yaml (patchr, default) or protenix-json (Protenix inference)')
-
-    args = parser.parse_args()
-
+    # Parse custom sequences
     custom_sequences = {}
-    if args.sequence:
-        print(f"DEBUG: Parsing --sequence argument: {args.sequence}")
-        if ':' in args.sequence:
-            for chain_seq in args.sequence.split(','):
-                chain_seq = chain_seq.strip()
-                if ':' in chain_seq:
-                    chain_id, seq = chain_seq.split(':', 1)
-                    chain_id = chain_id.strip().upper()
-                    chain_id = re.sub(r'\s*\[(?:DNA|RNA|PROTEIN)\]\s*', '', chain_id).strip()
-                    seq = seq.strip()
-                    custom_sequences[chain_id] = seq
-                    print(f"DEBUG: Parsed custom sequence: chain_id='{chain_id}', seq_length={len(seq)}, seq_preview={seq[:20]}...")
+    if sequence:
+        if ':' in sequence:
+            for pair in sequence.split(','):
+                pair = pair.strip()
+                if ':' in pair:
+                    chain, seq = pair.split(':', 1)
+                    chain = chain.strip().upper()
+                    chain = re.sub(r'\s*\[(?:DNA|RNA|PROTEIN)\]\s*', '', chain).strip()
+                    custom_sequences[chain] = seq.strip()
                 else:
-                    parser.error(f"Invalid sequence format: {chain_seq}. Expected format: CHAIN:SEQUENCE")
+                    raise click.BadParameter(
+                        f"Invalid format: {pair}. Expected CHAIN:SEQUENCE.",
+                        param_hint="'--sequence'",
+                    )
         else:
-            custom_sequences['_default_'] = args.sequence.strip()
-        print(f"DEBUG: Final custom_sequences dict: {list(custom_sequences.keys())}")
+            custom_sequences['_default_'] = sequence.strip()
 
-    # Determine assembly_id: if no chain_ids given anywhere, default to best assembly
-    assembly_id = args.assembly
+    # Resolve input source
+    assembly_id = assembly
+    cif_file_path = None
 
-    if args.input:
-        if args.pdb_id and not args.chain_ids:
-            chain_ids = args.pdb_id
-            cif_file_path = args.input
-            pdb_id = Path(cif_file_path).stem
-        elif args.chain_ids:
-            chain_ids = args.chain_ids
-            cif_file_path = args.input
-            pdb_id = Path(cif_file_path).stem
-        else:
-            parser.error("chain_ids is required when using --input option. Usage: --input file.cif CHAIN_ID")
-    elif args.pdb_id:
-        # If pdb_id looks like a file path (ends with .cif / .pdb / exists on disk), treat as local file
-        pdb_path = Path(args.pdb_id)
+    if input_file:
+        cif_file_path = input_file
+        resolved_pdb_id = Path(input_file).stem
+        resolved_chain_ids = pdb_id if (pdb_id and not chain_ids) else chain_ids
+        if not resolved_chain_ids:
+            raise click.UsageError("CHAIN_IDS required when using --input.")
+    elif pdb_id:
+        pdb_path = Path(pdb_id)
         if pdb_path.suffix.lower() in ('.cif', '.pdb') or pdb_path.exists():
             cif_file_path = str(pdb_path)
-            pdb_id = pdb_path.stem
-            if args.chain_ids:
-                chain_ids = args.chain_ids
-            else:
-                # No chain IDs given → use assembly 1 by default.
-                # Intentionally '1' (not 'best') so behaviour is predictable and reproducible.
-                chain_ids = 'ALL'
-                if assembly_id is None and not args.list_assemblies:
-                    assembly_id = '1'
+            resolved_pdb_id = pdb_path.stem
+            resolved_chain_ids = chain_ids or 'ALL'
+            if assembly_id is None and not list_assemblies:
+                assembly_id = '1'
         else:
             cif_file_path = None
-            pdb_id = args.pdb_id
-            if args.chain_ids:
-                chain_ids = args.chain_ids
-            else:
-                # No chain IDs given → use assembly 1 by default.
-                # Intentionally '1' (not 'best') so behaviour is predictable and reproducible.
-                chain_ids = 'ALL'
-                if assembly_id is None and not args.list_assemblies:
-                    assembly_id = '1'
+            resolved_pdb_id = pdb_id
+            resolved_chain_ids = chain_ids or 'ALL'
+            if not chain_ids and assembly_id is None and not list_assemblies:
+                assembly_id = '1'
     else:
-        parser.error("Either pdb_id or --input option must be provided")
+        raise click.UsageError("Provide PDB_ID or --input.")
 
     processor = StructureProcessor(
-        pdb_id=pdb_id,
-        chain_ids=chain_ids,
-        uniprot_mode=args.uniprot,
+        pdb_id=resolved_pdb_id,
+        chain_ids=resolved_chain_ids,
+        uniprot_mode=uniprot,
         cif_file_path=cif_file_path,
-        interactive_sequence=args.interactive,
+        interactive_sequence=interactive,
         custom_sequences=custom_sequences,
-        cache_dir=args.cache,
-        include_solvent=args.include_solvent,
-        include_ligands=not args.exclude_ligands,
+        cache_dir=cache,
+        include_solvent=include_solvent,
+        include_ligands=not exclude_ligands,
         assembly_id=assembly_id,
-        list_assemblies=args.list_assemblies,
-        skip_terminal=args.skip_terminal,
-        verbose=args.verbose,
-        output_format=args.format,
+        list_assemblies=list_assemblies,
+        skip_terminal=skip_terminal,
+        verbose=verbose,
+        output_format=output_format,
     )
-    processor.process(args.output)
+    processor.process(Path(out_dir))
 
 
 if __name__ == '__main__':

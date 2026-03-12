@@ -1,6 +1,7 @@
 """Chain ID mapping: auth_asym_id ↔ label_asym_id normalisation."""
-import sys
 from typing import Dict, List, Optional, Tuple
+
+from .log import info, debug, warning, error, detail
 
 
 class ChainMappingMixin:
@@ -40,7 +41,7 @@ class ChainMappingMixin:
             
             return auth_to_label, label_to_auth
         except Exception as e:
-            print(f"WARNING: Failed to build chain ID mapping: {e}", file=sys.stderr)
+            warning(f"Failed to build chain ID mapping: {e}")
             return {}, {}
     
     def normalize_chain_ids(self) -> None:
@@ -90,7 +91,7 @@ class ChainMappingMixin:
         using_author_ids = any(c.upper() in auth_to_label for c in self.chain_ids)
         
         if using_author_ids:
-            print(f"INFO: Treating chain IDs as author chain IDs (from PDB viewer)")
+            info("Treating chain IDs as author chain IDs (from PDB viewer)")
         
         # Normalize each chain ID (preserve case in output)
         normalized_chain_ids = []
@@ -106,7 +107,7 @@ class ChainMappingMixin:
                 chain_id_mapping[chain_id] = label_id
                 # Store author chain ID for output files (preserve original case)
                 self.author_chain_ids[label_id] = chain_id  # Use original case
-                print(f"  {chain_id} (author) -> {label_id} (internal)")
+                detail(f"{chain_id} (author) -> {label_id} (internal)")
             # Priority 2: Check if it's a valid label_asym_id
             elif chain_upper in available_label_ids:
                 # Find the actual label_id with original case from CIF
@@ -140,60 +141,61 @@ class ChainMappingMixin:
                 chain_id_mapping[chain_id] = label_id
                 # Store author chain ID for output files (preserve original case)
                 self.author_chain_ids[label_id] = chain_id  # Use original case
-                print(f"INFO: Converting author chain ID '{chain_id}' to internal chain ID '{label_id}'")
+                info(f"Converting author chain ID '{chain_id}' to internal chain ID '{label_id}'")
             else:
                 # Unknown chain ID, keep as-is (will fail later with proper error)
                 normalized_chain_ids.append(chain_id)  # Preserve original case
                 chain_id_mapping[chain_id] = chain_id
                 # No mapping, use as-is for both
                 self.author_chain_ids[chain_id] = chain_id  # Preserve original case
-                print(f"WARNING: Unknown chain ID '{chain_id}', keeping as-is")
+                warning(f"Unknown chain ID '{chain_id}', keeping as-is")
         
         # Update chain_ids
         self.chain_ids = normalized_chain_ids
         
         # Update manual_sequences keys if needed
-        print(f"DEBUG: Before mapping - manual_sequences keys: {list(self.manual_sequences.keys())}")
-        print(f"DEBUG: chain_id_mapping: {chain_id_mapping}")
+        debug(f"Before mapping - manual_sequences keys: {list(self.manual_sequences.keys())}")
+        debug(f"chain_id_mapping: {chain_id_mapping}")
         
         updated_sequences = {}
         for orig_chain, seq in self.manual_sequences.items():
             if orig_chain in chain_id_mapping:
                 mapped_chain = chain_id_mapping[orig_chain]
                 updated_sequences[mapped_chain] = seq
-                print(f"DEBUG: Mapped custom sequence: {orig_chain} -> {mapped_chain} (seq_length={len(seq)})")
+                debug(f"Mapped custom sequence: {orig_chain} -> {mapped_chain} (seq_length={len(seq)})")
             elif orig_chain.upper() in chain_id_mapping.values():
                 updated_sequences[orig_chain.upper()] = seq
-                print(f"DEBUG: Kept custom sequence: {orig_chain} (already normalized, seq_length={len(seq)})")
+                debug(f"Kept custom sequence: {orig_chain} (already normalized, seq_length={len(seq)})")
             elif orig_chain == '_default_':
                 updated_sequences[orig_chain] = seq
-                print(f"DEBUG: Kept default sequence (seq_length={len(seq)})")
+                debug(f"Kept default sequence (seq_length={len(seq)})")
             else:
                 # Try to normalize this chain ID too
                 orig_upper = orig_chain.upper()
                 if orig_upper in auth_to_label:
                     mapped_chain = auth_to_label[orig_upper]
                     updated_sequences[mapped_chain] = seq
-                    print(f"DEBUG: Mapped custom sequence (auth->label): {orig_upper} -> {mapped_chain} (seq_length={len(seq)})")
+                    debug(f"Mapped custom sequence (auth->label): {orig_upper} -> {mapped_chain} (seq_length={len(seq)})")
                 else:
                     updated_sequences[orig_upper] = seq
-                    print(f"DEBUG: Kept custom sequence (no mapping found): {orig_upper} (seq_length={len(seq)})")
+                    debug(f"Kept custom sequence (no mapping found): {orig_upper} (seq_length={len(seq)})")
         
         self.manual_sequences = updated_sequences
-        print(f"DEBUG: After mapping - manual_sequences keys: {list(self.manual_sequences.keys())}")
+        debug(f"After mapping - manual_sequences keys: {list(self.manual_sequences.keys())}")
     
 
     @staticmethod
     def _base_chain_id(chain_id: str) -> str:
         """Return the original label_asym_id for synthetic chains created by symmetry ops.
 
-        Synthetic chain IDs have the form "<original>_op<N>" (e.g. "A_op2").
-        For regular chains the input is returned unchanged.
+        Synthetic chain IDs have the form "<original>-<N>" or "<original>-<N>-<M>"
+        (e.g. "A-2", "A-12-60"). For regular chains the input is returned unchanged.
         """
-        idx = chain_id.find('_op')
-        if idx != -1:
-            suffix = chain_id[idx + 3:]
-            if suffix.isdigit():
-                return chain_id[:idx]
+        if '-' not in chain_id:
+            return chain_id
+        parts = chain_id.split('-')
+        # All parts after the first must be numeric operator IDs
+        if all(p.isdigit() for p in parts[1:]):
+            return parts[0]
         return chain_id
 
