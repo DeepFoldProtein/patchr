@@ -1,4 +1,11 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, Menu } from "electron";
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  Menu
+} from "electron";
 import { join } from "path";
 import { readFile } from "fs/promises";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";

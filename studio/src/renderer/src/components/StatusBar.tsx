@@ -57,7 +57,9 @@ export function StatusBar(): React.ReactElement {
       <div className="flex-1" />
       {currentProject && (
         <div className="flex items-center gap-2 text-neutral-600 dark:text-neutral-400">
-          <span className="text-neutral-500 dark:text-neutral-500">Project:</span>
+          <span className="text-neutral-500 dark:text-neutral-500">
+            Project:
+          </span>
           <span className="font-medium text-neutral-700 dark:text-neutral-300">
             {currentProject.name}
           </span>

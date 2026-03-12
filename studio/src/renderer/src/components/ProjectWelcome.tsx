@@ -109,12 +109,22 @@ export function ProjectWelcome(): React.ReactElement {
         throw new Error(project.error || "Failed to create sample project");
       }
 
-      // Load the sample structure via IPC (works in both dev and production)
-      const sampleResult = await window.api.app.readSample(sampleFile);
-      if (!sampleResult.success || !sampleResult.content) {
-        throw new Error(sampleResult.error || "Failed to load sample structure");
+      // Load sample structure: try IPC first (production), fallback to fetch (dev)
+      let content: string;
+      try {
+        const sampleResult = await window.api.app.readSample(sampleFile);
+        if (!sampleResult.success || !sampleResult.content) {
+          throw new Error(sampleResult.error || "IPC failed");
+        }
+        content = sampleResult.content;
+      } catch {
+        // Fallback: fetch from Vite dev server (public/ directory)
+        const response = await fetch(`/mock/${sampleFile}`);
+        if (!response.ok) {
+          throw new Error("Failed to load sample structure");
+        }
+        content = await response.text();
       }
-      const content = sampleResult.content;
 
       // Save to project's original folder
       const saveResult = await window.api.project.saveStructureContent(

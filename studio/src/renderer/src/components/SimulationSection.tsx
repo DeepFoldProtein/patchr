@@ -14,6 +14,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent
 } from "./ui/collapsible";
+import { Progress } from "./ui/progress";
 import { apiUrlAtom, apiConnectionStatusAtom } from "../store/api-atoms";
 import { DisconnectedHint } from "./DisconnectedHint";
 import { pathBasename, pathSplit } from "../lib/path-utils";
@@ -634,9 +635,36 @@ function JobStatusCard({
             Job: {jobId}
           </div>
         )}
-        {progress && status === "running" && (
-          <div className="text-xs text-muted-foreground">{progress}</div>
-        )}
+        {(status === "running" || status === "submitting") &&
+          (() => {
+            const percentMatch = progress?.match(/(\d+)%/);
+            const progressValue = percentMatch
+              ? parseInt(percentMatch[1], 10)
+              : 0;
+            return (
+              <div className="mt-2">
+                <Progress value={progressValue} className="h-2" />
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {progress ? (
+                    <div>
+                      <div className="font-medium">{progress}</div>
+                      {progressValue > 0 && (
+                        <div className="mt-0.5">
+                          {Math.round(progressValue)}%
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      {progressValue > 0
+                        ? `${Math.round(progressValue)}%`
+                        : "This may take a while..."}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
       </div>
       {error && (
         <div className="rounded-md border border-red-500/50 bg-red-500/10 p-3">
