@@ -1680,15 +1680,23 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             msg = "Template was not properly specified, missing CIF or PDB path!"
             raise ValueError(msg)
 
-        # Template CIF path: resolve relative to cwd (YAML paths are cwd-relative at process time)
+        # Resolve relative paths against YAML file's directory (not cwd)
+        p = Path(path)
+        if not p.is_absolute() and schema_path is not None:
+            p = Path(schema_path).parent / p
+        path = str(p.resolve())
+
         if not pdb and template_cif_path_resolved is None:
-            template_cif_path_resolved = str(Path(path).resolve())
+            template_cif_path_resolved = path
 
         # Inpainting metadata JSON path (optional, pre-computed by generate_inpainting_template.py)
         if inpainting_metadata_path_resolved is None:
             meta_path = template.get("inpainting_metadata", None)
             if meta_path is not None:
-                inpainting_metadata_path_resolved = str(Path(meta_path).resolve())
+                mp = Path(meta_path)
+                if not mp.is_absolute() and schema_path is not None:
+                    mp = Path(schema_path).parent / mp
+                inpainting_metadata_path_resolved = str(mp.resolve())
 
         template_id = Path(path).stem
         chain_ids = template.get("chain_id", None)

@@ -101,12 +101,12 @@ def generate_json(
 
         sequences.append(chain_entry)
 
-    # Build relative CIF path
+    # Build relative CIF path (relative to output_dir)
     try:
-        cif_path_str = str(cif_path.resolve().relative_to(Path.cwd().resolve()))
+        cif_path_str = str(cif_path.resolve().relative_to(output_dir.resolve()))
     except (ValueError, RuntimeError):
         cif_path_str = os.path.relpath(
-            str(cif_path.resolve()), str(Path.cwd().resolve())
+            str(cif_path.resolve()), str(output_dir.resolve())
         )
 
     name = cif_path.stem
@@ -119,13 +119,13 @@ def generate_json(
         try:
             meta_rel = str(
                 inpainting_metadata_path.resolve().relative_to(
-                    Path.cwd().resolve()
+                    output_dir.resolve()
                 )
             )
         except (ValueError, RuntimeError):
             meta_rel = os.path.relpath(
                 str(inpainting_metadata_path.resolve()),
-                str(Path.cwd().resolve()),
+                str(output_dir.resolve()),
             )
         json_data["inpainting"] = {
             "template_cif": cif_path_str,

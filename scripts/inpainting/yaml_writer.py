@@ -2,6 +2,7 @@
 YAML configuration generation for inpainting (delegates to benchmark.generate_yaml).
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -44,8 +45,12 @@ def generate_yaml(
                 entry["smiles"] = d["smiles"]
         chains.append(entry)
 
-    # Use absolute path so the YAML works regardless of SLURM job working directory
-    cif_path_str = str(cif_path.resolve())
+    # Use relative path (relative to output_dir) so the YAML is portable
+    try:
+        cif_path_str = str(cif_path.resolve().relative_to(output_dir.resolve()))
+    except ValueError:
+        import os
+        cif_path_str = os.path.relpath(str(cif_path.resolve()), str(output_dir.resolve()))
 
     yaml_content = generate_yaml_content(
         chains=chains, cif_path=cif_path_str, use_absolute_path=False
@@ -73,11 +78,13 @@ def generate_yaml(
             else:
                 quoted = [_yaml_str(aid) for aid in auth_ids]
                 new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
-            # Add inpainting_metadata path right after chain_id
+            # Add inpainting_metadata path right after chain_id (relative to output_dir)
             if inpainting_metadata_path is not None:
-                # Use absolute path so the YAML works regardless of SLURM job working directory
-                meta_abs = str(inpainting_metadata_path.resolve())
-                new_lines.append(f"    inpainting_metadata: {meta_abs}")
+                try:
+                    meta_rel = str(inpainting_metadata_path.resolve().relative_to(output_dir.resolve()))
+                except ValueError:
+                    meta_rel = os.path.relpath(str(inpainting_metadata_path.resolve()), str(output_dir.resolve()))
+                new_lines.append(f"    inpainting_metadata: {meta_rel}")
         else:
             new_lines.append(line)
     yaml_content = "\n".join(new_lines)
