@@ -516,9 +516,9 @@ class StructureProcessor(
                 # For proteins, use alignment-based mapping (pass chain_id so non-standard residues get parent_one)
                 residue_mapping = self.get_residue_mapping(atoms, seqres_sequence, final_sequence, chain_id=chain_id)
             
-            # Filter atoms by target sequence (UniProt or manually entered) if applicable (only for proteins)
+            # Filter atoms by target sequence (UniProt, manually entered, or custom) if applicable (only for proteins)
             removed_residues = []
-            if (self.uniprot_mode or self.interactive_sequence) and entity_type == 'protein':
+            if (self.uniprot_mode or self.interactive_sequence or chain_id in self.manual_sequences) and entity_type == 'protein':
                 atoms, removed_residues = self.filter_atoms_by_uniprot_sequence(atoms, residue_mapping, final_sequence)
                 
                 if removed_residues:
