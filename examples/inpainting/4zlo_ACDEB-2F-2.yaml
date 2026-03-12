@@ -2,24 +2,24 @@ version: 1
 
 sequences:
   - protein:
-      id: 'AA'
+      id: 'A'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
 
   - ligand:
-      id: 'AB'
+      id: 'C'
       ccd: '4PV'
 
   - ligand:
-      id: 'AC'
+      id: 'D'
       ccd: 'GOL'
 
   - protein:
-      id: 'B_op2'
+      id: 'B-2'
       sequence: SDEEILEKLRSIVSVGDPKKKYTRFEKIGQGASGTVYTAMDVATGQEVAIKQMNLQQQPKKELIINEILVMRENKNPNIVNYLDSYLVGDELWVVMEYLAGGSLTDVVTETCMDEGQIAAVCRECLQALEFLHSNQVIHRDIKSDNILLGMDGSVKLTDFGFCAQITPEQSKRSXMVGTPYWMAPEVVTRKAYGPKVDIWSLGIMAIEMIEGEPPYLNENPLRALYLIATNGTPELQNPEKLSAIFRDFLNRCLEMDVEKRGSAKELLQHQFLKIAKPLSSLTPLIAAAKEATKNNH
       msa: empty
 
 templates:
-  - cif: /store/wowjason/tools/patchr/examples/inpainting/4ZLO_chainACDB_op2.cif
-    chain_id: ['AA', 'AB', 'AC', 'B_op2']
-    inpainting_metadata: /store/wowjason/tools/patchr/examples/inpainting/4zlo_ACDB_op2_inpainting_metadata.json
+  - cif: /store/wowjason/tools/patchr/examples/inpainting/4ZLO_chainACDEB-2F-2.cif
+    chain_id: ['A', 'C', 'D', 'B-2']
+    inpainting_metadata: /store/wowjason/tools/patchr/examples/inpainting/4zlo_ACDEB-2F-2_inpainting_metadata.json
