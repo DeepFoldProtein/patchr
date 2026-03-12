@@ -1,5 +1,5 @@
 import { app, dialog, ipcMain, shell, net } from "electron";
-import { join, basename, resolve } from "path";
+import { join, basename, resolve, sep } from "path";
 import { promises as fs } from "fs";
 import { existsSync } from "fs";
 import { randomBytes } from "crypto";
@@ -11,7 +11,7 @@ import { randomBytes } from "crypto";
 function validatePathWithinBase(filePath: string, baseDir: string): string {
   const resolved = resolve(filePath);
   const resolvedBase = resolve(baseDir);
-  if (!resolved.startsWith(resolvedBase + "/") && resolved !== resolvedBase) {
+  if (!resolved.startsWith(resolvedBase + sep) && resolved !== resolvedBase) {
     throw new Error("Access denied: path is outside the allowed directory");
   }
   return resolved;
@@ -1212,7 +1212,7 @@ export function registerProjectIPC(): void {
         for (const entry of zip.getEntries()) {
           const entryPath = resolve(simDir, entry.entryName);
           if (
-            !entryPath.startsWith(resolvedSimDir + "/") &&
+            !entryPath.startsWith(resolvedSimDir + sep) &&
             entryPath !== resolvedSimDir
           ) {
             throw new Error(
@@ -1524,7 +1524,7 @@ export function registerProjectIPC(): void {
         for (const entry of zip.getEntries()) {
           const entryPath = resolve(extractDir, entry.entryName);
           if (
-            !entryPath.startsWith(resolvedExtractDir + "/") &&
+            !entryPath.startsWith(resolvedExtractDir + sep) &&
             entryPath !== resolvedExtractDir
           ) {
             throw new Error(

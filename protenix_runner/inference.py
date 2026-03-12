@@ -160,9 +160,21 @@ class InferenceRunner(object):
         self.print(
             f"Loading from {checkpoint_path}, strict: {self.configs.load_strict}"
         )
-        checkpoint = torch.load(
-            checkpoint_path, map_location=self.device, weights_only=False
-        )
+        try:
+            checkpoint = torch.load(
+                checkpoint_path, map_location=self.device, weights_only=False
+            )
+        except Exception as e:
+            # Corrupted checkpoint (e.g. interrupted download on Colab)
+            self.print(
+                f"Checkpoint at {checkpoint_path} is corrupted: {e}. "
+                "Removing and re-downloading..."
+            )
+            os.remove(checkpoint_path)
+            download_inference_cache(self.configs)
+            checkpoint = torch.load(
+                checkpoint_path, map_location=self.device, weights_only=False
+            )
 
         sample_key = list(checkpoint["model"].keys())[0]
         self.print(f"Sampled key: {sample_key}")
@@ -274,19 +286,29 @@ def progress_callback(block_num: int, block_size: int, total_size: int) -> None:
 def download_from_url(
     tos_url: str, checkpoint_path: str, check_weight: bool = True
 ) -> None:
-    """Internal helper to download from URL and verify weight files."""
-    urllib.request.urlretrieve(tos_url, checkpoint_path, reporthook=progress_callback)
-    if check_weight:
-        try:
-            ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    """Internal helper to download from URL and verify weight files.
+
+    Uses atomic download (temp file + rename) to prevent corrupted files
+    from persisting when downloads are interrupted (e.g. on Colab).
+    """
+    import tempfile
+
+    dest_dir = os.path.dirname(checkpoint_path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+    os.close(fd)
+    try:
+        urllib.request.urlretrieve(tos_url, tmp_path, reporthook=progress_callback)
+        if check_weight:
+            ckpt = torch.load(tmp_path, map_location="cpu", weights_only=False)
             del ckpt
-        except Exception as e:
-            if opexists(checkpoint_path):
-                os.remove(checkpoint_path)
-            raise RuntimeError(
-                f"Download model checkpoint failed: {e}. Please download "
-                f"manually with: wget {tos_url} -O {checkpoint_path}"
-            ) from e
+        os.replace(tmp_path, checkpoint_path)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise RuntimeError(
+            f"Download model checkpoint failed: {e}. Please download "
+            f"manually with: wget {tos_url} -O {checkpoint_path}"
+        ) from e
 
 
 def download_inference_cache(configs: Any) -> None:

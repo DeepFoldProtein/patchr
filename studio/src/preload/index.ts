@@ -87,7 +87,9 @@ const api = {
   // App settings
   app: {
     setTheme: (theme: "light" | "dark") =>
-      ipcRenderer.invoke("app:set-theme", theme)
+      ipcRenderer.invoke("app:set-theme", theme),
+    readSample: (filename: string) =>
+      ipcRenderer.invoke("app:read-sample", filename)
   }
 };
 

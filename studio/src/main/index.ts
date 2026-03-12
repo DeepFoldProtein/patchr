@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, nativeTheme, Menu } from "electron";
 import { join } from "path";
+import { readFile } from "fs/promises";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/logo.png?asset";
 import { registerProjectIPC } from "./project-manager";
@@ -165,6 +166,21 @@ app.whenReady().then(() => {
     });
 
     return { success: true };
+  });
+
+  // Read sample files from the app bundle
+  ipcMain.handle("app:read-sample", async (_event, filename: string) => {
+    // Sanitize filename to prevent path traversal
+    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+    const sampleDir = is.dev
+      ? join(__dirname, "../../src/renderer/public/mock")
+      : join(__dirname, "../renderer/mock");
+    try {
+      const content = await readFile(join(sampleDir, safe), "utf-8");
+      return { success: true, content };
+    } catch {
+      return { success: false, error: `Sample file not found: ${safe}` };
+    }
   });
 
   // Register project management IPC handlers
