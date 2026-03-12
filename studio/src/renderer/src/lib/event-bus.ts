@@ -47,6 +47,9 @@ export type AppEvents = {
   "inpainting:remove-result": { filePath: string; visible?: boolean };
   "inpainting:structure-loaded": { filePath: string };
 
+  // Results
+  "results:updated": void;
+
   // Simulation viewer
   "simulation:load-system": {
     filePath: string;
