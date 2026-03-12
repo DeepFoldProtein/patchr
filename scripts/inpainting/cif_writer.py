@@ -489,6 +489,8 @@ def generate_cif(
     lines.append("_atom_site.auth_atom_id")
     lines.append("_atom_site.pdbx_PDB_model_num")
 
+    # Collect all atom rows as tuples of field values, then column-align them.
+    atom_rows: list[list[str]] = []
     next_atom_id = 1
     for chain_id in chain_ids:
         atoms = all_chains_data[chain_id]['atoms']
@@ -500,30 +502,40 @@ def generate_cif(
             atom_id = next_atom_id
             next_atom_id += 1
             group_pdb = 'ATOM' if use_atom_for_chain else atom['group_PDB']
-            line = f"{group_pdb} {atom_id} {atom['type_symbol']} "
-            line += f"{atom['label_atom_id']} {atom['label_alt_id']} "
-            line += f"{atom['label_comp_id']} {atom['auth_asym_id']} "
-            line += f"{atom['label_entity_id']} {atom['label_seq_id']} "
-            line += f"{atom['pdbx_PDB_ins_code']} {atom['Cartn_x']} "
-            line += f"{atom['Cartn_y']} {atom['Cartn_z']} "
-            line += f"{atom['occupancy']} {atom['B_iso_or_equiv']} "
-            line += f"{atom['pdbx_formal_charge']} {atom['auth_seq_id']} "
-            line += f"{atom['auth_comp_id']} {atom['auth_asym_id']} "
-            line += f"{atom['auth_atom_id']} {atom['pdbx_PDB_model_num']}"
-            lines.append(line)
+            atom_rows.append([
+                group_pdb, str(atom_id), atom['type_symbol'],
+                atom['label_atom_id'], atom['label_alt_id'],
+                atom['label_comp_id'], atom['auth_asym_id'],
+                str(atom['label_entity_id']), str(atom['label_seq_id']),
+                atom['pdbx_PDB_ins_code'], atom['Cartn_x'],
+                atom['Cartn_y'], atom['Cartn_z'],
+                atom['occupancy'], atom['B_iso_or_equiv'],
+                atom['pdbx_formal_charge'], str(atom['auth_seq_id']),
+                atom['auth_comp_id'], atom['auth_asym_id'],
+                atom['auth_atom_id'], str(atom['pdbx_PDB_model_num']),
+            ])
     for atom in solvent_atoms:
         atom_id = next_atom_id
         next_atom_id += 1
-        line = f"{atom['group_PDB']} {atom_id} {atom['type_symbol']} "
-        line += f"{atom['label_atom_id']} {atom['label_alt_id']} "
-        line += f"{atom['label_comp_id']} {atom['auth_asym_id']} "
-        line += f"{water_entity_id} {atom['label_seq_id']} "
-        line += f"{atom['pdbx_PDB_ins_code']} {atom['Cartn_x']} "
-        line += f"{atom['Cartn_y']} {atom['Cartn_z']} "
-        line += f"{atom['occupancy']} {atom['B_iso_or_equiv']} "
-        line += f"{atom['pdbx_formal_charge']} {atom['auth_seq_id']} "
-        line += f"{atom['auth_comp_id']} {atom['auth_asym_id']} "
-        line += f"{atom['auth_atom_id']} {atom['pdbx_PDB_model_num']}"
-        lines.append(line)
+        atom_rows.append([
+            atom['group_PDB'], str(atom_id), atom['type_symbol'],
+            atom['label_atom_id'], atom['label_alt_id'],
+            atom['label_comp_id'], atom['auth_asym_id'],
+            str(water_entity_id), str(atom['label_seq_id']),
+            atom['pdbx_PDB_ins_code'], atom['Cartn_x'],
+            atom['Cartn_y'], atom['Cartn_z'],
+            atom['occupancy'], atom['B_iso_or_equiv'],
+            atom['pdbx_formal_charge'], str(atom['auth_seq_id']),
+            atom['auth_comp_id'], atom['auth_asym_id'],
+            atom['auth_atom_id'], str(atom['pdbx_PDB_model_num']),
+        ])
+
+    # Compute per-column max widths and write column-aligned rows.
+    if atom_rows:
+        ncols = len(atom_rows[0])
+        col_widths = [max(len(row[c]) for row in atom_rows) for c in range(ncols)]
+        for row in atom_rows:
+            fields = [row[c].ljust(col_widths[c]) for c in range(ncols)]
+            lines.append(' '.join(fields))
     lines.append("#")
     return '\n'.join(lines)
