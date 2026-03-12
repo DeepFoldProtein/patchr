@@ -1,6 +1,5 @@
 """StructureProcessor: main class that composes all Mixin capabilities."""
 import os
-import sys
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -26,6 +25,7 @@ from .atom_parse import AtomParseMixin
 from .alignment import AlignmentMixin
 from .validation import ValidationMixin
 from .assembly import AssemblyMixin
+from .log import info, debug, warning, error, status, section, detail, success, fatal
 
 
 class StructureProcessor(
@@ -141,10 +141,8 @@ class StructureProcessor(
     def process(self, output_dir: Path):
         """Main processing pipeline for multiple chains."""
         chain_ids_str = ','.join(self.chain_ids)
-        print(f"\n{'='*60}")
-        print(f"Processing PDB: {self.pdb_id}, Chains: {chain_ids_str}")
-        print(f"UniProt mode: {'ON' if self.uniprot_mode else 'OFF'}")
-        print(f"{'='*60}\n")
+        section(f"Processing PDB: {self.pdb_id}, Chains: {chain_ids_str}")
+        info(f"UniProt mode: {'ON' if self.uniprot_mode else 'OFF'}")
         
         # Load CIF (from local file or download)
         self.load_cif()
@@ -170,23 +168,23 @@ class StructureProcessor(
             if str(self.assembly_id).lower() == 'best':
                 selected_id = self.select_best_assembly(assembly_info)
                 if selected_id is None:
-                    print("WARNING: Could not determine best assembly; proceeding with original chains.")
+                    warning("Could not determine best assembly; proceeding with original chains.")
                 else:
-                    print(f"Auto-selected assembly {selected_id} "
-                          f"({assembly_info['assemblies'].get(selected_id, {}).get('details', '?')}, "
-                          f"{assembly_info['assemblies'].get(selected_id, {}).get('oligomeric_details', '?')})")
+                    info(f"Auto-selected assembly {selected_id} "
+                         f"({assembly_info['assemblies'].get(selected_id, {}).get('details', '?')}, "
+                         f"{assembly_info['assemblies'].get(selected_id, {}).get('oligomeric_details', '?')})")
             else:
                 selected_id = str(self.assembly_id)
                 if selected_id not in assembly_info.get('assemblies', {}):
-                    print(f"WARNING: Assembly {selected_id} not found; "
-                          f"available: {list(assembly_info['assemblies'].keys())}. "
-                          "Proceeding with original chains.")
+                    warning(f"Assembly {selected_id} not found; "
+                            f"available: {list(assembly_info['assemblies'].keys())}. "
+                            "Proceeding with original chains.")
                     selected_id = None
 
             if selected_id is not None:
                 asm_chain_ids, synthetic_atoms = self.get_assembly_chains(selected_id, assembly_info)
                 if asm_chain_ids:
-                    print(f"\nAssembly {selected_id} chains: {', '.join(asm_chain_ids)}")
+                    info(f"Assembly {selected_id} chains: {', '.join(asm_chain_ids)}")
                     # Override chain selection (assembly takes precedence over CLI chain IDs / ALL)
                     self.chain_ids = asm_chain_ids
                     self._synthetic_atoms = synthetic_atoms
@@ -202,7 +200,7 @@ class StructureProcessor(
                         else:
                             self.author_chain_ids[cid] = cid
                 else:
-                    print("WARNING: Assembly produced no chains; proceeding with original chains.")
+                    warning("Assembly produced no chains; proceeding with original chains.")
 
         # Load CCD from ccd.pkl (same as mmcif.parse_mmcif mols / main.py)
         ccd_dir = self.cache_dir or get_boltz_cache()
@@ -210,15 +208,14 @@ class StructureProcessor(
         if not ccd_path.exists():
             import urllib.request
             CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
-            print(f"Downloading CCD dictionary to {ccd_path} ...")
+            info(f"Downloading CCD dictionary to {ccd_path} ...")
             ccd_dir.mkdir(parents=True, exist_ok=True)
             try:
                 urllib.request.urlretrieve(CCD_URL, str(ccd_path))  # noqa: S310
-                print(f"Downloaded ccd.pkl successfully.")
+                success(f"Downloaded ccd.pkl successfully.")
             except Exception as e:
-                print(f"ERROR: Failed to download ccd.pkl: {e}", file=sys.stderr)
-                print(f"Please download manually or set --cache to a directory containing ccd.pkl.", file=sys.stderr)
-                sys.exit(1)
+                error(f"Failed to download ccd.pkl: {e}")
+                fatal("Please download manually or set --cache to a directory containing ccd.pkl.")
         ccd = load_ccd_dict(ccd_path)
         self.ccd = ccd  # stored so ligand / modification validation can use it later
         # Parse non-standard residue info from CIF (uses ccd.pkl via ccd_utils)
@@ -241,8 +238,7 @@ class StructureProcessor(
             include_all_copies = True  # Always include all chains so ALL gives A,B,C,D for 1A1B
             all_chains, chain_entity_types = self.get_all_polymer_chains(include_all_copies=include_all_copies)
             if not all_chains:
-                print("ERROR: No polymer chains found in structure", file=sys.stderr)
-                sys.exit(1)
+                fatal("No polymer chains found in structure")
             self.chain_ids = all_chains
             self.chain_entity_types = chain_entity_types
             
@@ -259,8 +255,7 @@ class StructureProcessor(
                     self.author_chain_ids[chain_id] = chain_id
             
             type_summary = ', '.join([f"{chain_entity_types.get(c, '?')}" for c in all_chains])
-            print(f"Auto-detected {len(self.chain_ids)} polymer chain(s): {','.join(self.chain_ids)} ({type_summary})")
-            print()
+            info(f"Auto-detected {len(self.chain_ids)} polymer chain(s): {','.join(self.chain_ids)} ({type_summary})")
 
         # Ligand chain handling
         if self.assembly_id is not None:
@@ -276,7 +271,7 @@ class StructureProcessor(
                 ]
                 removed = [c for c in before if c not in self.chain_ids]
                 if removed:
-                    print(f"Excluded ligand chain(s) from assembly: {removed}")
+                    info(f"Excluded ligand chain(s) from assembly: {removed}")
         else:
             # Non-assembly mode: add ligand chains if include_ligands
             if self.include_ligands:
@@ -286,7 +281,7 @@ class StructureProcessor(
                     self.chain_ids = list(self.chain_ids) + [c]
                     self.author_chain_ids[c] = c
                 if added:
-                    print(f"Include ligands: added chain(s) {added}")
+                    info(f"Include ligands: added chain(s) {added}")
         
         # Handle default sequence (single sequence for single chain)
         if '_default_' in self.manual_sequences:
@@ -296,39 +291,51 @@ class StructureProcessor(
                 self.manual_sequences[self.chain_ids[0]] = default_seq
             else:
                 # Multiple chains - error
-                print("ERROR: Single sequence provided but multiple chains detected.", file=sys.stderr)
-                print(f"ERROR: Please specify sequences for each chain: --sequence A:SEQ1,B:SEQ2", file=sys.stderr)
-                print(f"ERROR: Detected chains: {','.join(self.chain_ids)}", file=sys.stderr)
-                sys.exit(1)
+                error("Single sequence provided but multiple chains detected.")
+                error(f"Please specify sequences for each chain: --sequence A:SEQ1,B:SEQ2")
+                fatal(f"Detected chains: {','.join(self.chain_ids)}")
         
         # Deduplicate author_chain_ids: when multiple label chains share the same auth ID
-        # (e.g. assembly copies), append A/B/C... suffix to make them unique.
-        # E.g. three copies of auth "I" → "IA", "IB", "IC".
+        # (e.g. assembly copies of a homo-oligomer), fall back to using the label_asym_id
+        # (which is already unique) as the output chain ID.
         from collections import Counter
         auth_counts = Counter(self.author_chain_ids.get(c, c) for c in self.chain_ids)
-        seen_auth: Dict[str, int] = {}
         for cid in self.chain_ids:
             auth_id = self.author_chain_ids.get(cid, cid)
             if auth_counts[auth_id] > 1:
-                idx = seen_auth.get(auth_id, 0)
-                seen_auth[auth_id] = idx + 1
-                self.author_chain_ids[cid] = f"{auth_id}{chr(ord('A') + idx)}"
+                self.author_chain_ids[cid] = cid
 
         # Process each chain
         all_chains_data = {}
         entity_id = 1
-        
+        assembly_solvent_atoms: list = []  # solvent atoms collected from assembly chains
+
         for chain_id in self.chain_ids:
+            # Detect water/solvent chains and collect them separately.
+            # They flow through the assembly path (with symmetry ops applied) but
+            # are not processed as polymers or ligands.
+            base_id = self._base_chain_id(chain_id)
+            chain_etype = self._assembly_entity_types.get(base_id, '')
+            if 'water' in chain_etype:
+                if self.include_solvent:
+                    atoms = self.parse_atom_records(chain_id)
+                    if atoms:
+                        author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
+                        for atom in atoms:
+                            atom['auth_asym_id'] = author_chain_id
+                            atom['label_asym_id'] = author_chain_id
+                        assembly_solvent_atoms.extend(atoms)
+                        info(f"Chain {chain_id}: solvent ({len(atoms)} atoms)")
+                continue
+
             if self.verbose:
-                print(f"\n{'='*60}")
-                print(f"Processing Chain: {chain_id}")
-                print(f"{'='*60}\n")
+                section(f"Processing Chain: {chain_id}")
             
             # Get entity type for this chain (determined from actual atoms or CIF entity)
             # First try to get from chain_entity_types (if already set from get_all_polymer_chains)
             entity_type = self.chain_entity_types.get(chain_id)
             if entity_type is None:
-                # For synthetic chains (e.g. A_op2), check the base chain's entity type first
+                # For synthetic chains (e.g. A-2), check the base chain's entity type first
                 base_id = self._base_chain_id(chain_id)
                 if base_id != chain_id:
                     entity_type = self.chain_entity_types.get(base_id)
@@ -384,17 +391,17 @@ class StructureProcessor(
             if entity_type == 'ligand':
                 atoms = self.parse_atom_records(chain_id)
                 if not atoms:
-                    print(f"WARNING: No atoms for ligand chain {chain_id}, skipping")
+                    warning(f"No atoms for ligand chain {chain_id}, skipping")
                     continue
                 ligand_ccd = (atoms[0].get('label_comp_id') or 'UNK').strip().upper()
                 if not is_ccd_available(getattr(self, 'ccd', None), ligand_ccd):
-                    print(f"WARNING: CCD '{ligand_ccd}' not found in boltz CCD database (or has no conformer), "
-                          f"skipping ligand chain {chain_id}")
+                    warning(f"CCD '{ligand_ccd}' not found in boltz CCD database (or has no conformer), "
+                            f"skipping ligand chain {chain_id}")
                     continue
                 author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
                 if '\\' in author_chain_id:
-                    print(f"WARNING: Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
-                          f"(contains backslash), skipping")
+                    warning(f"Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
+                            f"(contains backslash), skipping")
                     continue
                 for atom in atoms:
                     atom['label_entity_id'] = str(entity_id)
@@ -422,7 +429,7 @@ class StructureProcessor(
                     'ccd': ligand_ccd,
                     'inpainting_metadata': ligand_inpainting_meta,
                 }
-                print(f"Chain {chain_id}: ligand (ccd={ligand_ccd})")
+                info(f"Chain {chain_id}: ligand (ccd={ligand_ccd})")
                 entity_id += 1
                 continue
             
@@ -432,15 +439,15 @@ class StructureProcessor(
                 seqres_sequence = self.extract_seqres_from_cif(chain_id)
                 # Fallback: empty SEQRES (e.g. short peptides with no _entity_poly_seq entry)
                 if not seqres_sequence:
-                    print(f"WARNING: Empty SEQRES for chain {chain_id}, extracting sequence from atoms")
+                    warning(f"Empty SEQRES for chain {chain_id}, extracting sequence from atoms")
                     seqres_sequence = self.extract_sequence_from_atoms(chain_id)
-                # Fallback for synthetic chains (e.g. D_op2): extract_sequence_from_atoms looks up
-                # label_asym_id in the CIF which only has the base chain ('D'), not 'D_op2'.
+                # Fallback for synthetic chains (e.g. D-2): extract_sequence_from_atoms looks up
+                # label_asym_id in the CIF which only has the base chain ('D'), not 'D-2'.
                 if not seqres_sequence:
                     base_id = self._base_chain_id(chain_id)
                     if base_id != chain_id:
-                        print(f"WARNING: Empty sequence for synthetic chain {chain_id}, "
-                              f"retrying with base chain {base_id}")
+                        warning(f"Empty sequence for synthetic chain {chain_id}, "
+                                f"retrying with base chain {base_id}")
                         seqres_sequence = self.extract_sequence_from_atoms(base_id)
                         if not seqres_sequence:
                             seqres_sequence = self.extract_seqres_from_cif(base_id)
@@ -449,44 +456,44 @@ class StructureProcessor(
                     protein_residues = set('ACDEFGHIKLMNPQRSTVWY')
                     if not all(c in protein_residues for c in seqres_sequence if c != 'X'):
                         # SEQRES doesn't match, extract from atoms
-                        print(f"WARNING: SEQRES sequence type doesn't match protein atoms, extracting from atoms")
+                        warning(f"SEQRES sequence type doesn't match protein atoms, extracting from atoms")
                         seqres_sequence = self.extract_sequence_from_atoms(chain_id)
                 elif entity_type in ['dna', 'rna']:
                     dna_rna_residues = set('ACGTUIN')
                     if not all(c in dna_rna_residues for c in seqres_sequence if c != 'X' and c != 'N'):
                         # SEQRES doesn't match, extract from atoms
-                        print(f"WARNING: SEQRES sequence type doesn't match {entity_type.upper()} atoms, extracting from atoms")
+                        warning(f"SEQRES sequence type doesn't match {entity_type.upper()} atoms, extracting from atoms")
                         seqres_sequence = self.extract_sequence_from_atoms(chain_id)
             except Exception as e:
                 # If SEQRES extraction fails, extract from atoms
-                print(f"WARNING: Failed to extract SEQRES, extracting from atoms: {e}")
+                warning(f"Failed to extract SEQRES, extracting from atoms: {e}")
                 seqres_sequence = self.extract_sequence_from_atoms(chain_id)
         
             # Get final sequence to use
             uniprot_id = None
             
             if self.verbose:
-                print(f"DEBUG: Checking sequence for chain {chain_id}:")
-                print(f"  - Available in manual_sequences: {chain_id in self.manual_sequences}")
-                print(f"  - manual_sequences keys: {list(self.manual_sequences.keys())}")
-                print(f"  - Entity type: {entity_type}")
-                print(f"  - SEQRES sequence length: {len(seqres_sequence)}")
+                debug(f"Checking sequence for chain {chain_id}:")
+                detail(f"Available in manual_sequences: {chain_id in self.manual_sequences}")
+                detail(f"manual_sequences keys: {list(self.manual_sequences.keys())}")
+                detail(f"Entity type: {entity_type}")
+                detail(f"SEQRES sequence length: {len(seqres_sequence)}")
             
             # Check if custom sequence is provided (CLI or interactive)
             if chain_id in self.manual_sequences:
                 # Use custom sequence from CLI
                 final_sequence = self.manual_sequences[chain_id]
-                print(f"Using custom sequence for chain {chain_id} (length: {len(final_sequence)})")
-                print(f"DEBUG: Custom sequence preview: {final_sequence[:50]}...")
+                info(f"Using custom sequence for chain {chain_id} (length: {len(final_sequence)})")
+                debug(f"Custom sequence preview: {final_sequence[:50]}...")
             elif self.interactive_sequence:
                 # Prompt for manual sequence input
                 manual_seq = self.prompt_manual_sequence(chain_id, entity_type, seqres_sequence)
                 if manual_seq:
                     final_sequence = manual_seq
                     self.manual_sequences[chain_id] = manual_seq
-                    print(f"Using manually entered sequence for chain {chain_id} (length: {len(final_sequence)})")
+                    info(f"Using manually entered sequence for chain {chain_id} (length: {len(final_sequence)})")
                 else:
-                    print(f"Skipping chain {chain_id}")
+                    info(f"Skipping chain {chain_id}")
                     continue
             elif self.uniprot_mode and entity_type == 'protein':
                 # UniProt only for proteins
@@ -496,12 +503,12 @@ class StructureProcessor(
                     # Use UniProt sequence as the final sequence
                     final_sequence = uniprot_sequence
                 else:
-                    print("WARNING: Falling back to SEQRES sequence")
+                    warning("Falling back to SEQRES sequence")
                     final_sequence = seqres_sequence
             else:
                 # Use SEQRES sequence (for DNA/RNA or when UniProt mode is off)
                 if self.uniprot_mode and entity_type != 'protein':
-                    print(f"WARNING: UniProt mode is ON but chain {chain_id} is {entity_type.upper()}, using SEQRES sequence")
+                    warning(f"UniProt mode is ON but chain {chain_id} is {entity_type.upper()}, using SEQRES sequence")
                 final_sequence = seqres_sequence
             
             # Parse atoms
@@ -523,28 +530,21 @@ class StructureProcessor(
                 
                 if removed_residues:
                     sequence_type = "manually entered sequence" if self.interactive_sequence else "UniProt sequence"
-                    print(f"\n{'='*60}")
-                    print(f"REMOVED RESIDUES (Chain {chain_id}, {sequence_type} mismatch):")
-                    print(f"{'='*60}")
-                    print(f"Total residues removed: {len(removed_residues)}")
-                    print("")
+                    section(f"REMOVED RESIDUES (Chain {chain_id}, {sequence_type} mismatch):")
+                    info(f"Total residues removed: {len(removed_residues)}")
                     for entry in removed_residues:
                         pos_info = f"Position {entry['uniprot_pos']}" if entry['uniprot_pos'] else "Not mapped"
                         target_aa_label = "Target" if self.interactive_sequence else "UniProt"
-                        print(f"  Residue {entry['residue']} ({pos_info}): "
-                              f"Structure={entry['struct_type']} ({entry['struct_aa']}), "
-                              f"{target_aa_label}={entry['uniprot_aa']}")
-                    print(f"{'='*60}\n")
+                        detail(f"Residue {entry['residue']} ({pos_info}): "
+                               f"Structure={entry['struct_type']} ({entry['struct_aa']}), "
+                               f"{target_aa_label}={entry['uniprot_aa']}")
                     
                     # Recalculate residue mapping after filtering
                     residue_mapping = self.get_residue_mapping(atoms, seqres_sequence, final_sequence, chain_id=chain_id)
                 else:
                     sequence_type = "manually entered sequence" if self.interactive_sequence else "UniProt sequence"
-                    print(f"\n{'='*60}")
-                    print(f"Sequence check (Chain {chain_id}, {sequence_type}):")
-                    print(f"{'='*60}")
-                    print(f"  All residues match {sequence_type}!")
-                    print(f"{'='*60}\n")
+                    section(f"Sequence check (Chain {chain_id}, {sequence_type}):")
+                    detail(f"All residues match {sequence_type}!")
             
             # Check for missing atoms in residues (only for proteins)
             if entity_type == 'protein':
@@ -569,8 +569,8 @@ class StructureProcessor(
                         old_len = len(final_sequence)
                         final_sequence = final_sequence[first_present - 1 : last_present]
                         residue_mapping = {k: v - trim_offset for k, v in residue_mapping.items()}
-                        print(f"  --skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
-                              f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
+                        detail(f"--skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
+                               f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
 
             # Apply skip-terminal offset to inpainting metadata
             if chain_inpainting_metadata is not None and trim_offset > 0:
@@ -610,8 +610,8 @@ class StructureProcessor(
                         seq_pos_to_monomer[pos] = comp_id
             
             # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
-            # For synthetic chains (e.g. D_op2) from assembly: try base chain ID first, then the
-            # full chain_id (handles re-processed generated CIFs where _op chains are real entities).
+            # For synthetic chains (e.g. D-2) from assembly: try base chain ID first, then the
+            # full chain_id (handles re-processed generated CIFs where synthetic chains are real entities).
             # NOTE: positions from _entity_poly_seq / struct_conn / non_standard_residues are in original
             # SEQRES coordinates; apply trim_offset (set above when --skip-terminal is active) to convert
             # them to the trimmed coordinate system.  seq_pos_to_monomer is already in trimmed coords.
@@ -670,9 +670,9 @@ class StructureProcessor(
                 elif is_ccd_available(_ccd_db, _ccd_code):
                     filtered_mods.append(_m)
                 else:
-                    print(f"WARNING: Chain {chain_id}: modification CCD '{_ccd_code}' at position "
-                          f"{_m.get('position')} not found in boltz CCD database, skipping modification "
-                          f"and removing its atoms from template CIF")
+                    warning(f"Chain {chain_id}: modification CCD '{_ccd_code}' at position "
+                            f"{_m.get('position')} not found in boltz CCD database, skipping modification "
+                            f"and removing its atoms from template CIF")
                     _unavailable_seq_positions.add(_m.get('position'))
             chain_modifications = filtered_mods
             # Remove atoms at positions with unavailable CCD so the template CIF is clean.
@@ -697,16 +697,16 @@ class StructureProcessor(
                     seq_list[pos - 1] = 'X'
                     output_sequence = ''.join(seq_list)
             if chain_modifications:
-                print(f"Chain {chain_id} has {len(chain_modifications)} modification(s):")
+                info(f"Chain {chain_id} has {len(chain_modifications)} modification(s):")
                 for mod in chain_modifications:
                     parent = mod.get('parent') or '-'
-                    print(f"  - Position {mod['position']}: {mod['ccd']} (parent: {parent})")
+                    detail(f"Position {mod['position']}: {mod['ccd']} (parent: {parent})")
             
             # Store chain data (include author chain ID for output files)
             author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
             if '\\' in author_chain_id:
-                print(f"WARNING: Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
-                      f"(contains backslash), skipping")
+                warning(f"Chain {chain_id} has unsafe author chain ID {author_chain_id!r} "
+                        f"(contains backslash), skipping")
                 continue
             all_chains_data[chain_id] = {
                 'atoms': renumbered_atoms,
@@ -725,10 +725,15 @@ class StructureProcessor(
         # Generate output files
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # File naming: use label chain IDs so names are unique (e.g. ABC not ABA when ligand C has auth A)
-        # Keep filename under 255 chars (filesystem limit): abbreviate when too many chains
-        suffix = "_uniprot" if self.uniprot_mode else ""
-        chain_ids_str_short: str = ''.join(self.chain_ids)
+        # File naming: use only chains that were actually included in the output
+        # (chains skipped due to CCD issues, unsafe IDs, etc. are excluded)
+        suffix = ""
+        if self.uniprot_mode:
+            suffix += "_uniprot"
+        if self.skip_terminal:
+            suffix += "_trimmed"
+        output_chain_ids = [c for c in self.chain_ids if c in all_chains_data]
+        chain_ids_str_short: str = ''.join(output_chain_ids)
         max_chain_chars = 15  # leave room for pdb_id, _chain, suffix, .cif
         if len(chain_ids_str_short) > max_chain_chars:
             chain_ids_str_short = f"ALL_{len(self.chain_ids)}chains"
@@ -741,14 +746,22 @@ class StructureProcessor(
         cif_path = output_dir / cif_filename
         config_path = output_dir / config_filename
 
-        # Optional: include solvent (water) atoms for full structure transfer
-        solvent_atoms = self._extract_solvent_atoms() if self.include_solvent else None
+        # Optional: include solvent (water) atoms for full structure transfer.
+        # When in assembly mode, solvent atoms were already collected above with
+        # correct symmetry ops and chain IDs.  Fall back to raw CIF extraction
+        # only for non-assembly runs.
+        if assembly_solvent_atoms:
+            solvent_atoms = assembly_solvent_atoms
+        elif self.include_solvent:
+            solvent_atoms = self._extract_solvent_atoms()
+        else:
+            solvent_atoms = None
 
         # Generate and save CIF
         cif_content = self.generate_cif(all_chains_data, solvent_atoms=solvent_atoms)
         with open(cif_path, 'w') as f:
             f.write(cif_content)
-        print(f"Saved CIF file: {cif_path.absolute()}")
+        success(f"Saved CIF file: {cif_path.absolute()}")
 
         # Save inpainting metadata JSON (per-chain, matching boltz2 format)
         # Must be saved before config so the path can be embedded in it
@@ -770,16 +783,14 @@ class StructureProcessor(
                                                 inpainting_metadata_path=metadata_path)
             with open(config_path, 'w') as f:
                 f.write(config_content)
-            print(f"Saved Protenix JSON: {config_path.absolute()}")
+            success(f"Saved Protenix JSON: {config_path.absolute()}")
         else:
             config_content = self.generate_yaml(cif_path, output_dir, all_chains_data,
                                                 inpainting_metadata_path=metadata_path)
             with open(config_path, 'w') as f:
                 f.write(config_content)
-            print(f"Saved YAML file: {config_path.absolute()}")
+            success(f"Saved YAML file: {config_path.absolute()}")
 
-        print(f"\n{'='*60}")
-        print("Processing complete!")
-        print(f"{'='*60}\n")
+        section("Processing complete!")
 
 

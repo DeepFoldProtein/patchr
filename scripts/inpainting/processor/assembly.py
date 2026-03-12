@@ -1,7 +1,8 @@
 """Biological assembly parsing, selection, and symmetry operations."""
 import re
-import sys
 from typing import Dict, List, Optional, Tuple
+
+from .log import info, warning, section
 
 
 class AssemblyMixin:
@@ -26,8 +27,8 @@ class AssemblyMixin:
             return [x.strip() for x in expr.split(',') if x.strip()]
 
         if len(groups) > 1:
-            print(f"WARNING: Complex oper_expression '{expr}' (Cartesian product) — "
-                  "treating as union of all IDs")
+            warning(f"Complex oper_expression '{expr}' (Cartesian product) — "
+                    "treating as union of all IDs")
 
         result: List[str] = []
         for group in groups:
@@ -141,11 +142,11 @@ class AssemblyMixin:
         if not assemblies:
             return None
 
-        for aid, info in assemblies.items():
-            if 'author_and_software_defined' in info.get('details', '').lower():
+        for aid, info_val in assemblies.items():
+            if 'author_and_software_defined' in info_val.get('details', '').lower():
                 return aid
-        for aid, info in assemblies.items():
-            if 'software_defined' in info.get('details', '').lower():
+        for aid, info_val in assemblies.items():
+            if 'software_defined' in info_val.get('details', '').lower():
                 return aid
         return next(iter(assemblies))
 
@@ -182,7 +183,7 @@ class AssemblyMixin:
         assemblies = assembly_info.get('assemblies', {})
         assembly_gen = assembly_info.get('assembly_gen', [])
         if not assemblies:
-            print("INFO: No biological assembly information found in CIF.")
+            info("No biological assembly information found in CIF.")
             return
 
         # Build per-assembly chain summary
@@ -192,19 +193,18 @@ class AssemblyMixin:
             n_opers = len(row['oper_ids'])
             chains_str = ','.join(row['chain_ids'])
             if n_opers > 1:
-                chains_str += f" (×{n_opers} ops)"
+                chains_str += f" (x{n_opers} ops)"
             chain_summary.setdefault(aid, []).append(chains_str)
 
-        print(f"\nAvailable biological assemblies for {self.pdb_id}:")
-        print(f"  {'ID':<4}  {'Details':<38}  {'Oligomer':<12}  Chains")
-        print(f"  {'-'*4}  {'-'*38}  {'-'*12}  {'-'*20}")
-        for aid, info in assemblies.items():
-            details = info.get('details', '?')
-            oligo = info.get('oligomeric_details', '?')
+        section(f"Available biological assemblies for {self.pdb_id}")
+        info(f"  {'ID':<4}  {'Details':<38}  {'Oligomer':<12}  Chains")
+        info(f"  {'-'*4}  {'-'*38}  {'-'*12}  {'-'*20}")
+        for aid, info_val in assemblies.items():
+            details = info_val.get('details', '?')
+            oligo = info_val.get('oligomeric_details', '?')
             chains_col = '; '.join(chain_summary.get(aid, ['?']))
-            marker = ' ✓' if 'author_and_software_defined' in details.lower() else ''
-            print(f"  {aid:<4}  {details+marker:<38}  {oligo:<12}  {chains_col}")
-        print()
+            marker = ' *' if 'author_and_software_defined' in details.lower() else ''
+            info(f"  {aid:<4}  {details+marker:<38}  {oligo:<12}  {chains_col}")
 
     def get_assembly_chains(
         self,
@@ -215,7 +215,7 @@ class AssemblyMixin:
 
         For identity operations: chains are included as-is.
         For non-identity operations: atom coordinates are transformed and stored in
-        a synthetic-atom cache under a new chain ID ("<original>_op<oper_id>").
+        a synthetic-atom cache under a new chain ID ("<original>-<oper_id>").
 
         Returns:
             (chain_id_list, synthetic_atom_cache)
@@ -245,7 +245,7 @@ class AssemblyMixin:
         # Collect all rows for this assembly
         rows = [r for r in assembly_gen if r['assembly_id'] == str(assembly_id)]
         if not rows:
-            print(f"WARNING: Assembly {assembly_id} not found in assembly_gen table.")
+            warning(f"Assembly {assembly_id} not found in assembly_gen table.")
             return [], {}
 
         chain_id_list: List[str] = []
@@ -258,7 +258,7 @@ class AssemblyMixin:
             for oper_id in oper_ids:
                 oper = operations.get(str(oper_id))
                 if oper is None:
-                    print(f"WARNING: Operation {oper_id} not found; skipping.")
+                    warning(f"Operation {oper_id} not found; skipping.")
                     continue
                 is_identity = 'identity' in oper.get('type', '').lower()
                 for orig_chain in gen_chains:
@@ -272,7 +272,7 @@ class AssemblyMixin:
                             seen.add(orig_chain)
                     else:
                         # Create a synthetic chain with transformed coordinates
-                        new_chain_id = f"{orig_chain}_op{oper_id}"
+                        new_chain_id = f"{orig_chain}-{oper_id}"
                         if new_chain_id not in seen:
                             # Parse and transform atoms for this chain
                             orig_atoms = self.parse_atom_records(orig_chain)
@@ -290,8 +290,7 @@ class AssemblyMixin:
                                     self._assembly_entity_types[new_chain_id] = et
                                 seen.add(new_chain_id)
                             else:
-                                print(f"WARNING: No atoms for chain {orig_chain}; "
-                                      f"skipping synthetic chain {new_chain_id}.")
+                                warning(f"No atoms for chain {orig_chain}; "
+                                        f"skipping synthetic chain {new_chain_id}.")
 
         return chain_id_list, synthetic_cache
-
