@@ -7,6 +7,6 @@ sequences:
       msa: empty
 
 templates:
-  - cif: /workspace/examples/inpainting/1CK4_chainA.cif
+  - cif: /store/wowjason/tools/patchr/examples/inpainting/1CK4_chainA.cif
     chain_id: 'A'
-    inpainting_metadata: /workspace/examples/inpainting/1ck4_A_inpainting_metadata.json
+    inpainting_metadata: /store/wowjason/tools/patchr/examples/inpainting/1ck4_A_inpainting_metadata.json

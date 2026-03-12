@@ -51,10 +51,10 @@ MPS is supported but runs significantly slower than CUDA. CPU fallback is also a
 
 ```bash
 # 1. Generate template from PDB
-patchr template 4ZLO A,B
+patchr template 4ZLO
 
 # 2. Run prediction
-patchr predict examples/inpainting/4zlo_AB.yaml --out_dir results
+patchr predict examples/inpainting/4zlo_ACDB-2.yaml --out_dir results
 ```
 
 The first run downloads the Boltz-2 checkpoint (~1.5 GB) to `~/.boltz/`.
@@ -68,7 +68,7 @@ The first run downloads the Boltz-2 checkpoint (~1.5 GB) to `~/.boltz/`.
 ### Basic Usage
 
 ```bash
-# From PDB ID with specific chains
+# From PDB ID with specific chains (polymer)
 patchr template 4ZLO A,B
 
 # From PDB ID with UniProt sequence (includes terminal extensions)
@@ -117,7 +117,7 @@ patchr template 7EOQ A --interactive
 
 ```bash
 # Include solvent atoms in template CIF
-patchr template 7EOQ A --include-solvent
+patchr template 4ZLO --include-solvent
 
 # Exclude ligands from template
 patchr template 4LRF A --exclude-ligands

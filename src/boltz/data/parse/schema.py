@@ -552,7 +552,7 @@ def get_template_records_from_search(
     """Get template records from an alignment."""
     # For inpainting: preserve 1:1 chain name mapping when possible.
     # linear_sum_assignment can swap homo-oligomer chains if modification counts differ
-    # (e.g., template AA has 6 SEP/TPO but A_op2 has 3, causing cross-chain mapping).
+    # (e.g., template AA has 6 SEP/TPO but A-2 has 3, causing cross-chain mapping).
     preserve_order = False
     if len(chain_ids) == len(template_chain_ids):
         # If every query chain name exists in template chain names with same order, use direct mapping

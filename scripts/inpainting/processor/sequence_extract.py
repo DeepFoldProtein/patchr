@@ -1,8 +1,8 @@
 """SEQRES and atom-based sequence extraction from CIF."""
-import sys
 from typing import Dict, List, Optional
 
 from ..constants import STANDARD_AA_THREE_LETTER
+from .log import info, warning, fatal
 
 
 class SequenceExtractMixin:
@@ -29,9 +29,9 @@ class SequenceExtractMixin:
                     asym_entity_ids = cif_dict['_struct_asym.entity_id']
 
                     # Find entity_id for our chain.
-                    # Primary: use base ID (strips _op<N> suffix for assembly synthetic chains).
+                    # Primary: use base ID (strips -<N> suffix for assembly synthetic chains).
                     # Fallback: try the full chain_id directly — needed when the input CIF is
-                    # already a generated template that embeds synthetic chains (e.g. A_op2) as
+                    # already a generated template that embeds synthetic chains (e.g. A-2) as
                     # real label_asym_id entries in its struct_asym table.
                     target_entity_id = None
                     for asym_id, entity_id in zip(asym_ids, asym_entity_ids):
@@ -45,9 +45,9 @@ class SequenceExtractMixin:
                                 break
 
                     if target_entity_id is None:
-                        print(f"WARNING: Could not find entity mapping for chain {chain_id}, skipping", file=sys.stderr)
+                        warning(f"Could not find entity mapping for chain {chain_id}, skipping")
                         return ""
-                    
+
                     # Determine entity type for this chain
                     # First try to get from chain_entity_types (if already set)
                     # Otherwise, determine from actual atoms
@@ -58,16 +58,16 @@ class SequenceExtractMixin:
                             label_asym_ids = cif_dict['_atom_site.label_asym_id']
                             label_comp_ids = cif_dict['_atom_site.label_comp_id']
                             group_pdb = cif_dict.get('_atom_site.group_PDB', [])
-                            
+
                             chain_residues = set()
                             for i, chain in enumerate(label_asym_ids):
                                 if chain.upper() == chain_id.upper() and (i >= len(group_pdb) or group_pdb[i] == 'ATOM'):
                                     if i < len(label_comp_ids):
                                         chain_residues.add(label_comp_ids[i])
-                            
+
                             dna_rna_residues = {'DA', 'DC', 'DG', 'DT', 'DI', 'A', 'C', 'G', 'T', 'U', 'I'}
-                            protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE', 
-                                                'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
+                            protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE',
+                                                'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                                 'THR', 'VAL', 'TRP', 'TYR'}
                             has_dna_rna = bool(chain_residues & dna_rna_residues)
                             has_protein = bool(chain_residues & protein_residues)
@@ -82,7 +82,7 @@ class SequenceExtractMixin:
                                 entity_type = 'protein'  # Default
                         else:
                             entity_type = 'protein'  # Default
-                    
+
                     # Extract sequence for this entity
                     # Protein codes
                     aa_codes = {
@@ -92,20 +92,20 @@ class SequenceExtractMixin:
                         'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S',
                         'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'
                     }
-                    
+
                     # DNA codes (3-letter to 1-letter)
                     dna_codes = {
                         'DA': 'A', 'DC': 'C', 'DG': 'G', 'DT': 'T',
                         'DI': 'I',  # Inosine
                         'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T'  # Sometimes just single letter
                     }
-                    
+
                     # RNA codes
                     rna_codes = {
                         'A': 'A', 'C': 'C', 'G': 'G', 'U': 'U',
                         'I': 'I'  # Inosine
                     }
-                    
+
                     # Select appropriate code mapping
                     if entity_type == 'dna':
                         code_map = dna_codes
@@ -113,24 +113,24 @@ class SequenceExtractMixin:
                         code_map = rna_codes
                     else:
                         code_map = aa_codes
-                    
+
                     sequence = []
                     seqres_entity_type = None  # Detect entity type from SEQRES residues
-                    
+
                     # First pass: collect all mon_ids for this entity to detect type
                     entity_mon_ids = []
                     for mon_id, entity_id in zip(mon_ids, entity_ids):
                         if entity_id == target_entity_id:
                             entity_mon_ids.append(mon_id.upper())
-                    
+
                     # Detect entity type from all residues (not just first)
                     # Check for RNA first (U is definitive)
                     has_u = any(mon_id == 'U' for mon_id in entity_mon_ids)
                     has_da_dt = any(mon_id in ['DA', 'DT'] for mon_id in entity_mon_ids)
-                    has_protein = any(mon_id in ['ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE', 
-                                                  'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
+                    has_protein = any(mon_id in ['ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE',
+                                                  'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                                   'THR', 'VAL', 'TRP', 'TYR'] for mon_id in entity_mon_ids)
-                    
+
                     if has_protein:
                         seqres_entity_type = 'protein'
                     elif has_u:
@@ -145,7 +145,7 @@ class SequenceExtractMixin:
                             seqres_entity_type = 'dna'  # Default to DNA if no U
                     else:
                         seqres_entity_type = 'protein'  # Default
-                    
+
                     # Second pass: convert to sequence
                     # Also track non-standard residues with their sequence positions
                     seq_num = 0  # 1-based position in sequence
@@ -153,7 +153,7 @@ class SequenceExtractMixin:
                         if entity_id == target_entity_id:
                             seq_num += 1
                             mon_id_upper = mon_id.upper()
-                            
+
                             # Convert 3-letter to 1-letter code
                             if seqres_entity_type == 'dna':
                                 # DNA: DA, DC, DG, DT or sometimes just A, C, G, T
@@ -165,10 +165,10 @@ class SequenceExtractMixin:
                                 # Protein: non-standard residues use X (parent from CCD in parse_non_standard_residues)
                                 base = aa_codes.get(mon_id, 'X')
                             sequence.append(base)
-                    
+
                     sequence_str = ''.join(sequence)
-                    
-                    # If SEQRES entity type doesn't match actual atom entity type, 
+
+                    # If SEQRES entity type doesn't match actual atom entity type,
                     # we need to extract from atoms instead
                     # EXCEPTION: DNA/RNA mismatch is OK (they're both nucleic acids, just T vs U difference)
                     if seqres_entity_type and seqres_entity_type != entity_type:
@@ -177,54 +177,52 @@ class SequenceExtractMixin:
                             {seqres_entity_type, entity_type} <= {'dna', 'rna'}
                         )
                         if not both_nucleic_acids:
-                            print(f"WARNING: SEQRES entity type ({seqres_entity_type}) doesn't match atom entity type ({entity_type}) for chain {chain_id}")
-                            print(f"Extracting sequence from atoms instead")
+                            warning(f"SEQRES entity type ({seqres_entity_type}) doesn't match atom entity type ({entity_type}) for chain {chain_id}")
+                            info(f"Extracting sequence from atoms instead")
                             return self.extract_sequence_from_atoms(chain_id)
                         else:
-                            print(f"INFO: SEQRES entity type ({seqres_entity_type}) and atom entity type ({entity_type}) are both nucleic acids, using SEQRES")
-                    
-                    print(f"Found SEQRES sequence for chain {chain_id} (entity {target_entity_id}, type: {entity_type}, length: {len(sequence_str)})")
+                            info(f"SEQRES entity type ({seqres_entity_type}) and atom entity type ({entity_type}) are both nucleic acids, using SEQRES")
+
+                    info(f"Found SEQRES sequence for chain {chain_id} (entity {target_entity_id}, type: {entity_type}, length: {len(sequence_str)})")
                     return sequence_str
-            
+
             # Fallback: extract from atoms if entity_poly_seq is not available
-            print(f"WARNING: Could not extract SEQRES from entity_poly_seq for chain {chain_id}, extracting from atoms")
+            warning(f"Could not extract SEQRES from entity_poly_seq for chain {chain_id}, extracting from atoms")
             return self.extract_sequence_from_atoms(chain_id)
-            
+
         except Exception as e:
-            print(f"ERROR: Error parsing CIF file: {e}", file=sys.stderr)
-            sys.exit(1)
-    
+            fatal(f"Error parsing CIF file: {e}")
+
     def extract_sequence_from_atoms(self, chain_id: str) -> str:
         """Extract sequence from actual atom records when SEQRES is unavailable or incorrect."""
         if not self.cif_content:
             raise ValueError("CIF content not loaded")
-        
+
         try:
             cif_dict = self._get_cif_dict()
-            
+
             # Get atom records for this chain
             # Use label_asym_id (not auth_asym_id) to match with struct_asym.id
             if '_atom_site.label_asym_id' not in cif_dict or '_atom_site.label_comp_id' not in cif_dict:
-                print(f"ERROR: Could not find atom records for chain {chain_id}", file=sys.stderr)
-                sys.exit(1)
-            
+                fatal(f"Could not find atom records for chain {chain_id}")
+
             label_asym_ids = cif_dict['_atom_site.label_asym_id']
             label_comp_ids = cif_dict['_atom_site.label_comp_id']
             label_seq_ids = cif_dict.get('_atom_site.label_seq_id', [])
             auth_seq_ids = cif_dict.get('_atom_site.auth_seq_id', [])
             group_pdb = cif_dict.get('_atom_site.group_PDB', [])
-            
+
             # Collect residues for this chain
             # Include ATOM records AND HETATM that are non-standard residues (part of polymer sequence)
             residue_dict = {}  # seq_id -> comp_id
-            
+
             for i, chain in enumerate(label_asym_ids):
                 # Match case-insensitively
                 if chain.upper() == chain_id.upper():
                     if i < len(label_comp_ids):
                         comp_id = label_comp_ids[i]
                         record_type = group_pdb[i] if i < len(group_pdb) else 'ATOM'
-                        
+
                         # Include ATOM records OR HETATM that are non-standard (e.g. modifications)
                         is_non_standard = comp_id.upper() not in STANDARD_AA_THREE_LETTER
                         if record_type == 'ATOM' or (record_type == 'HETATM' and is_non_standard):
@@ -235,14 +233,14 @@ class SequenceExtractMixin:
                                 label_seq_str = str(label_seq_id).strip()
                                 if label_seq_str and label_seq_str not in ['?', '.', '']:
                                     seq_id = label_seq_id
-                            
+
                             # If label_seq_id is not available, try auth_seq_id
                             if seq_id is None and i < len(auth_seq_ids):
                                 auth_seq_id = auth_seq_ids[i]
                                 auth_seq_str = str(auth_seq_id).strip()
                                 if auth_seq_str and auth_seq_str not in ['?', '.', '']:
                                     seq_id = auth_seq_id
-                            
+
                             if seq_id is not None:
                                 try:
                                     seq_id_int = int(str(seq_id).strip())
@@ -252,13 +250,13 @@ class SequenceExtractMixin:
                                 except (ValueError, AttributeError):
                                     # Skip if seq_id cannot be converted to int
                                     pass
-            
+
             # Determine entity type from actual residues found
             # Check what types of residues are present
             residue_types = set(residue_dict.values())
             dna_rna_residues = {'DA', 'DC', 'DG', 'DT', 'DI', 'A', 'C', 'G', 'T', 'U', 'I'}
-            protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE', 
-                                'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER', 
+            protein_residues = {'ALA', 'CYS', 'ASP', 'GLU', 'PHE', 'GLY', 'HIS', 'ILE',
+                                'LYS', 'LEU', 'MET', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                 'THR', 'VAL', 'TRP', 'TYR'}
             has_dna_rna = bool(residue_types & dna_rna_residues)
             has_protein = bool(residue_types & protein_residues)
@@ -273,7 +271,7 @@ class SequenceExtractMixin:
             else:
                 # Fall back to chain_entity_types if available, otherwise default to protein
                 entity_type = self.chain_entity_types.get(chain_id, 'protein')
-            
+
             # Protein codes
             aa_codes = {
                 'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E',
@@ -282,18 +280,18 @@ class SequenceExtractMixin:
                 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S',
                 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'
             }
-            
+
             # DNA codes
             dna_codes = {
                 'DA': 'A', 'DC': 'C', 'DG': 'G', 'DT': 'T',
                 'DI': 'I', 'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T'
             }
-            
+
             # RNA codes
             rna_codes = {
                 'A': 'A', 'C': 'C', 'G': 'G', 'U': 'U', 'I': 'I'
             }
-            
+
             # Select appropriate code mapping
             if entity_type == 'dna':
                 code_map = dna_codes
@@ -301,21 +299,19 @@ class SequenceExtractMixin:
                 code_map = rna_codes
             else:
                 code_map = aa_codes
-            
+
             # Build sequence
             sequence = []
             for seq_id in sorted(residue_dict.keys()):
                 comp_id = residue_dict[seq_id]
                 comp_id_upper = comp_id.upper()
-                
+
                 one_letter = code_map.get(comp_id, 'X' if entity_type == 'protein' else 'N')
                 sequence.append(one_letter)
-            
+
             sequence_str = ''.join(sequence)
-            print(f"Extracted sequence from atoms for chain {chain_id} (type: {entity_type}, length: {len(sequence_str)})")
+            info(f"Extracted sequence from atoms for chain {chain_id} (type: {entity_type}, length: {len(sequence_str)})")
             return sequence_str
-            
+
         except Exception as e:
-            print(f"ERROR: Error extracting sequence from atoms: {e}", file=sys.stderr)
-            sys.exit(1)
-    
+            fatal(f"Error extracting sequence from atoms: {e}")
