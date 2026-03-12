@@ -1,6 +1,8 @@
 """Atom record parsing, solvent extraction, and renumbering."""
-import sys
+import re
 from typing import Dict, List, Optional
+
+from .log import info, fatal
 
 
 class AtomParseMixin:
@@ -12,16 +14,15 @@ class AtomParseMixin:
 
         if not self.cif_content:
             raise ValueError("CIF content not loaded")
-        
+
         try:
             # Parse using BioPython
             cif_dict = self._get_cif_dict()
-            
+
             # Get all atom_site fields
             if '_atom_site.group_PDB' not in cif_dict:
-                print("ERROR: No atom_site information found in CIF file", file=sys.stderr)
-                sys.exit(1)
-            
+                fatal("No atom_site information found in CIF file")
+
             # Extract atoms for our chain
             atoms = []
             n_atoms = len(cif_dict['_atom_site.group_PDB'])
@@ -34,7 +35,7 @@ class AtomParseMixin:
                 all_models = sorted({m for m in model_nums if m not in ('?', '.')}, key=lambda x: int(x) if x.isdigit() else 0)
                 first_model = all_models[0] if all_models else None
                 if first_model and len(all_models) > 1:
-                    print(f"Multi-model structure detected ({len(all_models)} models); using model {first_model} only")
+                    info(f"Multi-model structure detected ({len(all_models)} models); using model {first_model} only")
             else:
                 first_model = None
 
@@ -62,7 +63,7 @@ class AtomParseMixin:
                             if i < len(fallback_list):
                                 return fallback_list[i]
                         return fallback_value if fallback_value is not None else '?'
-                    
+
                     atom = {
                         'group_PDB': cif_dict['_atom_site.group_PDB'][i],
                         'id': cif_dict['_atom_site.id'][i],
@@ -99,7 +100,7 @@ class AtomParseMixin:
                             if i < len(fallback_list):
                                 return fallback_list[i]
                         return fallback_value if fallback_value is not None else '?'
-                    
+
                     atom = {
                         'group_PDB': cif_dict['_atom_site.group_PDB'][i],
                         'id': cif_dict['_atom_site.id'][i],
@@ -124,14 +125,13 @@ class AtomParseMixin:
                         'pdbx_PDB_model_num': get_field('_atom_site.pdbx_PDB_model_num', '1')
                     }
                     atoms.append(atom)
-            
-            print(f"Parsed {len(atoms)} atoms for chain {chain_id}")
+
+            info(f"Parsed {len(atoms)} atoms for chain {chain_id}")
             return atoms
-            
+
         except Exception as e:
-            print(f"ERROR: Error parsing atom records: {e}", file=sys.stderr)
-            sys.exit(1)
-    
+            fatal(f"Error parsing atom records: {e}")
+
 
     def _extract_solvent_atoms(self) -> List[Dict]:
         """Extract water (and other solvent) atoms from CIF for --include-solvent."""
@@ -203,16 +203,16 @@ class AtomParseMixin:
                 'auth_atom_id': get_f('_atom_site.auth_atom_id', '?'),
                 'pdbx_PDB_model_num': get_f('_atom_site.pdbx_PDB_model_num', '1'),
             })
-        print(f"Included {len(atoms)} solvent (water) atoms from {len(solvent_asym_ids)} chain(s): {sorted(solvent_asym_ids)}")
+        info(f"Included {len(atoms)} solvent (water) atoms from {len(solvent_asym_ids)} chain(s): {sorted(solvent_asym_ids)}")
         return atoms
-    
+
     def renumber_atoms(self, atoms: List[Dict], residue_mapping: Dict[int, int]) -> List[Dict]:
         """Renumber atoms with new residue numbering starting from 1.
-        
+
         residue_mapping: Dict[sequential_index, SEQRES_position]
         """
         renumbered_atoms = []
-        
+
         # Build reverse mapping: (auth_seq_id_base, ins_code) -> sequential_index -> SEQRES position
         key_to_seqres = {}
         for seq_idx, seqres_pos in residue_mapping.items():
@@ -225,35 +225,33 @@ class AtomParseMixin:
             ins_code = atom.get('pdbx_PDB_ins_code', '?')
             if ins_code == '?':
                 ins_code = ''
-            
+
             # Parse base number
-            import re
             match = re.match(r'^(-?\d+)', auth_seq_id_str)
             if not match:
                 continue
             auth_seq_id_base = int(match.group(1))
-            
+
             residue_key = (auth_seq_id_base, ins_code)
-            
+
             # Skip residues that were removed (e.g., in UniProt mode)
             if residue_key not in key_to_seqres:
                 continue
-            
+
             new_seq_id = key_to_seqres[residue_key]
-            
+
             new_atom = atom.copy()
             # Update both label_seq_id and auth_seq_id - remove insertion codes
             new_atom['label_seq_id'] = str(new_seq_id)
             new_atom['auth_seq_id'] = str(new_seq_id)
             new_atom['pdbx_PDB_ins_code'] = '?'  # Remove insertion code
-            
+
             renumbered_atoms.append(new_atom)
-        
-        print(f"Renumbered {len(renumbered_atoms)} atoms")
+
+        info(f"Renumbered {len(renumbered_atoms)} atoms")
         return renumbered_atoms
-    
+
 
     # ------------------------------------------------------------------
     # Assembly selection methods
     # ------------------------------------------------------------------
-

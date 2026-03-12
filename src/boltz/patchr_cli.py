@@ -15,17 +15,119 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
-import click
+import rich_click as click
+from rich.console import Console
+
+_console = Console(highlight=False)
+
+LOGO = r"""[bold cyan]
+██████╗  █████╗ ████████╗ ██████╗██╗  ██╗██████╗
+██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ██║██╔══██╗
+██████╔╝███████║   ██║   ██║     ███████║██████╔╝
+██╔═══╝ ██╔══██║   ██║   ██║     ██╔══██║██╔══██╗
+██║     ██║  ██║   ██║   ╚██████╗██║  ██║██║  ██║
+╚═╝     ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝[/]
+[dim]Diffusion-based structure completion for proteins, DNA, RNA, and complexes[/]
+"""
+
+click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.SHOW_ARGUMENTS = True
+click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
+click.rich_click.STYLE_ERRORS_SUGGESTION = "bold italic"
+click.rich_click.ERRORS_SUGGESTION = "Try the '--help' flag for more information."
+click.rich_click.COMMAND_GROUPS = {
+    "patchr": [
+        {
+            "name": "Workflows",
+            "commands": ["template", "predict"],
+        },
+        {
+            "name": "Services",
+            "commands": ["serve"],
+        },
+        {
+            "name": "Post-processing",
+            "commands": ["sim-ready"],
+        },
+    ],
+}
+click.rich_click.OPTION_GROUPS = {
+    "patchr predict": [
+        {
+            "name": "Input / Output",
+            "options": ["data", "--out_dir", "--output_format", "--override"],
+        },
+        {
+            "name": "Backend",
+            "options": ["--backend", "--cache", "--checkpoint", "--devices",
+                        "--accelerator", "--no_kernels"],
+        },
+        {
+            "name": "Sampling",
+            "options": ["--recycling_steps", "--sampling_steps",
+                        "--diffusion_samples", "--max_parallel_samples",
+                        "--step_scale", "--seed", "--seeds", "--method"],
+        },
+        {
+            "name": "MSA",
+            "options": ["--use_msa_server", "--msa_server_url",
+                        "--msa_pairing_strategy", "--max_msa_seqs",
+                        "--subsample_msa", "--num_subsampled_msa",
+                        "--preprocessing-threads"],
+        },
+        {
+            "name": "Inpainting",
+            "options": ["--inpainting", "--disable_boundary_refinement",
+                        "--use_potentials"],
+        },
+        {
+            "name": "Extra output",
+            "options": ["--write_full_pae", "--write_full_pde",
+                        "--write_embeddings"],
+        },
+        {
+            "name": "Post-processing",
+            "options": ["--sim-ready", "--ff"],
+        },
+    ],
+    "patchr template": [
+        {
+            "name": "Input",
+            "options": ["pdb_id", "chain_ids", "--input"],
+        },
+        {
+            "name": "Sequence",
+            "options": ["--uniprot", "--sequence", "--interactive"],
+        },
+        {
+            "name": "Assembly",
+            "options": ["--assembly", "--list-assemblies"],
+        },
+        {
+            "name": "Output",
+            "options": ["--out_dir", "--format", "--skip-terminal",
+                        "--include-solvent", "--exclude-ligands"],
+        },
+    ],
+}
+
+
+def _print_logo() -> None:
+    _console.print(LOGO)
 
 
 # ---------------------------------------------------------------------------
 # Top-level CLI group
 # ---------------------------------------------------------------------------
 
-@click.group()
+@click.group("patchr", invoke_without_command=True)
 @click.version_option(package_name="patchr")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """PATCHR — diffusion-based structure completion for proteins, DNA, RNA, and complexes."""
+    if ctx.invoked_subcommand is None:
+        _print_logo()
+        click.echo(ctx.get_help())
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +147,7 @@ def cli() -> None:
     "--cache",
     type=click.Path(exists=False),
     default=None,
-    help="Model/data cache directory (default: ~/.boltz or $BOLTZ_CACHE).",
+    help="Model/data cache directory. Boltz: defaults to ~/.boltz or $BOLTZ_CACHE. Protenix: defaults to ~/ or $PROTENIX_ROOT_DIR.",
 )
 @click.option("--checkpoint", type=click.Path(exists=True), default=None, help="Custom model checkpoint.")
 @click.option("--devices", type=int, default=1, help="Number of devices. Default: 1.")
@@ -145,6 +247,7 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
         _predict_protenix(
             data=data,
             out_dir=out_dir,
+            cache=cache,
             recycling_steps=recycling_steps,
             sampling_steps=sampling_steps,
             diffusion_samples=diffusion_samples,
@@ -498,6 +601,7 @@ def _predict_boltz(
 def _predict_protenix(
     data: str,
     out_dir: str,
+    cache: Optional[str],
     recycling_steps: int,
     sampling_steps: int,
     diffusion_samples: int,
@@ -528,6 +632,20 @@ def _predict_protenix(
 
     model_name = "protenix_base_default_v1.0.0"
     inference_configs["model_name"] = model_name
+
+    # Override cache directory if --cache is provided.
+    # Sets both the checkpoint dir and the PROTENIX_ROOT_DIR so data caches
+    # (CCD components, cluster files, etc.) also land under the same tree.
+    if cache is not None:
+        cache_path = Path(cache).expanduser()
+        cache_path.mkdir(parents=True, exist_ok=True)
+        os.environ["PROTENIX_ROOT_DIR"] = str(cache_path)
+        inference_configs["load_checkpoint_dir"] = str(cache_path / "checkpoint")
+        for key in ("ccd_components_file", "ccd_components_rdkit_mol_file",
+                     "pdb_cluster_file", "obsolete_release_data_csv"):
+            if key in data_configs:
+                basename = Path(data_configs[key]).name
+                data_configs[key] = str(cache_path / "common" / basename)
 
     # Parse seeds
     seed_list = [101]

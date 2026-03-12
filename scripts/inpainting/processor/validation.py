@@ -1,17 +1,17 @@
 """Missing atom checks and inpainting region detection."""
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..constants import ref_atoms
+from .log import info, detail, section
 
 
 class ValidationMixin:
     def check_missing_atoms(self, atoms: List[Dict], residue_mapping: Dict[int, int], final_sequence: str):
         """
         Check for missing atoms in each residue and log them.
-        
+
         Args:
             atoms: List of atom dictionaries
             residue_mapping: Mapping from sequential index to SEQRES position
@@ -23,45 +23,45 @@ class ValidationMixin:
             if hasattr(self, '_residue_index_to_key'):
                 key = self._residue_index_to_key[seq_idx]
                 key_to_seqres[key] = seqres_pos
-        
+
         # Group atoms by residue (using new numbering)
         # Use set to handle alternative locations
         residue_atoms = {}
         residue_types = {}
-        
+
         for atom in atoms:
             # Extract residue key from atom
             auth_seq_id_str = str(atom['auth_seq_id']).strip()
             ins_code = atom.get('pdbx_PDB_ins_code', '?')
             if ins_code == '?':
                 ins_code = ''
-            
+
             # Parse base number
             import re
             match = re.match(r'^(-?\d+)', auth_seq_id_str)
             if not match:
                 continue
             auth_seq_id_base = int(match.group(1))
-            
+
             residue_key = (auth_seq_id_base, ins_code)
-            
+
             # Skip residues that were removed (e.g., in UniProt mode)
             if residue_key not in key_to_seqres:
                 continue
-            
+
             new_seq_id = key_to_seqres[residue_key]
-            
+
             if new_seq_id not in residue_atoms:
                 residue_atoms[new_seq_id] = set()
                 residue_types[new_seq_id] = atom['label_comp_id']
-            
+
             # Add atom name to set (automatically handles duplicates from alt locs)
             residue_atoms[new_seq_id].add(atom['label_atom_id'])
-        
+
         # Check for missing atoms
         missing_atoms_log = []
         total_missing = 0
-        
+
         # Convert 1-letter to 3-letter codes
         aa_one_to_three = {
             'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU',
@@ -70,7 +70,7 @@ class ValidationMixin:
             'P': 'PRO', 'Q': 'GLN', 'R': 'ARG', 'S': 'SER',
             'T': 'THR', 'V': 'VAL', 'W': 'TRP', 'Y': 'TYR'
         }
-        
+
         # Only check residues that exist in the structure
         for seq_pos in sorted(residue_atoms.keys()):
             # Get residue type from sequence (not from structure)
@@ -79,11 +79,11 @@ class ValidationMixin:
                 aa_three_letter = aa_one_to_three.get(aa_one, 'UNK')
             else:
                 aa_three_letter = 'UNK'
-            
+
             expected_atoms = set(ref_atoms.get(aa_three_letter, ref_atoms.get("UNK", [])))
             actual_atoms = residue_atoms[seq_pos]  # Already a set
             missing_atoms = expected_atoms - actual_atoms
-            
+
             if missing_atoms:
                 missing_atoms_log.append({
                     'residue': seq_pos,
@@ -93,31 +93,23 @@ class ValidationMixin:
                     'actual_count': len(actual_atoms)
                 })
                 total_missing += len(missing_atoms)
-        
+
         # Log missing atoms
         if missing_atoms_log and self.verbose:
-            print(f"\n{'='*60}")
-            print("MISSING ATOMS IN RESIDUES:")
-            print(f"{'='*60}")
-            print(f"Total residues with missing atoms: {len(missing_atoms_log)}")
-            print(f"Total missing atoms: {total_missing}")
-            print("")
-            
+            section("MISSING ATOMS IN RESIDUES")
+            info(f"Total residues with missing atoms: {len(missing_atoms_log)}")
+            info(f"Total missing atoms: {total_missing}")
+
             for entry in missing_atoms_log:
-                print(f"  Residue {entry['residue']} ({entry['type']}): "
-                      f"missing {len(entry['missing'])}/{entry['expected_count']} atoms")
-                print(f"    Missing atoms: {', '.join(entry['missing'])}")
-                print(f"    Present atoms: {entry['actual_count']}")
-            
-            print(f"{'='*60}\n")
+                detail(f"Residue {entry['residue']} ({entry['type']}): "
+                       f"missing {len(entry['missing'])}/{entry['expected_count']} atoms")
+                detail(f"  Missing atoms: {', '.join(entry['missing'])}")
+                detail(f"  Present atoms: {entry['actual_count']}")
         elif not missing_atoms_log:
             if self.verbose:
-                print(f"\n{'='*60}")
-                print("MISSING ATOMS CHECK:")
-                print(f"{'='*60}")
-                print("  No missing atoms found in residues with structure!")
-                print(f"{'='*60}\n")
-    
+                section("MISSING ATOMS CHECK")
+                detail("No missing atoms found in residues with structure!")
+
     def determine_inpainting_region(self, atoms: List[Dict], residue_mapping: Dict[int, int], final_sequence: str) -> Tuple[Tuple[int, int], Dict[str, Any]]:
         """
         Determine the inpainting region (missing residues) by checking atom presence per residue.
@@ -139,42 +131,42 @@ class ValidationMixin:
             if hasattr(self, '_residue_index_to_key'):
                 key = self._residue_index_to_key[seq_idx]
                 key_to_seqres[key] = seqres_pos
-        
+
         # Group atoms by residue (using new numbering)
         residue_atoms = {}
         residue_types = {}
-        
+
         for atom in atoms:
             # Extract residue key from atom
             auth_seq_id_str = str(atom['auth_seq_id']).strip()
             ins_code = atom.get('pdbx_PDB_ins_code', '?')
             if ins_code == '?':
                 ins_code = ''
-            
+
             # Parse base number
             import re
             match = re.match(r'^(-?\d+)', auth_seq_id_str)
             if not match:
                 continue
             auth_seq_id_base = int(match.group(1))
-            
+
             residue_key = (auth_seq_id_base, ins_code)
-            
+
             # Skip residues that were removed (e.g., in UniProt mode)
             if residue_key not in key_to_seqres:
                 continue
-            
+
             new_seq_id = key_to_seqres[residue_key]
-            
+
             if new_seq_id not in residue_atoms:
                 residue_atoms[new_seq_id] = set()
                 residue_types[new_seq_id] = atom['label_comp_id']
-            
+
             residue_atoms[new_seq_id].add(atom['label_atom_id'])
-        
+
         # Sequence length
         seq_length = len(final_sequence)
-        
+
         # Convert 1-letter to 3-letter codes
         aa_one_to_three = {
             'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU',
@@ -183,12 +175,12 @@ class ValidationMixin:
             'P': 'PRO', 'Q': 'GLN', 'R': 'ARG', 'S': 'SER',
             'T': 'THR', 'V': 'VAL', 'W': 'TRP', 'Y': 'TYR'
         }
-        
+
         # Classify each residue based on atom presence
         residues_fully_fixed = []
         residues_partially_fixed = []
         residues_fully_inpainted = []
-        
+
         for seq_pos in range(1, seq_length + 1):
             # Get residue type from sequence (not from structure)
             if seq_pos <= len(final_sequence):
@@ -196,7 +188,7 @@ class ValidationMixin:
                 aa_three_letter = aa_one_to_three.get(aa_one, 'UNK')
             else:
                 aa_three_letter = 'UNK'
-            
+
             # For non-standard residues (X), use actual structure atoms as expected set
             # since ref_atoms only covers standard amino acids (NAG, etc. have different atom names)
             if aa_three_letter == 'UNK' and seq_pos in residue_atoms:
@@ -214,7 +206,7 @@ class ValidationMixin:
                 # Only count atoms that are in ref_atoms (exclude hydrogen and other non-standard atoms)
                 all_actual_atoms = residue_atoms[seq_pos]
                 actual_atoms = all_actual_atoms & expected_atoms  # Intersection: only ref_atoms
-                
+
                 if len(actual_atoms) == len(expected_atoms):
                     # All expected atoms present
                     residues_fully_fixed.append(seq_pos)
@@ -227,7 +219,7 @@ class ValidationMixin:
             else:
                 # No structure at all for this residue
                 residues_fully_inpainted.append(seq_pos)
-        
+
         # Format residue ranges for output (similar to boltz2.py _format_residue_ranges)
         def format_residue_ranges(residue_list):
             if not residue_list:
@@ -236,7 +228,7 @@ class ValidationMixin:
             ranges = []
             start = residue_list[0]
             end = residue_list[0]
-            
+
             for i in range(1, len(residue_list)):
                 if residue_list[i] == end + 1:
                     end = residue_list[i]
@@ -247,41 +239,39 @@ class ValidationMixin:
                         ranges.append(f"{start} - {end}")
                     start = residue_list[i]
                     end = residue_list[i]
-            
+
             if start == end:
                 ranges.append(str(start))
             else:
                 ranges.append(f"{start} - {end}")
-            
+
             return ", ".join(ranges)
-        
+
         # Log inpainting regions (matching boltz2.py format)
         if self.verbose:
-            print(f"\n{'='*60}")
-            print("INPAINTING REGIONS (residue-level analysis):")
-            print(f"{'='*60}")
-            print(f"  Total residues: {seq_length}")
-            print(f"  Residues FULLY FIXED (all atoms have structure): {len(residues_fully_fixed)}")
+            section("INPAINTING REGIONS (residue-level analysis)")
+            detail(f"Total residues: {seq_length}")
+            detail(f"Residues FULLY FIXED (all atoms have structure): {len(residues_fully_fixed)}")
             if residues_fully_fixed:
                 fully_fixed_ranges = format_residue_ranges(residues_fully_fixed)
-                print(f"    Residues: {fully_fixed_ranges}")
+                detail(f"  Residues: {fully_fixed_ranges}")
             else:
-                print("    Residues: (none)")
-            
-            print(f"  Residues PARTIALLY FIXED (some atoms have structure, some need inpainting): {len(residues_partially_fixed)}")
+                detail("  Residues: (none)")
+
+            detail(f"Residues PARTIALLY FIXED (some atoms have structure, some need inpainting): {len(residues_partially_fixed)}")
             if residues_partially_fixed:
                 for res_idx, fixed_atoms, total_atoms in residues_partially_fixed:
-                    print(f"    Residue {res_idx}: {fixed_atoms}/{total_atoms} atoms fixed")
+                    detail(f"  Residue {res_idx}: {fixed_atoms}/{total_atoms} atoms fixed")
             else:
-                print("    Residues: (none)")
-            
-            print(f"  Residues FULLY INPAINTED (no atoms have structure): {len(residues_fully_inpainted)}")
+                detail("  Residues: (none)")
+
+            detail(f"Residues FULLY INPAINTED (no atoms have structure): {len(residues_fully_inpainted)}")
             if residues_fully_inpainted:
                 fully_inpainted_ranges = format_residue_ranges(residues_fully_inpainted)
-                print(f"    Residues: {fully_inpainted_ranges}")
+                detail(f"  Residues: {fully_inpainted_ranges}")
             else:
-                print("    Residues: (none)")
-        
+                detail("  Residues: (none)")
+
         # Calculate total atoms (used below for return value; prints only when verbose)
         # Convert 1-letter to 3-letter codes
         aa_one_to_three = {
@@ -291,7 +281,7 @@ class ValidationMixin:
             'P': 'PRO', 'Q': 'GLN', 'R': 'ARG', 'S': 'SER',
             'T': 'THR', 'V': 'VAL', 'W': 'TRP', 'Y': 'TYR'
         }
-        
+
         # Count only ref_atoms (exclude hydrogen and other non-standard atoms)
         total_atoms_with_structure = 0
         total_expected_atoms = 0
@@ -317,12 +307,11 @@ class ValidationMixin:
                     all_actual_atoms = residue_atoms[seq_pos]
                     actual_ref_atoms = all_actual_atoms & expected_atoms  # Intersection: only ref_atoms
                     total_atoms_with_structure += len(actual_ref_atoms)
-        
+
         if self.verbose:
-            print(f"  Total atoms WITH template structure: {total_atoms_with_structure} / {total_expected_atoms}")
-            print(f"  Total atoms to be INPAINTED: {total_expected_atoms - total_atoms_with_structure} / {total_expected_atoms}")
-            print(f"{'='*60}\n")
-        
+            detail(f"Total atoms WITH template structure: {total_atoms_with_structure} / {total_expected_atoms}")
+            detail(f"Total atoms to be INPAINTED: {total_expected_atoms - total_atoms_with_structure} / {total_expected_atoms}")
+
         # Build metadata dict (matching boltz2.py inpainting_metadata format)
         metadata = {
             "fully_fixed_residues": residues_fully_fixed,
@@ -387,5 +376,4 @@ class ValidationMixin:
         data = {"chains": all_inpainting_metadata}
         with open(output_path, "w") as f:
             json.dump(data, f, indent=4, cls=_NumpyEncoder)
-        print(f"Saved inpainting metadata: {output_path.absolute()}")
-    
+        info(f"Saved inpainting metadata: {output_path.absolute()}")
