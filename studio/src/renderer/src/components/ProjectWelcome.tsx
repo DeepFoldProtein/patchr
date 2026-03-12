@@ -40,7 +40,7 @@ export function ProjectWelcome(): React.ReactElement {
   const setLoading = useProjectStore(state => state.setLoading);
   const setError = useProjectStore(state => state.setError);
   const recentProjects = useRecentProjects();
-  const [showSamples, setShowSamples] = useState(false);
+  const [showSamples, setShowSamples] = useState(recentProjects.length === 0);
 
   const handleCreateProject = async (): Promise<void> => {
     setLoading(true);
@@ -109,12 +109,12 @@ export function ProjectWelcome(): React.ReactElement {
         throw new Error(project.error || "Failed to create sample project");
       }
 
-      // Load the sample structure from mock folder
-      const response = await fetch(`/mock/${sampleFile}`);
-      if (!response.ok) {
-        throw new Error("Failed to load sample structure");
+      // Load the sample structure via IPC (works in both dev and production)
+      const sampleResult = await window.api.app.readSample(sampleFile);
+      if (!sampleResult.success || !sampleResult.content) {
+        throw new Error(sampleResult.error || "Failed to load sample structure");
       }
-      const content = await response.text();
+      const content = sampleResult.content;
 
       // Save to project's original folder
       const saveResult = await window.api.project.saveStructureContent(

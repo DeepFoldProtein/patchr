@@ -449,20 +449,45 @@ def _predict_boltz(
         steering_args.contact_guidance_update = use_potentials
         steering_args.inpainting = enable_inpainting
 
-        model_module = Boltz2.load_from_checkpoint(
-            checkpoint,
-            strict=True,
-            weights_only=False,
-            predict_args=predict_args,
-            map_location="cpu",
-            diffusion_process_args=asdict(diffusion_params),
-            ema=False,
-            use_kernels=not no_kernels,
-            pairformer_args=asdict(pairformer_args),
-            msa_args=asdict(msa_args),
-            steering_args=asdict(steering_args),
-            enable_inpainting=enable_inpainting,
-        )
+        try:
+            model_module = Boltz2.load_from_checkpoint(
+                checkpoint,
+                strict=True,
+                weights_only=False,
+                predict_args=predict_args,
+                map_location="cpu",
+                diffusion_process_args=asdict(diffusion_params),
+                ema=False,
+                use_kernels=not no_kernels,
+                pairformer_args=asdict(pairformer_args),
+                msa_args=asdict(msa_args),
+                steering_args=asdict(steering_args),
+                enable_inpainting=enable_inpainting,
+            )
+        except Exception as e:
+            if "PytorchStreamReader" in str(e) or "zip" in str(e).lower():
+                click.echo(
+                    f"Checkpoint {checkpoint} is corrupted: {e}. "
+                    "Removing and re-downloading..."
+                )
+                Path(checkpoint).unlink(missing_ok=True)
+                download_boltz2(cache_path)
+                model_module = Boltz2.load_from_checkpoint(
+                    checkpoint,
+                    strict=True,
+                    weights_only=False,
+                    predict_args=predict_args,
+                    map_location="cpu",
+                    diffusion_process_args=asdict(diffusion_params),
+                    ema=False,
+                    use_kernels=not no_kernels,
+                    pairformer_args=asdict(pairformer_args),
+                    msa_args=asdict(msa_args),
+                    steering_args=asdict(steering_args),
+                    enable_inpainting=enable_inpainting,
+                )
+            else:
+                raise
         model_module.eval()
 
         trainer.predict(model_module, datamodule=data_module, return_predictions=False)

@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { bus } from "../../lib/event-bus";
+import { pathBasename, pathDirname, pathSplit, pathIncludes, pathJoin } from "../../lib/path-utils";
 import {
   Structure,
   StructureElement,
@@ -44,12 +45,12 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         console.log("Superpose:", superpose);
 
         // Extract run ID from file path (e.g., run_001, run_002)
-        const pathParts = filePath.split("/");
+        const pathParts = pathSplit(filePath);
         const runIdIndex = pathParts.findIndex(part => part.startsWith("run_"));
         const runId = runIdIndex >= 0 ? pathParts[runIdIndex] : null;
 
         // Create unique label based on file path
-        const fileName = filePath.split("/").pop() || "result";
+        const fileName = pathBasename(filePath) || "result";
         const uniqueLabel = runId ? runId : `Inpainting Result: ${fileName}`;
 
         // Modify CIF file content: replace _entry.id value with run ID
@@ -266,11 +267,11 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
       // If not cached, find in current hierarchy
       if (!hierarchyRef) {
-        const fileName = filePath.split("/").pop() || "";
+        const fileName = pathBasename(filePath) || "";
         const fileNameWithoutExt = fileName.replace(/\.[^.]*$/, "");
         const hierarchy = plugin.managers.structure.hierarchy;
         const structures = hierarchy.current.structures;
-        const isBaseStructure = filePath.includes("/structures/original/");
+        const isBaseStructure = pathIncludes(filePath, "/structures/original/");
 
         console.log(
           `[Visibility] Finding structure for: ${fileName} (${structures.length} structures, isBase: ${isBaseStructure})`
@@ -748,9 +749,9 @@ async function applyInpaintingMetadataColors(
     // Metadata is in the same directory as the CIF file
     // Path format: .../run_XXX/predictions/predictions/chain_id/1ton_A_model_0.cif
     // Metadata: .../run_XXX/predictions/predictions/chain_id/inpainting_metadata_1ton_A.json
-    const pathParts = filePath.split("/");
+    const pathParts = pathSplit(filePath);
     const cifFileName = pathParts[pathParts.length - 1];
-    const cifDir = pathParts.slice(0, -1).join("/");
+    const cifDir = pathDirname(filePath);
 
     // Extract chain ID from filename (e.g., "A" from "1ton_A_model_0.cif")
     const chainMatch =
@@ -767,22 +768,27 @@ async function applyInpaintingMetadataColors(
         !part.endsWith(".cif")
     );
 
+    // Parent directory (one level above cifDir)
+    const parentDir = pathParts.slice(0, -2).join("/");
+
     // Try multiple possible metadata file names
     const possibleMetadataPaths = [
       // Same directory with chain prefix (e.g., inpainting_metadata_1ton_A.json)
       chainPrefixMatch
-        ? `${cifDir}/inpainting_metadata_${chainPrefixMatch}.json`
+        ? pathJoin(cifDir, `inpainting_metadata_${chainPrefixMatch}.json`)
         : null,
       // Same directory with chain ID only (e.g., inpainting_metadata_A.json)
-      `${cifDir}/inpainting_metadata_${chainId.toLowerCase()}.json`,
+      pathJoin(cifDir, `inpainting_metadata_${chainId.toLowerCase()}.json`),
       // Parent directory
-      `${pathParts.slice(0, -2).join("/")}/inpainting_metadata_${chainId.toLowerCase()}.json`,
+      parentDir
+        ? pathJoin(parentDir, `inpainting_metadata_${chainId.toLowerCase()}.json`)
+        : null,
       // Also try with full chain prefix from filename (e.g., "1ton_A" from "1ton_A_model_0.cif")
       cifFileName.includes("_")
-        ? `${cifDir}/inpainting_metadata_${cifFileName
+        ? pathJoin(cifDir, `inpainting_metadata_${cifFileName
             .split("_")
             .slice(0, 2)
-            .join("_")}.json`
+            .join("_")}.json`)
         : null
     ].filter((path): path is string => path !== null);
 

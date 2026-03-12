@@ -18,6 +18,7 @@ import { pluginAtom } from "../store/mol-viewer-atoms";
 import { getSequencePanelData } from "./mol-viewer/useGapDetection";
 import { bus } from "../lib/event-bus";
 import { logger } from "../lib/logger";
+import { pathBasename, pathDirname, pathJoin, pathIncludes, pathSplit } from "../lib/path-utils";
 import {
   Eye,
   EyeOff,
@@ -206,7 +207,7 @@ function RepairConsole(): React.ReactElement {
       if (result.success && result.files) {
         // Convert filenames to full paths
         const basePaths = result.files.map(
-          filename => `${currentProject.structuresPath}/original/${filename}`
+          filename => pathJoin(currentProject.structuresPath, "original", filename)
         );
         setBaseStructures(basePaths);
 
@@ -393,7 +394,7 @@ function RepairConsole(): React.ReactElement {
         // Strategy 1: Search in runPath/predictions directory recursively for all JSON files
         if (runPath) {
           try {
-            const predictionsPath = `${runPath}/predictions`;
+            const predictionsPath = pathJoin(runPath, "predictions");
             const searchForMetadataFiles = async (
               dirPath: string,
               depth = 0
@@ -405,7 +406,7 @@ function RepairConsole(): React.ReactElement {
                   await window.api.project.listDirectory(dirPath);
                 if (listResult.success && listResult.files) {
                   for (const file of listResult.files) {
-                    const filePath = `${dirPath}/${file}`;
+                    const filePath = pathJoin(dirPath, file);
 
                     // If it's a JSON file, try to read it
                     if (file.endsWith(".json")) {
@@ -455,9 +456,9 @@ function RepairConsole(): React.ReactElement {
 
         // Strategy 2: Try to find metadata files by path matching (original method)
         for (const cifFile of cifFiles) {
-          const pathParts = cifFile.split("/");
+          const pathParts = pathSplit(cifFile);
           const cifFileName = pathParts[pathParts.length - 1];
-          const cifDir = pathParts.slice(0, -1).join("/");
+          const cifDir = pathDirname(cifFile);
 
           logger.log(
             `[Quality Metrics] Searching metadata for: ${cifFileName} in ${cifDir}`
@@ -498,34 +499,34 @@ function RepairConsole(): React.ReactElement {
           // 1. Try with chain prefix from path (e.g., "1kx3_CDEFGHIJAB")
           if (chainPrefixMatch) {
             possibleMetadataPaths.push(
-              `${cifDir}/inpainting_metadata_${chainPrefixMatch}.json`
+              pathJoin(cifDir, `inpainting_metadata_${chainPrefixMatch}.json`)
             );
           }
 
           // 2. Try with chain prefix from filename (e.g., "1kx3_CDEFGHIJAB")
           if (chainPrefix) {
             possibleMetadataPaths.push(
-              `${cifDir}/inpainting_metadata_${chainPrefix}.json`
+              pathJoin(cifDir, `inpainting_metadata_${chainPrefix}.json`)
             );
           }
 
           // 3. Try with single chain ID (e.g., "A")
           if (singleChainId) {
             possibleMetadataPaths.push(
-              `${cifDir}/inpainting_metadata_${singleChainId.toLowerCase()}.json`
+              pathJoin(cifDir, `inpainting_metadata_${singleChainId.toLowerCase()}.json`)
             );
           }
 
           // 4. Try parent directory (for multi-chain files, metadata might be one level up)
-          const parentDir = pathParts.slice(0, -1).join("/");
+          const parentDir = pathDirname(cifFile);
           if (chainPrefixMatch) {
             possibleMetadataPaths.push(
-              `${parentDir}/inpainting_metadata_${chainPrefixMatch}.json`
+              pathJoin(parentDir, `inpainting_metadata_${chainPrefixMatch}.json`)
             );
           }
           if (chainPrefix) {
             possibleMetadataPaths.push(
-              `${parentDir}/inpainting_metadata_${chainPrefix}.json`
+              pathJoin(parentDir, `inpainting_metadata_${chainPrefix}.json`)
             );
           }
 
@@ -534,19 +535,19 @@ function RepairConsole(): React.ReactElement {
             const upDir = pathParts.slice(0, -i - 1).join("/");
             if (upDir && chainPrefixMatch) {
               possibleMetadataPaths.push(
-                `${upDir}/inpainting_metadata_${chainPrefixMatch}.json`
+                pathJoin(upDir, `inpainting_metadata_${chainPrefixMatch}.json`)
               );
             }
             if (upDir && chainPrefix) {
               possibleMetadataPaths.push(
-                `${upDir}/inpainting_metadata_${chainPrefix}.json`
+                pathJoin(upDir, `inpainting_metadata_${chainPrefix}.json`)
               );
             }
           }
 
           // 6. Try generic names (for multi-chain files)
-          possibleMetadataPaths.push(`${cifDir}/inpainting_metadata.json`);
-          possibleMetadataPaths.push(`${parentDir}/inpainting_metadata.json`);
+          possibleMetadataPaths.push(pathJoin(cifDir, "inpainting_metadata.json"));
+          possibleMetadataPaths.push(pathJoin(parentDir, "inpainting_metadata.json"));
 
           // Remove duplicates
           const uniquePaths = Array.from(new Set(possibleMetadataPaths));
@@ -680,7 +681,7 @@ function RepairConsole(): React.ReactElement {
             );
 
             logger.log(
-              `[Quality Metrics] Extracted from ${cifFile.split("/").pop()}: ${metrics.pLDDTCount} pLDDT values, ${metrics.molProbCount} molprob values`
+              `[Quality Metrics] Extracted from ${pathBasename(cifFile)}: ${metrics.pLDDTCount} pLDDT values, ${metrics.molProbCount} molprob values`
             );
 
             totalPLDDT += metrics.totalPLDDT;
@@ -866,7 +867,7 @@ function RepairConsole(): React.ReactElement {
         // Load for first time
         setVisibleFiles(prev => new Set(prev).add(filePath));
         setLoadedFiles(prev => new Set(prev).add(filePath));
-        const isBaseStructure = filePath.includes("/structures/original/");
+        const isBaseStructure = pathIncludes(filePath, "/structures/original/");
         await handleSuperpose(filePath, !isBaseStructure);
       }
     },
@@ -893,7 +894,7 @@ function RepairConsole(): React.ReactElement {
     async (runId: string, runPath: string) => {
       try {
         // YAML file is in predictions folder: runPath/predictions/*.yaml
-        const predictionsPath = `${runPath}/predictions`;
+        const predictionsPath = pathJoin(runPath, "predictions");
         let yamlContent: string | null = null;
 
         // First, list all files in predictions folder and find .yaml files
@@ -912,7 +913,7 @@ function RepairConsole(): React.ReactElement {
 
           // Try to load the first yaml file found
           for (const yamlFile of yamlFiles) {
-            const yamlPath = `${predictionsPath}/${yamlFile}`;
+            const yamlPath = pathJoin(predictionsPath, yamlFile);
             const yamlResult =
               await window.api.project.readFileByPath(yamlPath);
             if (yamlResult.success && yamlResult.content) {
@@ -925,7 +926,7 @@ function RepairConsole(): React.ReactElement {
 
         // Fallback: try project.yaml in run directory
         if (!yamlContent) {
-          const yamlPath = `${runPath}/project.yaml`;
+          const yamlPath = pathJoin(runPath, "project.yaml");
           const yamlResult = await window.api.project.readFileByPath(yamlPath);
           if (yamlResult.success && yamlResult.content) {
             yamlContent = yamlResult.content;
@@ -1058,7 +1059,7 @@ function RepairConsole(): React.ReactElement {
                           onClick={() => toggleFileVisibility(file)}
                           title={isVisible ? "Click to hide" : "Click to show"}
                         >
-                          {file.split("/").pop()}
+                          {pathBasename(file)}
                         </span>
                         <Button
                           onClick={() => toggleFileVisibility(file)}
@@ -1264,7 +1265,7 @@ function RepairConsole(): React.ReactElement {
                                         : "Click to show"
                                     }
                                   >
-                                    {file.split("/").pop()}
+                                    {pathBasename(file)}
                                   </span>
                                   <Button
                                     onClick={() => toggleFileVisibility(file)}

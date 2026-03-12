@@ -2,6 +2,7 @@ appId: com.patchr.studio
 productName: Patchr Studio
 directories:
   buildResources: build
+icon: icon.png
 files:
   - "!**/.vscode/*"
   - "!src/*"
@@ -13,12 +14,18 @@ asarUnpack:
   - resources/**
 win:
   executableName: patchr-studio
+  icon: icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  icon: icon.png
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -30,14 +37,18 @@ dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
   target:
-    - AppImage
-    - snap
-    - deb
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
   maintainer: electronjs.org
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: DeepFoldProtein
+  repo: patchr

@@ -16,6 +16,7 @@ import {
 } from "./ui/collapsible";
 import { apiUrlAtom, apiConnectionStatusAtom } from "../store/api-atoms";
 import { DisconnectedHint } from "./DisconnectedHint";
+import { pathBasename, pathSplit } from "../lib/path-utils";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -281,7 +282,7 @@ export function SimulationSection({
     setSimProgress(null);
     try {
       const cifContent = await readCifContent(selectedCif);
-      const cifFilename = selectedCif.split("/").pop() || "input.cif";
+      const cifFilename = pathBasename(selectedCif) || "input.cif";
       const payload = {
         cif_content: cifContent,
         cif_filename: cifFilename,
@@ -395,7 +396,7 @@ export function SimulationSection({
                 <SelectContent>
                   {selectedRunCifs.map((cif, idx) => (
                     <SelectItem key={cif} value={String(idx)}>
-                      {cif.split("/").pop()}
+                      {pathBasename(cif)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -766,7 +767,7 @@ function SimResultCard({
                       className="text-[10px] font-mono text-muted-foreground truncate"
                     >
                       {typeof val === "string"
-                        ? val.split("/").pop()
+                        ? pathBasename(val)
                         : String(val)}
                     </div>
                   )
@@ -777,7 +778,7 @@ function SimResultCard({
 
           {savedDir && (
             <p className="text-[10px] text-muted-foreground font-mono truncate">
-              {savedDir.split("/").slice(-2).join("/")}
+              {pathSplit(savedDir).slice(-2).join("/")}
             </p>
           )}
         </div>
