@@ -1008,6 +1008,7 @@ function RepairConsole(): React.ReactElement {
         <ContextInpaintSection
           onJobCompleted={() => {
             void loadResults(true); // Auto-load latest result
+            bus.emit("results:updated");
           }}
         />
       </Section>
@@ -2353,6 +2354,17 @@ function SimulationPanel(): React.ReactElement {
 
   React.useEffect(() => {
     void loadData();
+  }, [loadData]);
+
+  // Reload when inpainting results are updated
+  React.useEffect(() => {
+    const handler = (): void => {
+      void loadData();
+    };
+    bus.on("results:updated", handler);
+    return () => {
+      bus.off("results:updated", handler);
+    };
   }, [loadData]);
 
   if (!currentProject) {
