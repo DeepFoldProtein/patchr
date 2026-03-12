@@ -13,15 +13,16 @@ import os
 import shutil
 import subprocess
 import sys
-import threading
 import uuid
 import warnings
 import zipfile
+from concurrent.futures import Future
 from dataclasses import asdict
 from datetime import datetime
 from enum import Enum
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 import torch
 import uvicorn
@@ -85,8 +86,50 @@ class ModelType(str, Enum):
 _model_registry: Dict[str, Any] = {}
 _model_params: Dict[str, Dict[str, Any]] = {}
 
-# Protenix inference lock (not thread-safe by design)
-_protenix_lock = threading.Lock()
+# ── GPU Job Queue ─────────────────────────────────────────────────────────
+# Replaces the old threading.Lock() approach.  A bounded asyncio.Queue holds
+# pending GPU tasks; a single background worker drains them one-at-a-time.
+# If the queue is full the API returns 503 immediately instead of blocking.
+
+_GPU_QUEUE_MAX = int(os.environ.get("PATCHR_GPU_QUEUE_MAX", "4"))
+_gpu_job_queue: asyncio.Queue | None = None   # initialised in startup_event
+_gpu_worker_task: asyncio.Task | None = None  # handle for the background worker
+
+
+async def _gpu_worker():
+    """Background coroutine that processes GPU jobs sequentially."""
+    while True:
+        job_id, fn, future = await _gpu_job_queue.get()
+        try:
+            logger.info("[GPU-Queue] Starting job %s  (queue depth: %d)", job_id, _gpu_job_queue.qsize())
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, fn)
+            future.set_result(result)
+        except Exception as exc:
+            future.set_exception(exc)
+        finally:
+            _gpu_job_queue.task_done()
+            logger.info("[GPU-Queue] Finished job %s  (queue depth: %d)", job_id, _gpu_job_queue.qsize())
+
+
+async def _submit_gpu_job(job_id: str, fn: Callable, *, update_queued: bool = True) -> Future:
+    """Submit a synchronous callable to the GPU job queue.
+
+    Returns a Future that resolves when the job finishes.
+    Raises HTTPException(503) if the queue is full.
+    """
+    future: Future = Future()
+    try:
+        _gpu_job_queue.put_nowait((job_id, fn, future))
+    except asyncio.QueueFull:
+        raise HTTPException(
+            status_code=503,
+            detail=f"GPU job queue is full ({_GPU_QUEUE_MAX} pending). Try again later.",
+        )
+    if update_queued:
+        depth = _gpu_job_queue.qsize()
+        update_job_status(job_id, JobStatus.PENDING, progress=f"Queued (position {depth}/{_GPU_QUEUE_MAX})")
+    return future
 
 
 # ── Job status ───────────────────────────────────────────────────────────────
@@ -427,7 +470,14 @@ _startup_model: Optional[str] = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Load model(s) on server startup."""
+    """Load model(s) on server startup and start GPU job queue worker."""
+    global _gpu_job_queue, _gpu_worker_task
+
+    # Initialise the bounded GPU job queue and its consumer
+    _gpu_job_queue = asyncio.Queue(maxsize=_GPU_QUEUE_MAX)
+    _gpu_worker_task = asyncio.create_task(_gpu_worker())
+    logger.info("[GPU-Queue] Worker started (max_depth=%d)", _GPU_QUEUE_MAX)
+
     device_id = DEFAULT_DEVICE_ID or os.environ.get("PATCHR_DEVICE_ID") or os.environ.get("BOLTZ_DEVICE_ID")
     startup = _startup_model or os.environ.get("PATCHR_DEFAULT_MODEL", "boltz2")
 
@@ -553,30 +603,23 @@ async def run_boltz_prediction(
     use_msa_server: bool,
     model_type: ModelType = ModelType.BOLTZ2,
 ):
-    """Background task to run Boltz prediction."""
+    """Background task to run Boltz prediction via GPU job queue."""
     try:
-        update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Initializing Boltz prediction")
-
         job_dir = WORK_DIR / job_id
         out_dir = job_dir / "predictions"
         progress_streams[job_id] = asyncio.Queue()
 
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            _run_boltz_prediction_sync,
-            job_id,
-            yaml_file,
-            out_dir,
-            recycling_steps,
-            sampling_steps,
-            diffusion_samples,
-            devices,
-            accelerator,
-            use_msa_server,
-            model_type,
-            loop,
-        )
+
+        def _boltz_work():
+            _run_boltz_prediction_sync(
+                job_id, yaml_file, out_dir, recycling_steps, sampling_steps,
+                diffusion_samples, devices, accelerator, use_msa_server,
+                model_type, loop,
+            )
+
+        future = await _submit_gpu_job(job_id, _boltz_work)
+        await asyncio.wrap_future(future)
 
         pred_base_dir = out_dir / f"patchr_results_{yaml_file.stem}"
         pred_dir = pred_base_dir / "predictions"
@@ -786,9 +829,6 @@ def _run_boltz_prediction_sync(
         can_reuse = (
             preloaded is not None
             and preloaded_params is not None
-            and preloaded_params.get("recycling_steps") == recycling_steps
-            and preloaded_params.get("sampling_steps") == sampling_steps
-            and preloaded_params.get("diffusion_samples") == diffusion_samples
             and preloaded_params.get("map_location") == map_location
         )
 
@@ -817,6 +857,7 @@ def _run_boltz_prediction_sync(
                 msa_args=asdict(msa_args),
                 steering_args=asdict(steering_args),
                 enable_inpainting=enable_inpainting,
+                weights_only=False,
             )
             model_module.eval()
 
@@ -846,27 +887,23 @@ async def run_protenix_prediction(
     sampling_steps: int,
     diffusion_samples: int,
 ):
-    """Background task to run Protenix prediction."""
+    """Background task to run Protenix prediction via GPU job queue."""
     try:
-        update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Initializing Protenix prediction")
-
         job_dir = WORK_DIR / job_id
         out_dir = job_dir / "predictions"
         out_dir.mkdir(parents=True, exist_ok=True)
         progress_streams[job_id] = asyncio.Queue()
 
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            _run_protenix_prediction_sync,
-            job_id,
-            yaml_file,
-            out_dir,
-            recycling_steps,
-            sampling_steps,
-            diffusion_samples,
-            loop,
-        )
+
+        def _protenix_work():
+            _run_protenix_prediction_sync(
+                job_id, yaml_file, out_dir, recycling_steps, sampling_steps,
+                diffusion_samples, loop,
+            )
+
+        future = await _submit_gpu_job(job_id, _protenix_work)
+        await asyncio.wrap_future(future)
 
         # Find prediction results — Protenix dumps to {out_dir}/predictions/{name}/
         pred_dir = out_dir / "predictions"
@@ -903,44 +940,43 @@ def _run_protenix_prediction_sync(
     """Synchronous function to run Protenix prediction."""
     from protenix_runner.inference import infer_predict
 
-    with _protenix_lock:
-        try:
-            runner = _model_registry.get("protenix")
-            if runner is None:
-                update_job_status(job_id, JobStatus.FAILED, error="Protenix model not loaded. Start server with --model protenix or --model all")
-                return
+    try:
+        runner = _model_registry.get("protenix")
+        if runner is None:
+            update_job_status(job_id, JobStatus.FAILED, error="Protenix model not loaded. Start server with --model protenix or --model all")
+            return
 
-            update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Configuring Protenix parameters")
+        update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Configuring Protenix parameters")
 
-            configs = runner.configs
-            configs.input_path = str(yaml_file)
-            configs.dump_dir = str(out_dir)
-            configs.model.N_cycle = recycling_steps
-            configs.sample_diffusion.N_step = sampling_steps
-            configs.sample_diffusion.N_sample = diffusion_samples
+        configs = runner.configs
+        configs.input_path = str(yaml_file)
+        configs.dump_dir = str(out_dir)
+        configs.model.N_cycle = recycling_steps
+        configs.sample_diffusion.N_step = sampling_steps
+        configs.sample_diffusion.N_sample = diffusion_samples
 
-            # Re-init dumper with updated dump_dir
-            runner.dump_dir = str(out_dir)
-            runner.error_dir = os.path.join(str(out_dir), "ERR")
-            os.makedirs(runner.dump_dir, exist_ok=True)
-            os.makedirs(runner.error_dir, exist_ok=True)
-            runner.init_dumper(
-                need_atom_confidence=configs.need_atom_confidence,
-                sorted_by_ranking_score=configs.sorted_by_ranking_score,
-            )
+        # Re-init dumper with updated dump_dir
+        runner.dump_dir = str(out_dir)
+        runner.error_dir = os.path.join(str(out_dir), "ERR")
+        os.makedirs(runner.dump_dir, exist_ok=True)
+        os.makedirs(runner.error_dir, exist_ok=True)
+        runner.init_dumper(
+            need_atom_confidence=configs.need_atom_confidence,
+            sorted_by_ranking_score=configs.sorted_by_ranking_score,
+        )
 
-            update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Running Protenix inference")
+        update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Running Protenix inference")
 
-            infer_predict(runner, configs)
+        infer_predict(runner, configs)
 
-            update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Finalizing Protenix results")
+        update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Finalizing Protenix results")
 
-        except Exception as e:
-            error_msg = f"Protenix prediction error: {str(e)}"
-            import traceback
-            traceback.print_exc()
-            update_job_status(job_id, JobStatus.FAILED, error=error_msg)
-            raise
+    except Exception as e:
+        error_msg = f"Protenix prediction error: {str(e)}"
+        import traceback
+        traceback.print_exc()
+        update_job_status(job_id, JobStatus.FAILED, error=error_msg)
+        raise
 
 
 # ── API endpoints ────────────────────────────────────────────────────────────
@@ -1368,14 +1404,19 @@ def _resolve_cif_from_request(
         if job.get("status") != JobStatus.COMPLETED:
             raise HTTPException(status_code=400, detail=f"Job {job_id} is not completed (status: {job.get('status')})")
 
-        # Find the prediction CIF
+        # Find the prediction CIF (pred_dir is stored relative to WORK_DIR)
         pred_dir = job.get("prediction_dir")
-        if not pred_dir or not Path(pred_dir).exists():
+        if not pred_dir:
+            raise HTTPException(status_code=404, detail="Prediction directory not found")
+        pred_path = Path(pred_dir)
+        if not pred_path.is_absolute():
+            pred_path = WORK_DIR / pred_path
+        if not pred_path.exists():
             raise HTTPException(status_code=404, detail="Prediction directory not found")
 
-        cif_files = list(Path(pred_dir).rglob("*_model_0.cif"))
+        cif_files = list(pred_path.rglob("*_model_0.cif"))
         if not cif_files:
-            cif_files = list(Path(pred_dir).rglob("*.cif"))
+            cif_files = list(pred_path.rglob("*.cif"))
         if not cif_files:
             raise HTTPException(status_code=404, detail="No CIF files found in prediction output")
         return str(cif_files[0])
@@ -1383,8 +1424,8 @@ def _resolve_cif_from_request(
     raise HTTPException(status_code=400, detail="Either job_id, cif_path, or cif_content must be provided")
 
 
-def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: SimReadyRequest):
-    """Background worker for sim-ready preparation."""
+def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: "SimReadyRequest"):
+    """Synchronous sim-ready work (called from GPU queue worker)."""
     try:
         from boltz.sim_ready import SimReadyConfig, prepare_sim_ready
 
@@ -1407,7 +1448,7 @@ def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: SimReadyRequest
         result = prepare_sim_ready(config, progress_callback=progress_cb)
 
         jobs_db[sim_job_id]["sim_ready_result"] = result.to_dict()
-        jobs_db[sim_job_id]["prediction_dir"] = str(out_dir)
+        jobs_db[sim_job_id]["prediction_dir"] = str(out_dir.relative_to(WORK_DIR))
         update_job_status(sim_job_id, JobStatus.COMPLETED, progress="done")
 
     except Exception as e:
@@ -1436,7 +1477,16 @@ async def sim_ready_endpoint(
         "source_cif": cif_path,
     }
 
-    background_tasks.add_task(_run_sim_ready_sync, sim_job_id, cif_path, request)
+    async def _sim_ready_via_queue():
+        try:
+            future = await _submit_gpu_job(sim_job_id, partial(_run_sim_ready_sync, sim_job_id, cif_path, request))
+            await asyncio.wrap_future(future)
+        except HTTPException:
+            update_job_status(sim_job_id, JobStatus.FAILED, error="GPU queue full")
+        except Exception as e:
+            update_job_status(sim_job_id, JobStatus.FAILED, error=str(e))
+
+    background_tasks.add_task(_sim_ready_via_queue)
     return JobStatusResponse(**{k: v for k, v in jobs_db[sim_job_id].items() if k in JobStatusResponse.model_fields})
 
 
@@ -1452,6 +1502,16 @@ async def get_sim_result(job_id: str):
         raise HTTPException(status_code=404, detail="No simulation result found for this job")
 
     return result
+
+
+@app.get("/api/v1/queue/status")
+async def queue_status():
+    """Return current GPU job queue depth and capacity."""
+    return {
+        "queue_depth": _gpu_job_queue.qsize() if _gpu_job_queue else 0,
+        "queue_max": _GPU_QUEUE_MAX,
+        "worker_alive": _gpu_worker_task is not None and not _gpu_worker_task.done(),
+    }
 
 
 @app.get("/api/v1/health")

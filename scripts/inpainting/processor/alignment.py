@@ -649,9 +649,10 @@ class AlignmentMixin:
             print()
         
         
-        # If UniProt mode or interactive sequence, map SEQRES positions to target sequence positions
-        if (self.uniprot_mode or self.interactive_sequence) and final_sequence != seqres_sequence:
-            sequence_type = "manually entered sequence" if self.interactive_sequence else "UniProt sequence"
+        # If UniProt mode, interactive sequence, or custom sequence, map SEQRES positions to target sequence positions
+        _has_custom_seq = chain_id and chain_id in getattr(self, 'manual_sequences', {})
+        if (self.uniprot_mode or self.interactive_sequence or _has_custom_seq) and final_sequence != seqres_sequence:
+            sequence_type = "custom sequence" if _has_custom_seq else ("manually entered sequence" if self.interactive_sequence else "UniProt sequence")
             
             # Check if SEQRES is an exact substring of target sequence
             # This is common when target is the full sequence and SEQRES is a fragment
@@ -769,9 +770,10 @@ class AlignmentMixin:
         Returns:
             Tuple of (filtered_atoms, removed_residues_info)
         """
-        # Skip filtering if not in UniProt mode and not using interactive sequence
-        # (i.e., using SEQRES sequence directly)
-        if not (self.uniprot_mode or self.interactive_sequence) or not final_sequence:
+        # Skip filtering if not in UniProt mode, not using interactive sequence,
+        # and no custom sequences provided (i.e., using SEQRES sequence directly)
+        _has_any_custom = bool(getattr(self, 'manual_sequences', {}))
+        if not (self.uniprot_mode or self.interactive_sequence or _has_any_custom) or not final_sequence:
             return atoms, []
         
         # 3-letter to 1-letter code mapping
