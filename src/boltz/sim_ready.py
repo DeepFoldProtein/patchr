@@ -56,6 +56,42 @@ _PROTEIN_RESIDUES = {
     "ACE", "NME", "NMA",
 }
 
+_NUCLEIC_RESIDUES = {
+    # DNA (PDB/CIF standard naming)
+    "DA", "DC", "DG", "DT", "DI",
+    # RNA (PDB/CIF standard naming)
+    "A", "C", "G", "U", "I",
+    # AMBER terminal variants
+    "DA5", "DC5", "DG5", "DT5", "DA3", "DC3", "DG3", "DT3",
+    "DAN", "DCN", "DGN", "DTN",
+    "A5", "C5", "G5", "U5", "A3", "C3", "G3", "U3",
+    # CHARMM naming
+    "ADE", "CYT", "GUA", "THY", "URA",
+    "TADE", "TCYT", "TGUA", "TTHY", "TURA",
+    "NADE", "NTHY",
+    "NUSA", "NUSC", "NUSG", "NUST", "NUSU",
+}
+
+# CIF/PDB standard DNA residue names
+_DNA_RESIDUES = {"DA", "DC", "DG", "DT", "DI"}
+# CIF/PDB standard RNA residue names
+_RNA_RESIDUES = {"A", "C", "G", "U", "I"}
+
+# AMBER force field: 5'/3' terminal and single-nucleotide naming
+# DC → DC5 (5'), DC3 (3'), DCN (single); same pattern for DA, DG, DT
+# RNA: A → A5, A3, AN; same for C, G, U
+_AMBER_TERMINAL_MAP = {
+    # DNA: base → (5' name, 3' name, single name)
+    "DA": ("DA5", "DA3", "DAN"), "DC": ("DC5", "DC3", "DCN"),
+    "DG": ("DG5", "DG3", "DGN"), "DT": ("DT5", "DT3", "DTN"),
+    # RNA
+    "A": ("A5", "A3", "AN"), "C": ("C5", "C3", "CN"),
+    "G": ("G5", "G3", "GN"), "U": ("U5", "U3", "UN"),
+}
+
+# CHARMM36 atom-name remapping: PDB standard → CHARMM36 convention
+_CHARMM_ATOM_RENAME = {"OP1": "O1P", "OP2": "O2P"}
+
 _WATER_RESIDUES = {"HOH", "WAT", "TIP3", "SOL", "TIP4", "TIP5", "SPC"}
 
 _ION_RESIDUES = {
@@ -64,6 +100,11 @@ _ION_RESIDUES = {
 }
 
 _BACKBONE_ATOMS = {"N", "CA", "C", "O", "OXT"}
+# Nucleic acid backbone atoms (for position restraints)
+_NUCLEIC_BACKBONE_ATOMS = {
+    "P", "OP1", "OP2", "O1P", "O2P",
+    "O5'", "C5'", "C4'", "C3'", "O3'",
+}
 
 # PDBFixer atom name → CHARMM template name aliases
 _NAME_ALIASES = {
@@ -184,6 +225,113 @@ def _cif_to_pdb_string(cif_path: str, keep_water: bool = False) -> str:
     return st.make_pdb_string()
 
 
+def _has_nucleic_acids(topology) -> bool:
+    """Check if topology contains nucleic acid residues."""
+    for residue in topology.residues():
+        if residue.name in _NUCLEIC_RESIDUES:
+            return True
+    return False
+
+
+def _fix_nucleic_for_forcefield(fixer):
+    """Fix nucleic acid residues for OpenMM force field compatibility.
+
+    OpenMM's AMBER force fields define DNA/RNA templates with ExternalBond
+    constraints:
+      - Internal residues (DA, DC, ...): ExternalBond on P (upstream) and O3'
+      - 5' terminal (DC5, ...): no P, ExternalBond on O3' only
+      - 3' terminal (DC3, ...): ExternalBond on P only
+
+    OpenMM's pdbNames.xml already maps DC5→DC, DC3→DC etc. as alt names,
+    so residue *naming* is handled automatically. The real issue is that
+    predicted structures often have orphan phosphate groups (P, OP1, OP2) on
+    the first nucleotide of a chain — these atoms have no upstream O3' to
+    bond to, causing ExternalBond mismatch.
+
+    This function removes orphan 5' phosphate atoms so OpenMM can match the
+    residue to the 5' terminal template variant.
+
+    See: https://github.com/openmm/openmm/issues/2313
+    """
+    import logging
+
+    log = logging.getLogger(__name__)
+    topology = fixer.topology
+
+    # Collect atom indices to remove (orphan phosphate atoms at 5' termini)
+    atoms_to_remove = set()
+
+    for chain in topology.chains():
+        residues = list(chain.residues())
+        nucleic_indices = [
+            i for i, r in enumerate(residues)
+            if r.name in _DNA_RESIDUES | _RNA_RESIDUES
+        ]
+        if not nucleic_indices:
+            continue
+
+        first_na = nucleic_indices[0]
+        res = residues[first_na]
+
+        # 5' terminal: remove orphan phosphate if present
+        # (chain start has no upstream O3' to bond to P)
+        for atom in res.atoms():
+            if atom.name in ("P", "OP1", "OP2"):
+                atoms_to_remove.add(atom.index)
+
+    if atoms_to_remove:
+        log.info(
+            f"Removing {len(atoms_to_remove)} orphan phosphate atoms "
+            f"from 5' terminal nucleotides"
+        )
+        _remove_atoms_from_fixer(fixer, atoms_to_remove)
+
+
+def _remove_atoms_from_fixer(fixer, atom_indices_to_remove: set):
+    """Remove specific atoms from fixer topology and positions."""
+    import openmm.app as app
+    import openmm.unit as unit
+    from openmm.vec3 import Vec3
+
+    old_topology = fixer.topology
+    old_positions = fixer.positions
+
+    # Extract raw Vec3 values without units to avoid nested Quantity issues
+    pos_unit = old_positions.unit if hasattr(old_positions, 'unit') else unit.nanometer
+    raw_positions = old_positions.value_in_unit(pos_unit)
+
+    new_topology = app.Topology()
+    new_positions = []
+    atom_map = {}
+
+    for old_chain in old_topology.chains():
+        new_chain = new_topology.addChain(old_chain.id)
+        for old_residue in old_chain.residues():
+            new_residue = new_topology.addResidue(
+                old_residue.name, new_chain, old_residue.id
+            )
+            for old_atom in old_residue.atoms():
+                if old_atom.index in atom_indices_to_remove:
+                    continue
+                new_atom = new_topology.addAtom(
+                    old_atom.name, old_atom.element, new_residue
+                )
+                atom_map[old_atom.index] = new_atom
+                new_positions.append(Vec3(*raw_positions[old_atom.index]))
+
+    # Copy bonds (only if both atoms are kept)
+    for bond in old_topology.bonds():
+        if bond[0].index in atom_map and bond[1].index in atom_map:
+            new_topology.addBond(atom_map[bond[0].index], atom_map[bond[1].index])
+
+    # Copy box vectors if present
+    if old_topology.getPeriodicBoxVectors() is not None:
+        new_topology.setPeriodicBoxVectors(old_topology.getPeriodicBoxVectors())
+
+    fixer.topology = new_topology
+    fixer.positions = new_positions * pos_unit
+
+
 def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimReadyResult:
     """Run the full simulation-ready pipeline.
 
@@ -237,8 +385,25 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
         msg = f"Unsupported force field: {config.forcefield}. Available: {list(FF_MAP.keys())}"
         raise ValueError(msg)
 
-    ff_xmls = FF_MAP[config.forcefield]
+    ff_name = config.forcefield
+    has_nucleic = _has_nucleic_acids(fixer.topology)
+
+    # CHARMM36 does not have DNA/RNA polymer templates in OpenMM.
+    # Auto-switch to AMBER14 when nucleic acids are present.
+    if has_nucleic and ff_name.startswith("charmm"):
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Structure contains nucleic acids but '{ff_name}' lacks DNA/RNA "
+            f"polymer templates in OpenMM. Switching to 'amber14sb'."
+        )
+        ff_name = "amber14sb"
+
+    ff_xmls = FF_MAP[ff_name]
     forcefield = app.ForceField(*ff_xmls)
+
+    # Fix nucleic acid terminal residues (remove orphan 5' phosphates)
+    if has_nucleic:
+        _fix_nucleic_for_forcefield(fixer)
 
     # Step 4: Create modeller and solvate
     modeller = app.Modeller(fixer.topology, fixer.positions)
@@ -638,14 +803,14 @@ def _rename_protein_molecules(mol_blocks):
 
 
 def _is_protein_block(mol_sections) -> bool:
-    """Check if a molecule block is a protein by its first residue name."""
+    """Check if a molecule block is a protein or nucleic acid by its first residue name."""
     for header, body in mol_sections:
         if "atoms" not in header.lower():
             continue
         for line in body.strip().split("\n"):
             parts = line.strip().split()
             if parts and not parts[0].startswith(";") and len(parts) > 3:
-                return parts[3] in _PROTEIN_RESIDUES
+                return parts[3] in _PROTEIN_RESIDUES | _NUCLEIC_RESIDUES
     return False
 
 
@@ -674,8 +839,11 @@ def _append_position_restraints(f, mol_name, mol_sections):
         return
 
     first_resname = atom_lines[0].split()[3] if len(atom_lines[0].split()) > 3 else ""
-    if first_resname not in _PROTEIN_RESIDUES:
+    if first_resname not in _PROTEIN_RESIDUES | _NUCLEIC_RESIDUES:
         return
+
+    is_nucleic = first_resname in _NUCLEIC_RESIDUES
+    bb_atoms = _NUCLEIC_BACKBONE_ATOMS if is_nucleic else _BACKBONE_ATOMS
 
     f.write("\n#ifdef POSRES\n")
     f.write("[ position_restraints ]\n")
@@ -689,7 +857,7 @@ def _append_position_restraints(f, mol_name, mol_sections):
         atom_name = parts[4]
         if atom_type.startswith("H") and atom_type not in ("HSD", "HSE", "HSP"):
             continue
-        if atom_name in _BACKBONE_ATOMS:
+        if atom_name in bb_atoms:
             f.write(f"{atom_nr:5d}     1    POSRES_FC_BB"
                     f"    POSRES_FC_BB    POSRES_FC_BB\n")
         else:
@@ -765,7 +933,7 @@ def _classify_residues(topology):
 
     for atom in topology.atoms():
         idx = atom.index + 1  # GROMACS is 1-based
-        if atom.residue.name in _PROTEIN_RESIDUES:
+        if atom.residue.name in _PROTEIN_RESIDUES | _NUCLEIC_RESIDUES:
             solu.append(idx)
         else:
             solv.append(idx)
