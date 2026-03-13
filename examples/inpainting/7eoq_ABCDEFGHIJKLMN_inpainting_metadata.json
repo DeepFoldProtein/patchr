@@ -1,6 +1,6 @@
 {
     "chains": {
-        "AA": {
+        "A": {
             "fully_fixed_residues": [
                 34,
                 35,
@@ -955,7 +955,7 @@
             "total_atoms_with_structure": 6111,
             "total_expected_atoms": 6718
         },
-        "BA": {
+        "B": {
             "fully_fixed_residues": [
                 25,
                 26,
@@ -1860,7 +1860,7 @@
             "total_atoms_with_structure": 6188,
             "total_expected_atoms": 6686
         },
-        "CA": {
+        "C": {
             "fully_fixed_residues": [
                 34,
                 35,
@@ -2815,7 +2815,7 @@
             "total_atoms_with_structure": 6111,
             "total_expected_atoms": 6718
         },
-        "DA": {
+        "D": {
             "fully_fixed_residues": [
                 25,
                 26,
@@ -3720,7 +3720,7 @@
             "total_atoms_with_structure": 6188,
             "total_expected_atoms": 6686
         },
-        "AB": {
+        "E": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3729,7 +3729,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "AC": {
+        "F": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3738,7 +3738,7 @@
             "total_atoms_with_structure": 30,
             "total_expected_atoms": 30
         },
-        "BB": {
+        "G": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3747,7 +3747,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "BC": {
+        "H": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3756,7 +3756,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "BD": {
+        "I": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3765,7 +3765,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "CB": {
+        "J": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3774,7 +3774,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "CC": {
+        "K": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3783,7 +3783,7 @@
             "total_atoms_with_structure": 30,
             "total_expected_atoms": 30
         },
-        "DB": {
+        "L": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3792,7 +3792,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "DC": {
+        "M": {
             "fully_fixed_residues": [
                 1
             ],
@@ -3801,7 +3801,7 @@
             "total_atoms_with_structure": 14,
             "total_expected_atoms": 14
         },
-        "DD": {
+        "N": {
             "fully_fixed_residues": [
                 1
             ],
