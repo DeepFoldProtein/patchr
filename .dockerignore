@@ -1,33 +1,11 @@
-# Git
-.git
-.gitignore
-
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.egg-info
-.venv
-venv
-
-# IDE
-.vscode
-.idea
-*.swp
-
-# Build artifacts
-dist
-build
-*.so
-
-# Project-specific
-results/
-reference_pr/
-patchr_sandbox/
-benchmarks/
-note
-*.cif
-
-# Docker
-Dockerfile
-.dockerignore
+# Include only what's needed
+*
+!pyproject.toml
+!README.md
+!src/
+!scripts/
+!protenix_configs/
+!protenix_runner/
+!server.py
+!examples/
+!tests/
