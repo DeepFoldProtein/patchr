@@ -1,6 +1,6 @@
 {
     "chains": {
-        "AA": {
+        "A": {
             "fully_fixed_residues": [
                 1,
                 2,
@@ -249,7 +249,7 @@
             "total_atoms_with_structure": 1733,
             "total_expected_atoms": 1795
         },
-        "AB": {
+        "B": {
             "fully_fixed_residues": [
                 1
             ],
