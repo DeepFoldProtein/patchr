@@ -90,7 +90,7 @@ def generate_yaml(
             else:
                 quoted = [_yaml_str(aid) for aid in auth_ids]
                 new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
-            # Add inpainting_metadata path right after chain_id
+            # Add inpainting_metadata path right after chain_id (relative to output_dir)
             if inpainting_metadata_path is not None:
                 meta_str = _resolve_path(inpainting_metadata_path, output_dir, use_absolute_path)
                 new_lines.append(f"    inpainting_metadata: {meta_str}")
