@@ -19,12 +19,23 @@ def _int_to_letters(n: int) -> str:
     return result
 
 
+def _resolve_path(target: Path, output_dir: Path, use_absolute: bool) -> str:
+    """Return a path string — absolute or relative to *output_dir*."""
+    if use_absolute:
+        return str(target.resolve())
+    try:
+        return str(target.resolve().relative_to(output_dir.resolve()))
+    except (ValueError, RuntimeError):
+        return os.path.relpath(str(target.resolve()), str(output_dir.resolve()))
+
+
 def generate_json(
     chain_ids: List[str],
     all_chains_data: Dict[str, Dict],
     cif_path: Path,
     output_dir: Path,
     inpainting_metadata_path: Optional[Path] = None,
+    use_absolute_path: bool = True,
 ) -> str:
     """Generate Protenix-compatible JSON for inpainting.
 
@@ -32,8 +43,9 @@ def generate_json(
         chain_ids: Ordered list of chain IDs (patchr label/author IDs).
         all_chains_data: Per-chain data dict from StructureProcessor.
         cif_path: Path to the template CIF file.
-        output_dir: Output directory (unused, for symmetry with yaml_writer).
+        output_dir: Output directory.
         inpainting_metadata_path: Path to inpainting_metadata.json, or None.
+        use_absolute_path: If True (default), embed absolute paths.
 
     Returns:
         JSON string ready to write to file.
@@ -101,13 +113,7 @@ def generate_json(
 
         sequences.append(chain_entry)
 
-    # Build relative CIF path (relative to output_dir)
-    try:
-        cif_path_str = str(cif_path.resolve().relative_to(output_dir.resolve()))
-    except (ValueError, RuntimeError):
-        cif_path_str = os.path.relpath(
-            str(cif_path.resolve()), str(output_dir.resolve())
-        )
+    cif_path_str = _resolve_path(cif_path, output_dir, use_absolute_path)
 
     name = cif_path.stem
     json_data: Dict = {
@@ -116,20 +122,10 @@ def generate_json(
     }
 
     if inpainting_metadata_path is not None:
-        try:
-            meta_rel = str(
-                inpainting_metadata_path.resolve().relative_to(
-                    output_dir.resolve()
-                )
-            )
-        except (ValueError, RuntimeError):
-            meta_rel = os.path.relpath(
-                str(inpainting_metadata_path.resolve()),
-                str(output_dir.resolve()),
-            )
+        meta_str = _resolve_path(inpainting_metadata_path, output_dir, use_absolute_path)
         json_data["inpainting"] = {
             "template_cif": cif_path_str,
-            "metadata": meta_rel,
+            "metadata": meta_str,
             # chain_id_mapping: Protenix label_asym_id → author chain ID in CIF/metadata
             "chain_id_mapping": protenix_to_author,
         }

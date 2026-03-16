@@ -106,6 +106,7 @@ patchr template 7EOQ all-copies             # Including duplicate copies
 patchr template 1BNA all -o my_templates/   # Custom output directory
 patchr template 7EOQ A --include-solvent     # Include solvent atoms
 patchr template 1CK4 all --assembly best     # Biological assembly
+patchr template 1CK4 all --relative-paths    # Use relative paths in YAML (default: absolute)
 ```
 
 </details>
@@ -114,10 +115,15 @@ patchr template 1CK4 all --assembly best     # Biological assembly
 <summary><b>Prediction options</b></summary>
 
 ```bash
+# Single file
 patchr predict examples/inpainting/4zlo_ABCD.yaml --out_dir results --seed 42
 patchr predict examples/inpainting/1ck4_AB.yaml --out_dir results --diffusion_samples 5
 patchr predict examples/inpainting/1bna_AB.yaml --out_dir results --backend protenix
 patchr predict examples/inpainting/7eoq_ABCDEFGHIJKLMN.yaml --out_dir results --use_msa_server
+
+# Bulk prediction — pass a directory of YAML files
+patchr predict my_templates/ --out_dir results
+patchr predict my_templates/ --out_dir results --backend protenix --seeds 42,101
 ```
 
 </details>

@@ -82,7 +82,8 @@ class InferenceDataset(Dataset):
         self.use_rna_msa = configs.get("use_rna_msa", True)
         self.use_template = configs.get("use_template", True)
         self.inputs = load_input(self.input_path)
-        json_task_name = os.path.basename(self.input_path).split(".")[0]
+        _input_p = os.path.abspath(self.input_path)
+        json_task_name = os.path.basename(_input_p) if os.path.isdir(_input_p) else os.path.basename(_input_p).split(".")[0]
         if self.use_template:
             template_mmcif_dir = configs.data.template.prot_template_mmcif_dir
             fetch_remote = configs.data.template.get("fetch_remote", True)

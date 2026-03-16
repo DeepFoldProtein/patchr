@@ -644,19 +644,28 @@ def run() -> None:
     _INPAINTING_MODEL = "protenix_base_default_v1.0.0"
     _input_path = configs.input_path
     _has_inpainting = False
-    if _input_path and os.path.isfile(_input_path):
+
+    def _check_yaml_for_inpainting(fpath):
         import yaml as _yaml
         try:
-            with open(_input_path) as _f:
+            with open(fpath) as _f:
                 _raw = _yaml.safe_load(_f)
             if isinstance(_raw, dict):
-                _has_inpainting = bool(_raw.get("templates"))
-            elif isinstance(_raw, list):
-                _has_inpainting = any(
-                    s.get("inpainting") or s.get("templates") for s in _raw if isinstance(s, dict)
-                )
+                return bool(_raw.get("templates"))
         except Exception:
             pass
+        return False
+
+    if _input_path:
+        _p = os.path.abspath(_input_path)
+        if os.path.isdir(_p):
+            for _fn in os.listdir(_p):
+                if _fn.lower().endswith((".yaml", ".yml")):
+                    if _check_yaml_for_inpainting(os.path.join(_p, _fn)):
+                        _has_inpainting = True
+                        break
+        elif os.path.isfile(_p):
+            _has_inpainting = _check_yaml_for_inpainting(_p)
     if _has_inpainting and model_name != _INPAINTING_MODEL:
         logger.warning(
             "Inpainting detected in input. Overriding model_name "
