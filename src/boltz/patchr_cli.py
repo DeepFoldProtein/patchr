@@ -130,6 +130,56 @@ def cli(ctx: click.Context) -> None:
         click.echo(ctx.get_help())
 
 
+def _validate_inpainting_input(data: str) -> None:
+    """Check that every YAML input contains a ``templates`` section.
+
+    PATCHR is an inpainting tool — inputs without templates are rejected early
+    with a clear error message rather than silently running a plain prediction.
+    """
+    import yaml as _yaml
+
+    data_path = Path(data).expanduser()
+
+    if data_path.is_dir():
+        yaml_files = sorted(
+            f for f in data_path.iterdir()
+            if f.suffix.lower() in (".yaml", ".yml") and f.is_file()
+        )
+    elif data_path.suffix.lower() in (".yaml", ".yml"):
+        yaml_files = [data_path]
+    else:
+        # Non-YAML (e.g. FASTA for Boltz) — skip validation
+        return
+
+    if not yaml_files:
+        raise click.BadParameter(
+            f"No YAML files found in directory: {data_path}",
+            param_hint="DATA",
+        )
+
+    missing: list[str] = []
+    for yf in yaml_files:
+        try:
+            with open(yf) as f:
+                raw = _yaml.safe_load(f)
+            if not isinstance(raw, dict) or not raw.get("templates"):
+                missing.append(yf.name)
+        except Exception as e:
+            raise click.BadParameter(
+                f"Failed to parse {yf.name}: {e}",
+                param_hint="DATA",
+            )
+
+    if missing:
+        names = ", ".join(missing)
+        raise click.BadParameter(
+            f"PATCHR requires inpainting templates. The following input(s) are "
+            f"missing a 'templates' section: {names}\n"
+            f"Use 'patchr template' to generate inpainting YAML files first.",
+            param_hint="DATA",
+        )
+
+
 # ---------------------------------------------------------------------------
 # patchr predict
 # ---------------------------------------------------------------------------
@@ -235,14 +285,18 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
 ) -> None:
     """Run structure prediction.
 
-    DATA is a YAML/FASTA input file or directory.
+    DATA is a YAML input file, a directory of YAML files (bulk mode), or a FASTA file (Boltz only).
 
     \b
     Examples:
       patchr predict input.yaml --out_dir results
+      patchr predict yaml_dir/ --out_dir results --backend protenix   # bulk
       patchr predict input.yaml --out_dir results --backend protenix --seed 42
       patchr predict input.yaml --out_dir results --sim-ready gromacs
     """
+    # ── Validate that input contains inpainting templates ──────────────
+    _validate_inpainting_input(data)
+
     if backend == "protenix":
         _predict_protenix(
             data=data,
@@ -608,7 +662,7 @@ def _predict_protenix(
     seed: Optional[int],
     seeds: Optional[str],
 ) -> None:
-    """Run Protenix prediction with unified output format."""
+    """Run Protenix prediction. Accepts a YAML file or directory of YAML files."""
     import torch
 
     # Ensure paths are on sys.path
@@ -670,7 +724,7 @@ def _predict_protenix(
     # Set parameters
     data_path = Path(data).expanduser()
     out_path = Path(out_dir).expanduser()
-    results_dir = out_path / f"patchr_results_{data_path.stem}"
+    results_dir = out_path / f"patchr_results_{data_path.stem}" if data_path.is_file() else out_path / f"patchr_results_{data_path.name}"
 
     configs.input_path = str(data_path)
     configs.dump_dir = str(results_dir)
@@ -722,6 +776,7 @@ def _predict_protenix(
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
 @click.option("--interactive", is_flag=True, help="Prompt for sequence input.")
 @click.option("--format", "output_format", type=click.Choice(["yaml", "protenix-json"]), default="yaml", help="Output format.")
+@click.option("--relative-paths", is_flag=True, help="Write CIF/metadata paths relative to output dir (default: absolute).")
 def template(
     pdb_id: Optional[str],
     chain_ids: Optional[str],
@@ -737,6 +792,7 @@ def template(
     verbose: bool,
     interactive: bool,
     output_format: str,
+    relative_paths: bool,
 ) -> None:
     """Generate inpainting template from a PDB structure.
 
@@ -813,6 +869,7 @@ def template(
         skip_terminal=skip_terminal,
         verbose=verbose,
         output_format=output_format,
+        use_absolute_path=not relative_paths,
     )
     processor.process(Path(out_dir))
 

@@ -45,24 +45,44 @@ logger = logging.getLogger(__name__)
 
 
 def load_input(path: str) -> list[dict[str, Any]]:
-    """Load input file (JSON or YAML) and return Protenix sample dict list.
+    """Load YAML input file(s) and return Protenix sample dict list.
 
-    Detects file format by extension (.yaml/.yml → YAML, otherwise JSON).
+    Accepts either a single YAML file or a directory containing YAML files.
+    When a directory is given, all ``*.yaml`` / ``*.yml`` files are collected
+    (sorted by name) and each is converted to a sample.
 
     Args:
-        path: Path to the input file.
+        path: Path to a YAML file or a directory of YAML files.
 
     Returns:
         List of sample dicts in Protenix JSON format.
     """
-    import json
+    p = Path(path)
 
-    ext = Path(path).suffix.lower()
-    if ext in (".yaml", ".yml"):
-        return boltz_yaml_to_protenix_samples(path)
-    else:
-        with open(path, "r") as f:
-            return json.load(f)
+    if p.is_dir():
+        yaml_files = sorted(
+            f for f in p.iterdir()
+            if f.suffix.lower() in (".yaml", ".yml") and f.is_file()
+        )
+        if not yaml_files:
+            raise FileNotFoundError(
+                f"No YAML files (*.yaml, *.yml) found in directory: {path}"
+            )
+        samples: list[dict[str, Any]] = []
+        for yf in yaml_files:
+            samples.extend(boltz_yaml_to_protenix_samples(str(yf)))
+        logger.info(
+            "Loaded %d sample(s) from %d YAML file(s) in %s",
+            len(samples), len(yaml_files), path,
+        )
+        return samples
+
+    if p.suffix.lower() not in (".yaml", ".yml"):
+        raise ValueError(
+            f"Unsupported input format '{p.suffix}'. Only YAML files (.yaml/.yml) "
+            f"or directories of YAML files are accepted."
+        )
+    return boltz_yaml_to_protenix_samples(path)
 
 
 def boltz_yaml_to_protenix_samples(yaml_path: str) -> list[dict[str, Any]]:

@@ -14,14 +14,31 @@ if str(_scripts_dir) not in sys.path:
 from benchmark.generate_yaml import generate_yaml_content, _yaml_str
 
 
+def _resolve_path(target: Path, output_dir: Path, use_absolute: bool) -> str:
+    """Return a path string — absolute or relative to *output_dir*."""
+    if use_absolute:
+        return str(target.resolve())
+    try:
+        return str(target.resolve().relative_to(output_dir.resolve()))
+    except ValueError:
+        return os.path.relpath(str(target.resolve()), str(output_dir.resolve()))
+
+
 def generate_yaml(
     chain_ids: List[str],
     all_chains_data: Dict[str, Dict],
     cif_path: Path,
     output_dir: Path,
     inpainting_metadata_path: Path = None,
+    use_absolute_path: bool = True,
 ) -> str:
-    """Generate YAML configuration using benchmark generate_yaml_content."""
+    """Generate YAML configuration using benchmark generate_yaml_content.
+
+    Args:
+        use_absolute_path: If True (default), embed absolute paths for CIF and
+            metadata so the YAML works regardless of working directory.  If
+            False, paths are relative to *output_dir*.
+    """
     chains = []
     auth_ids = []  # author_asym_id (what goes into chain_id in YAML)
 
@@ -45,12 +62,7 @@ def generate_yaml(
                 entry["smiles"] = d["smiles"]
         chains.append(entry)
 
-    # Use relative path (relative to output_dir) so the YAML is portable
-    try:
-        cif_path_str = str(cif_path.resolve().relative_to(output_dir.resolve()))
-    except ValueError:
-        import os
-        cif_path_str = os.path.relpath(str(cif_path.resolve()), str(output_dir.resolve()))
+    cif_path_str = _resolve_path(cif_path, output_dir, use_absolute_path)
 
     yaml_content = generate_yaml_content(
         chains=chains, cif_path=cif_path_str, use_absolute_path=False
@@ -78,13 +90,10 @@ def generate_yaml(
             else:
                 quoted = [_yaml_str(aid) for aid in auth_ids]
                 new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
-            # Add inpainting_metadata path right after chain_id (relative to output_dir)
+            # Add inpainting_metadata path right after chain_id
             if inpainting_metadata_path is not None:
-                try:
-                    meta_rel = str(inpainting_metadata_path.resolve().relative_to(output_dir.resolve()))
-                except ValueError:
-                    meta_rel = os.path.relpath(str(inpainting_metadata_path.resolve()), str(output_dir.resolve()))
-                new_lines.append(f"    inpainting_metadata: {meta_rel}")
+                meta_str = _resolve_path(inpainting_metadata_path, output_dir, use_absolute_path)
+                new_lines.append(f"    inpainting_metadata: {meta_str}")
         else:
             new_lines.append(line)
     yaml_content = "\n".join(new_lines)

@@ -42,7 +42,7 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml'):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml', use_absolute_path: bool = True):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
@@ -100,6 +100,7 @@ class StructureProcessor(
         # Assembly selection
         self.assembly_id = assembly_id          # None / 'best' / str(N)
         self.list_assemblies = list_assemblies
+        self.use_absolute_path = use_absolute_path
         self._synthetic_atoms: Dict[str, List[Dict]] = {}  # synthetic chain atoms from non-identity symmetry ops
         self._assembly_entity_types: Dict[str, str] = {}   # label_asym_id -> entity type for assembly chains
 
@@ -125,16 +126,20 @@ class StructureProcessor(
 
 
     def generate_yaml(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict],
-                       inpainting_metadata_path: Path = None) -> str:
+                       inpainting_metadata_path: Path = None,
+                       use_absolute_path: bool = True) -> str:
         """Generate YAML configuration (delegates to yaml_writer)."""
         return yaml_writer.generate_yaml(self._processed_chain_ids(all_chains_data), all_chains_data, cif_path, output_dir,
-                                         inpainting_metadata_path=inpainting_metadata_path)
+                                         inpainting_metadata_path=inpainting_metadata_path,
+                                         use_absolute_path=use_absolute_path)
 
     def generate_json(self, cif_path: Path, output_dir: Path, all_chains_data: Dict[str, Dict],
-                      inpainting_metadata_path: Path = None) -> str:
+                      inpainting_metadata_path: Path = None,
+                      use_absolute_path: bool = True) -> str:
         """Generate Protenix JSON configuration (delegates to json_writer)."""
         return json_writer.generate_json(self._processed_chain_ids(all_chains_data), all_chains_data, cif_path, output_dir,
-                                         inpainting_metadata_path=inpainting_metadata_path)
+                                         inpainting_metadata_path=inpainting_metadata_path,
+                                         use_absolute_path=use_absolute_path)
 
 
 
@@ -780,13 +785,15 @@ class StructureProcessor(
         # Generate and save config (YAML or Protenix JSON)
         if self.output_format == 'protenix-json':
             config_content = self.generate_json(cif_path, output_dir, all_chains_data,
-                                                inpainting_metadata_path=metadata_path)
+                                                inpainting_metadata_path=metadata_path,
+                                                use_absolute_path=self.use_absolute_path)
             with open(config_path, 'w') as f:
                 f.write(config_content)
             success(f"Saved Protenix JSON: {config_path.absolute()}")
         else:
             config_content = self.generate_yaml(cif_path, output_dir, all_chains_data,
-                                                inpainting_metadata_path=metadata_path)
+                                                inpainting_metadata_path=metadata_path,
+                                                use_absolute_path=self.use_absolute_path)
             with open(config_path, 'w') as f:
                 f.write(config_content)
             success(f"Saved YAML file: {config_path.absolute()}")
