@@ -612,7 +612,40 @@ class StructureProcessor(
                     comp_id = atom.get('label_comp_id', 'UNK')
                     if pos not in seq_pos_to_monomer:
                         seq_pos_to_monomer[pos] = comp_id
-            
+
+            # Reconcile final_sequence with actual atom residues at each position.
+            # This ensures entity_poly.pdbx_seq_one_letter_code, entity_poly_seq,
+            # and atom_site are all consistent (prevents Alignment mismatch in boltz parser).
+            _recon_map = {}
+            if entity_type in ('dna', 'rna'):
+                _dna_to_one = {'DA': 'A', 'DC': 'C', 'DG': 'G', 'DT': 'T', 'DI': 'I'}
+                _rna_to_one = {'A': 'A', 'C': 'C', 'G': 'G', 'U': 'U', 'I': 'I'}
+                _recon_map = _dna_to_one if entity_type == 'dna' else _rna_to_one
+            else:
+                _recon_map = {
+                    'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E', 'PHE': 'F',
+                    'GLY': 'G', 'HIS': 'H', 'ILE': 'I', 'LYS': 'K', 'LEU': 'L',
+                    'MET': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R',
+                    'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y',
+                }
+            _seq_list = list(final_sequence)
+            _seq_changed = False
+            for pos, comp_id in seq_pos_to_monomer.items():
+                if pos < 1 or pos > len(_seq_list):
+                    continue
+                actual_one = _recon_map.get(comp_id.upper())
+                if actual_one is None:
+                    continue  # non-standard residue, will be handled by modifications
+                expected_one = _seq_list[pos - 1]
+                if expected_one != actual_one:
+                    _seq_list[pos - 1] = actual_one
+                    _seq_changed = True
+            if _seq_changed:
+                old_seq = final_sequence
+                final_sequence = ''.join(_seq_list)
+                _n_diff = sum(1 for a, b in zip(old_seq, final_sequence) if a != b)
+                info(f"Reconciled sequence with atoms: {_n_diff} position(s) updated for chain {chain_id}")
+
             # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
             # For synthetic chains (e.g. D-2) from assembly: try base chain ID first, then the
             # full chain_id (handles re-processed generated CIFs where synthetic chains are real entities).
