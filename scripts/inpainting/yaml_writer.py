@@ -74,22 +74,9 @@ def generate_yaml(
     new_lines = []
     for line in lines:
         if line.strip().startswith("chain_id:"):
-            if len(auth_ids) == 1:
-                aid = auth_ids[0]
-                if len(aid) > 1:
-                    # Multi-char chain ID: must use list notation to prevent compact-string misparse
-                    new_lines.append(f"    chain_id: [{_yaml_str(aid)}]")
-                else:
-                    new_lines.append(f"    chain_id: {_yaml_str(aid)}")
-            elif (len(auth_ids) >= 6
-                  and all(len(aid) == 1 for aid in auth_ids)
-                  and len(set(auth_ids)) == len(auth_ids)
-                  and all(c.isalnum() for aid in auth_ids for c in aid)):
-                # Compact notation only when all IDs are unique single alphanumeric chars
-                new_lines.append(f"    chain_id: {''.join(auth_ids)}")
-            else:
-                quoted = [_yaml_str(aid) for aid in auth_ids]
-                new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
+            # Always use explicit list notation to avoid ambiguity (e.g. "AA" vs ["A","A"])
+            quoted = [_yaml_str(aid) for aid in auth_ids]
+            new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
             # Add inpainting_metadata path right after chain_id (relative to output_dir)
             if inpainting_metadata_path is not None:
                 meta_str = _resolve_path(inpainting_metadata_path, output_dir, use_absolute_path)

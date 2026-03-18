@@ -83,6 +83,8 @@ class AssemblyMixin:
             for i, aid in enumerate(gen_ids):
                 expr = oper_exprs[i] if i < len(oper_exprs) else '1'
                 asym_raw = asym_lists[i] if i < len(asym_lists) else ''
+                # Strip CIF multi-line delimiters (leading/trailing ';' and newlines)
+                asym_raw = asym_raw.strip().strip(';').strip()
                 chain_ids_in_gen = [c.strip() for c in asym_raw.split(',') if c.strip()]
                 oper_ids = self._parse_oper_expression(str(expr))
                 result['assembly_gen'].append({

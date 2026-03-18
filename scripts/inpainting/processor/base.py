@@ -300,14 +300,13 @@ class StructureProcessor(
                 error(f"Please specify sequences for each chain: --sequence A:SEQ1,B:SEQ2")
                 fatal(f"Detected chains: {','.join(self.chain_ids)}")
         
-        # Deduplicate author_chain_ids: when multiple label chains share the same auth ID
-        # (e.g. assembly copies of a homo-oligomer), fall back to using the label_asym_id
-        # (which is already unique) as the output chain ID.
+        # Deduplicate author_chain_ids: when any author IDs collide (including
+        # after fallback to label_asym_id), use label_asym_id for ALL chains.
+        # label_asym_ids are guaranteed unique so this is always safe.
         from collections import Counter
-        auth_counts = Counter(self.author_chain_ids.get(c, c) for c in self.chain_ids)
-        for cid in self.chain_ids:
-            auth_id = self.author_chain_ids.get(cid, cid)
-            if auth_counts[auth_id] > 1:
+        auth_vals = [self.author_chain_ids.get(c, c) for c in self.chain_ids]
+        if len(set(auth_vals)) < len(auth_vals):
+            for cid in self.chain_ids:
                 self.author_chain_ids[cid] = cid
 
         # Process each chain
