@@ -102,14 +102,6 @@ def parse_chem_comp(cif_content: Optional[str], comp_ids: Set[str]) -> List[str]
         if not isinstance(v, list):
             cif_dict[k] = [v] * n
 
-    def _quote(s: str) -> str:
-        s = str(s).strip() if s not in (None, '') else '?'
-        if s == '?' or s == '.':
-            return s
-        if ' ' in s or s.startswith("'") or s.startswith('"'):
-            return s if s.startswith("'") else f"'{s}'"
-        return s
-
     comp_id_set = {c.upper() for c in comp_ids}
     found_ids = set()
     lines = []
@@ -117,7 +109,10 @@ def parse_chem_comp(cif_content: Optional[str], comp_ids: Set[str]) -> List[str]
         if cid.upper() not in comp_id_set:
             continue
         found_ids.add(cid.upper())
-        parts = [_quote(cif_dict[k][i] if i < len(cif_dict[k]) else '?') for k in keys]
+        parts = [
+            _cif_value(str(cif_dict[k][i]).strip().replace('\n', ' ') if i < len(cif_dict[k]) else '?')
+            for k in keys
+        ]
         lines.append(' '.join(parts))
     for cid in comp_ids:
         if cid.upper() in found_ids:

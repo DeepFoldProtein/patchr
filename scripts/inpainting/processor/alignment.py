@@ -118,24 +118,19 @@ class AlignmentMixin:
 
         elif num_structure_residues < seq_length:
             # Structure is incomplete - detect where the gap is
-            # Check if residues are numbered sequentially starting from 1
             first_residue_num = residue_keys[0][0] if residue_keys else 1
             last_residue_num = residue_keys[-1][0] if residue_keys else 0
 
-            # If residues are numbered 1, 2, 3, ..., N where N < seq_length
-            # This means there's a gap at the end or middle
+            # If residues are numbered 1, 2, 3, ..., N where N <= seq_length
+            # use auth_seq_id directly as sequence positions
             if first_residue_num == 1 and last_residue_num <= seq_length:
-                # Map structure residues to their corresponding sequence positions
-                # based on their original numbering
                 for idx, key in enumerate(residue_keys):
                     original_num = key[0]
-                    # Map to sequence position based on original residue number
                     residue_mapping[idx] = original_num
 
                 info(f"Found {num_structure_residues} residues in structure out of {seq_length} in sequence")
                 info(f"Structure residues numbered {first_residue_num} to {last_residue_num}")
 
-                # Check for gaps in the middle
                 expected_residues = set(range(first_residue_num, last_residue_num + 1))
                 actual_residues = set(key[0] for key in residue_keys)
                 missing_in_range = expected_residues - actual_residues
@@ -146,22 +141,105 @@ class AlignmentMixin:
                 if last_residue_num < seq_length:
                     info(f"Residues {last_residue_num + 1} to {seq_length} will be inpainted")
             else:
-                # Fallback: use simple sequential mapping
-                for idx, key in enumerate(residue_keys):
-                    residue_mapping[idx] = idx + 1
-                info(f"Found {num_structure_residues} residues in structure out of {seq_length} in sequence")
-                info(f"Using sequential mapping (structure residue numbering doesn't start from 1)")
+                # auth_seq_id doesn't start from 1 — use sequence alignment
+                residue_mapping = self._align_nucleotide_residues_to_seqres(
+                    residue_keys, residue_info, seqres_sequence, seq_length,
+                )
         else:
-            # Structure covers full sequence or more
-            # Simple sequential mapping starting from 1
-            for idx, key in enumerate(residue_keys):
-                residue_mapping[idx] = idx + 1
-            info(f"Found {num_structure_residues} residues in structure")
+            # Structure covers full sequence or more — use sequence alignment
+            residue_mapping = self._align_nucleotide_residues_to_seqres(
+                residue_keys, residue_info, seqres_sequence, seq_length,
+            )
 
         if residue_mapping:
             mapped_positions = sorted(residue_mapping.values())
             info(f"Mapped to sequence positions: {min(mapped_positions)} to {max(mapped_positions)}")
 
+        return residue_mapping
+
+    def _align_nucleotide_residues_to_seqres(
+        self,
+        residue_keys: list,
+        residue_info: dict,
+        seqres_sequence: str,
+        seq_length: int,
+    ) -> Dict[int, int]:
+        """Align nucleotide structure residues to SEQRES using sequence alignment.
+
+        Builds a 1-letter sequence from atom comp_ids and aligns it against the
+        SEQRES to find the correct offset/mapping.
+        """
+        # DNA 3-letter to 1-letter
+        nuc_to_one = {
+            'DA': 'A', 'DC': 'C', 'DG': 'G', 'DT': 'T', 'DI': 'I',
+            'A': 'A', 'C': 'C', 'G': 'G', 'U': 'U', 'T': 'T', 'I': 'I',
+        }
+
+        # Build 1-letter sequence from structure atoms
+        struct_seq_chars = []
+        for key in residue_keys:
+            atoms_for_res = residue_info[key]['atoms']
+            comp_id = atoms_for_res[0].get('label_comp_id', 'N').upper()
+            struct_seq_chars.append(nuc_to_one.get(comp_id, 'N'))
+        struct_seq = ''.join(struct_seq_chars)
+
+        num_structure_residues = len(residue_keys)
+
+        # Try offset-based matching first (fast)
+        best_offset = 0
+        max_matches = 0
+        seqres_upper = seqres_sequence.upper()
+
+        for offset in range(seq_length - num_structure_residues + 1):
+            matches = sum(
+                1 for i in range(num_structure_residues)
+                if struct_seq[i] == seqres_upper[offset + i]
+            )
+            if matches > max_matches:
+                max_matches = matches
+                best_offset = offset
+
+        match_ratio = max_matches / num_structure_residues if num_structure_residues > 0 else 0
+
+        if match_ratio >= 0.8:
+            residue_mapping = {}
+            for idx in range(num_structure_residues):
+                residue_mapping[idx] = best_offset + idx + 1
+            info(f"Found {num_structure_residues} residues in structure out of {seq_length} in sequence")
+            info(f"Aligned with offset {best_offset} (match ratio: {match_ratio:.2f})")
+            return residue_mapping
+
+        # Fallback: use Bio.Align for gapped alignment
+        try:
+            aligner = Align.PairwiseAligner()
+            aligner.mode = 'local'
+            aligner.match_score = 2
+            aligner.mismatch_score = -1
+            aligner.open_gap_score = -3
+            aligner.extend_gap_score = -0.5
+            alignments = aligner.align(seqres_upper, struct_seq)
+            if alignments:
+                best = alignments[0]
+                # Extract mapping from alignment
+                residue_mapping = {}
+                aligned = best.aligned
+                struct_idx = 0
+                for (seq_start, seq_end), (qry_start, qry_end) in zip(aligned[0], aligned[1]):
+                    for i in range(seq_end - seq_start):
+                        if qry_start + i < num_structure_residues:
+                            residue_mapping[qry_start + i] = seq_start + i + 1  # 1-based
+                info(f"Found {num_structure_residues} residues in structure out of {seq_length} in sequence")
+                info(f"Used pairwise alignment (mapped {len(residue_mapping)} residues)")
+                return residue_mapping
+        except Exception as e:
+            warning(f"Pairwise alignment failed: {e}")
+
+        # Ultimate fallback: sequential mapping
+        residue_mapping = {}
+        for idx in range(num_structure_residues):
+            residue_mapping[idx] = idx + 1
+        info(f"Found {num_structure_residues} residues in structure out of {seq_length} in sequence")
+        info(f"Using sequential mapping (fallback)")
         return residue_mapping
 
     def get_residue_mapping(self, atoms: List[Dict], seqres_sequence: str, final_sequence: str, chain_id: Optional[str] = None) -> Dict[int, int]:
