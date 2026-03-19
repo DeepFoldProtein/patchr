@@ -60,9 +60,11 @@ def to_mmcif(
         sequence = [str(res["name"]) for res in residues]
         sequences[entity] = sequence
 
-    # Create entity objects
+    # Create entity objects, caching by (mol_type, sequence_tuple) to avoid
+    # ihm "Duplicate entity" errors when multiple chains share the same sequence.
     lig_entity = None
     entities_map = {}
+    _entity_cache = {}  # (mol_type, seq_tuple) -> Entity
     for entity, sequence in sequences.items():
         mol_type = entity_to_moltype[entity]
 
@@ -89,11 +91,16 @@ def to_mmcif(
                 lig_entity = Entity(seq)
             model_e = lig_entity
         else:
-            seq = [
-                alphabet[item] if item in alphabet else chem_comp(item)
-                for item in sequence
-            ]
-            model_e = Entity(seq)
+            cache_key = (mol_type, tuple(sequence))
+            if cache_key in _entity_cache:
+                model_e = _entity_cache[cache_key]
+            else:
+                seq = [
+                    alphabet[item] if item in alphabet else chem_comp(item)
+                    for item in sequence
+                ]
+                model_e = Entity(seq)
+                _entity_cache[cache_key] = model_e
 
         for chain in entity_to_chains[entity]:
             chain_idx = chain["asym_id"]
