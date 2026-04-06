@@ -188,6 +188,47 @@ def _parse_crystallographic(
     return cell_lines, symmetry_lines, atom_sites_lines
 
 
+def _remove_chem_comp_block(cif_str: str) -> str:
+    """Remove existing _chem_comp loop block from CIF string to avoid duplicates."""
+    lines = cif_str.split("\n")
+    result: list[str] = []
+    skip = False
+    # Track whether we just saw a `loop_` that starts a _chem_comp block
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # Detect `loop_` followed by `_chem_comp.` columns
+        if line.strip() == "loop_" and i + 1 < len(lines) and lines[i + 1].strip().startswith("_chem_comp."):
+            # Skip the entire loop_ block: header columns + data rows + trailing #
+            skip = True
+            i += 1
+            continue
+        if skip:
+            stripped = line.strip()
+            if stripped.startswith("_chem_comp."):
+                # Still in column headers
+                i += 1
+                continue
+            if stripped == "#" or stripped == "":
+                # End of block (or separator between blocks)
+                if stripped == "#":
+                    i += 1
+                skip = False
+                continue
+            if stripped.startswith("_") or stripped.startswith("loop_") or stripped.startswith("data_"):
+                # Entered a new section — stop skipping
+                skip = False
+                result.append(line)
+                i += 1
+                continue
+            # Data row — skip it
+            i += 1
+            continue
+        result.append(line)
+        i += 1
+    return "\n".join(result)
+
+
 def _quote_cif(v: str) -> str:
     """Quote an mmCIF value if it contains whitespace (required by the mmCIF spec)."""
     s = str(v) if v is not None else "?"
@@ -314,6 +355,8 @@ def merge_template_blocks_into_cif(
 
     chem_comp_lines = _parse_chem_comp(template_content, comp_ids)
     if chem_comp_lines:
+        # Remove existing ModelCIF _chem_comp block to avoid duplicate tags
+        output_cif_str = _remove_chem_comp_block(output_cif_str)
         extra.append("loop_")
         extra.append("_chem_comp.id")
         extra.append("_chem_comp.type")
