@@ -8,7 +8,6 @@ import {
   Square,
   CheckSquare
 } from "lucide-react";
-import { useAtomValue } from "jotai";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
@@ -18,7 +17,7 @@ import {
   DialogTitle,
   DialogDescription
 } from "./ui/dialog";
-import { apiUrlAtom } from "../store/api-atoms";
+import { pdb2cif } from "../lib/gemmi-wasm/pdb2cif";
 
 interface ChainInfo {
   id: string;
@@ -295,7 +294,6 @@ export function StructureUploadModal({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdbId, setPdbId] = useState("");
-  const apiUrl = useAtomValue(apiUrlAtom);
 
   // Chain selection state
   const [fetchedContent, setFetchedContent] = useState<string | null>(null);
@@ -333,29 +331,17 @@ export function StructureUploadModal({
         let content = await file.text();
         let savedFilename = file.name;
 
-        // Convert PDB to mmCIF via server for proper SEQRES/entity handling
+        // Convert PDB to mmCIF via gemmi-wasm for proper SEQRES/entity handling
         if (filename.endsWith(".pdb")) {
           try {
-            const formData = new FormData();
-            formData.append("file", file);
-            const resp = await fetch(
-              `${apiUrl}/api/v1/convert/pdb-to-cif`,
-              { method: "POST", body: formData }
-            );
-            if (resp.ok) {
-              const result = await resp.json();
-              content = result.cif_content;
-              savedFilename = result.filename;
-            } else {
-              // Server unavailable – fall back to raw PDB
-              console.warn(
-                "PDB→CIF conversion failed; loading raw PDB. Gap detection may be inaccurate."
-              );
-            }
-          } catch {
-            // Server unreachable – fall back to raw PDB
+            content = await pdb2cif(content);
+            savedFilename =
+              file.name.replace(/\.pdb$/i, "") + ".cif";
+          } catch (err) {
+            // Conversion failed – fall back to raw PDB
             console.warn(
-              "Server unreachable for PDB→CIF conversion; loading raw PDB."
+              "PDB→CIF conversion failed; loading raw PDB. Gap detection may be inaccurate.",
+              err
             );
           }
         }
@@ -380,7 +366,7 @@ export function StructureUploadModal({
         setIsLoading(false);
       }
     },
-    [onStructureLoaded, apiUrl]
+    [onStructureLoaded]
   );
 
   const handleDrop = useCallback(
