@@ -121,7 +121,9 @@ class AssemblyMixin:
                         float(v[r][i]) if i < len(v[r]) else 0.0
                         for r in range(1, 4)
                     ]
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    warning(f"Failed to parse matrix/vector for oper {oid}: {e}; "
+                            "defaulting to identity (will be skipped as identity)")
                     matrix = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
                     vector = [0.0, 0.0, 0.0]
                 result['operations'][str(oid)] = {
@@ -176,9 +178,41 @@ class AssemblyMixin:
                 new_atom['Cartn_y'] = f"{R[1][0]*x + R[1][1]*y + R[1][2]*z + t[1]:.3f}"
                 new_atom['Cartn_z'] = f"{R[2][0]*x + R[2][1]*y + R[2][2]*z + t[2]:.3f}"
             except (TypeError, ValueError):
-                pass
+                warning(f"Failed to transform atom coords: "
+                        f"({atom.get('Cartn_x')}, {atom.get('Cartn_y')}, {atom.get('Cartn_z')})")
+                return []  # Return empty to signal transform failure
             transformed.append(new_atom)
         return transformed
+
+    def _chains_clash(self, atoms1: List[Dict], atoms2: List[Dict],
+                      dist_thresh: float = 1.7, freq_thresh: float = 0.3) -> bool:
+        """Check if two sets of atoms are clashing (>freq_thresh atoms within dist_thresh Å)."""
+        if not atoms1 or not atoms2:
+            return False
+        try:
+            import numpy as np
+            c1 = np.array([[float(a.get('Cartn_x', 0)), float(a.get('Cartn_y', 0)),
+                            float(a.get('Cartn_z', 0))] for a in atoms1])
+            c2 = np.array([[float(a.get('Cartn_x', 0)), float(a.get('Cartn_y', 0)),
+                            float(a.get('Cartn_z', 0))] for a in atoms2])
+            # For large chains, sample to keep check fast
+            max_sample = 200
+            if len(c2) > max_sample:
+                idx = np.linspace(0, len(c2) - 1, max_sample, dtype=int)
+                c2_sample = c2[idx]
+            else:
+                c2_sample = c2
+            # Check min distance from each c2 atom to any c1 atom
+            n_clash = 0
+            dist_sq = dist_thresh ** 2
+            for pt in c2_sample:
+                diffs = c1 - pt
+                dists_sq = (diffs * diffs).sum(axis=1)
+                if dists_sq.min() < dist_sq:
+                    n_clash += 1
+            return (n_clash / len(c2_sample)) > freq_thresh
+        except (TypeError, ValueError):
+            return False
 
     def _print_assembly_info(self, assembly_info: Dict) -> None:
         """Print a summary table of available assemblies."""
@@ -280,6 +314,17 @@ class AssemblyMixin:
                             orig_atoms = self.parse_atom_records(orig_chain)
                             if orig_atoms:
                                 transformed = self.apply_oper_to_atoms(orig_atoms, oper)
+                                if not transformed:
+                                    warning(f"Transform failed for chain {orig_chain} "
+                                            f"with oper {oper_id}; skipping {new_chain_id}.")
+                                    continue
+                                # Check if transformed chain clashes with the original
+                                # (happens when atoms sit on the symmetry axis)
+                                if self._chains_clash(orig_atoms, transformed):
+                                    warning(f"Synthetic chain {new_chain_id} clashes with "
+                                            f"original {orig_chain} (atoms on symmetry axis); "
+                                            f"skipping.")
+                                    continue
                                 # Update chain identifiers in each atom
                                 for atom in transformed:
                                     atom['label_asym_id'] = new_chain_id

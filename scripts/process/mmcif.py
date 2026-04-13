@@ -864,16 +864,20 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
 
     # Clean up the structure
     structure.merge_chain_parts()
-    structure.remove_waters()
     structure.remove_hydrogens()
     structure.remove_alternative_conformations()
     structure.remove_empty_chains()
 
-    # Expand assembly 1
+    # Expand assembly 1 (must happen before remove_waters, because
+    # assembly definitions may reference water subchains)
     if use_assembly and structure.assemblies:
         how = gemmi.HowToNameCopiedChain.AddNumber
         assembly_name = structure.assemblies[0].name
         structure.transform_to_assembly(assembly_name, how=how)
+
+    # Remove waters after assembly expansion
+    structure.remove_waters()
+    structure.remove_empty_chains()
 
     # Parse entities
     # Create mapping from subchain id to entity
