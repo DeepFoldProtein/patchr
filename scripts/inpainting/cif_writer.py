@@ -15,6 +15,10 @@ def _cif_value(v: str) -> str:
     (_ $ ' " [ ;) are wrapped in single quotes.  Values that themselves
     contain single quotes are wrapped in double quotes instead.
     Plain tokens (including '?' and '.') are returned as-is.
+
+    When both quote types are present, double quotes in the value are
+    replaced with prime characters to avoid semicolon text blocks
+    (which break CIF loop formatting).
     """
     s = str(v) if v is not None else '?'
     if not s:
@@ -33,8 +37,10 @@ def _cif_value(v: str) -> str:
         return f"'{s}'"
     if '"' not in s:
         return f'"{s}"'
-    # Both quote types present — fall back to semicolon text block
-    return f"\n;{s}\n;"
+    # Both quote types present — strip double quotes so we can use
+    # double-quote wrapping (semicolon text blocks break CIF loops)
+    s = s.replace('"', "'")
+    return f'"{s}"'
 
 
 def format_sequence_for_cif(sequence: str, width: int = 80) -> str:
