@@ -8,6 +8,7 @@ import {
   Square,
   CheckSquare
 } from "lucide-react";
+import { useAtomValue } from "jotai";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
@@ -17,6 +18,7 @@ import {
   DialogTitle,
   DialogDescription
 } from "./ui/dialog";
+import { apiUrlAtom } from "../store/api-atoms";
 
 interface ChainInfo {
   id: string;
@@ -293,6 +295,7 @@ export function StructureUploadModal({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdbId, setPdbId] = useState("");
+  const apiUrl = useAtomValue(apiUrlAtom);
 
   // Chain selection state
   const [fetchedContent, setFetchedContent] = useState<string | null>(null);
@@ -327,12 +330,40 @@ export function StructureUploadModal({
       setError(null);
 
       try {
-        const content = await file.text();
+        let content = await file.text();
+        let savedFilename = file.name;
+
+        // Convert PDB to mmCIF via server for proper SEQRES/entity handling
+        if (filename.endsWith(".pdb")) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            const resp = await fetch(
+              `${apiUrl}/api/v1/convert/pdb-to-cif`,
+              { method: "POST", body: formData }
+            );
+            if (resp.ok) {
+              const result = await resp.json();
+              content = result.cif_content;
+              savedFilename = result.filename;
+            } else {
+              // Server unavailable – fall back to raw PDB
+              console.warn(
+                "PDB→CIF conversion failed; loading raw PDB. Gap detection may be inaccurate."
+              );
+            }
+          } catch {
+            // Server unreachable – fall back to raw PDB
+            console.warn(
+              "Server unreachable for PDB→CIF conversion; loading raw PDB."
+            );
+          }
+        }
 
         // Save to project's original folder
         const saveResult = await window.api.project.saveStructureContent(
           "original",
-          file.name,
+          savedFilename,
           content
         );
 
@@ -340,7 +371,7 @@ export function StructureUploadModal({
           throw new Error(saveResult.error || "Failed to save structure file");
         }
 
-        onStructureLoaded(content, file.name);
+        onStructureLoaded(content, savedFilename);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to load structure file";
@@ -349,7 +380,7 @@ export function StructureUploadModal({
         setIsLoading(false);
       }
     },
-    [onStructureLoaded]
+    [onStructureLoaded, apiUrl]
   );
 
   const handleDrop = useCallback(

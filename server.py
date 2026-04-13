@@ -1007,6 +1007,29 @@ def _run_protenix_prediction_sync(
 
 # ── API endpoints ────────────────────────────────────────────────────────────
 
+
+@app.post("/api/v1/convert/pdb-to-cif")
+async def convert_pdb_to_cif(
+    file: UploadFile = File(..., description="PDB file to convert"),
+):
+    """Convert a PDB file to mmCIF format.
+
+    Returns the converted mmCIF content as a plain-text response.
+    Used by Studio to ensure PDB files get proper SEQRES/entity handling.
+    """
+    content = await file.read()
+    try:
+        import gemmi
+        pdb_text = content.decode("utf-8", errors="replace")
+        structure = gemmi.read_pdb_string(pdb_text)
+        structure.setup_entities()
+        structure.assign_label_seq_id()
+        cif_text = structure.make_mmcif_document().as_string()
+        return JSONResponse({"cif_content": cif_text, "filename": Path(file.filename).stem + ".cif"})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to convert PDB to mmCIF: {str(e)}")
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -1071,23 +1094,42 @@ async def generate_template(
 @app.post("/api/v1/template/upload", response_model=JobStatusResponse)
 async def upload_structure(
     background_tasks: BackgroundTasks,
-    cif_file: UploadFile = File(..., description="CIF structure file"),
+    cif_file: UploadFile = File(..., description="Structure file (CIF or PDB)"),
     chain_ids: str = Form(..., description="Chain IDs (e.g., 'A' or 'A,B')"),
     custom_sequences: Optional[str] = Form(None, description="Custom sequences in format 'A:SEQ1,B:SEQ2'"),
 ):
-    """Upload a CIF structure file and generate inpainting template."""
+    """Upload a structure file (CIF or PDB) and generate inpainting template."""
     print(f"[API] POST /api/v1/template/upload filename={cif_file.filename} chain_ids={chain_ids}")
 
-    if not cif_file.filename.endswith((".cif", ".mmcif")):
-        raise HTTPException(status_code=400, detail="File must be a CIF file (.cif or .mmcif)")
+    if not cif_file.filename.endswith((".cif", ".mmcif", ".pdb")):
+        raise HTTPException(status_code=400, detail="File must be a CIF (.cif, .mmcif) or PDB (.pdb) file")
 
     job_id = str(uuid.uuid4())
     job_dir = WORK_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    cif_path = job_dir / cif_file.filename
+    content = await cif_file.read()
+
+    # If PDB format, convert to mmCIF so downstream processing is uniform
+    if cif_file.filename.endswith(".pdb"):
+        try:
+            import gemmi
+            pdb_text = content.decode("utf-8", errors="replace")
+            structure = gemmi.read_pdb_string(pdb_text)
+            structure.setup_entities()
+            structure.assign_label_seq_id()
+            cif_text = structure.make_mmcif_document().as_string()
+            content = cif_text.encode("utf-8")
+            # Save as .cif instead of .pdb
+            cif_filename = Path(cif_file.filename).stem + ".cif"
+            print(f"[API] Converted PDB → mmCIF: {cif_file.filename} → {cif_filename}")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to convert PDB to mmCIF: {str(e)}")
+    else:
+        cif_filename = cif_file.filename
+
+    cif_path = job_dir / cif_filename
     with open(cif_path, "wb") as f:
-        content = await cif_file.read()
         f.write(content)
 
     custom_seq_dict = None
