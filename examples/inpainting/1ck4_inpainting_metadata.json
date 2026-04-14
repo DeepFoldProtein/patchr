@@ -199,7 +199,13 @@
                 {
                     "residue": 195,
                     "fixed_atoms": 1,
-                    "total_atoms": 5
+                    "total_atoms": 5,
+                    "missing_atoms": [
+                        "C",
+                        "CA",
+                        "CB",
+                        "O"
+                    ]
                 }
             ],
             "fully_inpainted_residues": [

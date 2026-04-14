@@ -212,7 +212,10 @@ class ValidationMixin:
                     residues_fully_fixed.append(seq_pos)
                 elif len(actual_atoms) > 0:
                     # Some atoms missing
-                    residues_partially_fixed.append((seq_pos, len(actual_atoms), len(expected_atoms)))
+                    missing_atoms = sorted(expected_atoms - all_actual_atoms)
+                    residues_partially_fixed.append(
+                        (seq_pos, len(actual_atoms), len(expected_atoms), missing_atoms)
+                    )
                 else:
                     # No expected atoms present (only non-standard atoms like hydrogen)
                     residues_fully_inpainted.append(seq_pos)
@@ -260,8 +263,9 @@ class ValidationMixin:
 
             detail(f"Residues PARTIALLY FIXED (some atoms have structure, some need inpainting): {len(residues_partially_fixed)}")
             if residues_partially_fixed:
-                for res_idx, fixed_atoms, total_atoms in residues_partially_fixed:
-                    detail(f"  Residue {res_idx}: {fixed_atoms}/{total_atoms} atoms fixed")
+                for res_idx, fixed_atoms, total_atoms, missing in residues_partially_fixed:
+                    missing_str = ", ".join(missing) if missing else "-"
+                    detail(f"  Residue {res_idx}: {fixed_atoms}/{total_atoms} atoms fixed (missing: {missing_str})")
             else:
                 detail("  Residues: (none)")
 
@@ -316,7 +320,12 @@ class ValidationMixin:
         metadata = {
             "fully_fixed_residues": residues_fully_fixed,
             "partially_fixed_residues": [
-                {"residue": r[0], "fixed_atoms": r[1], "total_atoms": r[2]}
+                {
+                    "residue": r[0],
+                    "fixed_atoms": r[1],
+                    "total_atoms": r[2],
+                    "missing_atoms": r[3],
+                }
                 for r in residues_partially_fixed
             ],
             "fully_inpainted_residues": residues_fully_inpainted,

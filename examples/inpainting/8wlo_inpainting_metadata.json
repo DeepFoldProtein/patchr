@@ -4275,37 +4275,58 @@
                 {
                     "residue": 88,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 },
                 {
                     "residue": 120,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 },
                 {
                     "residue": 125,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 },
                 {
                     "residue": 206,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 },
                 {
                     "residue": 241,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 },
                 {
                     "residue": 407,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CD"
+                    ]
                 },
                 {
                     "residue": 560,
                     "fixed_atoms": 6,
-                    "total_atoms": 7
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2"
+                    ]
                 }
             ],
             "fully_inpainted_residues": [],
