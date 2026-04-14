@@ -29,8 +29,77 @@ def _get_output_cif_tags(cif_str: str) -> Tuple[Set[str], Set[str]]:
     return chain_ids, comp_ids
 
 
-def _parse_struct_conn(cif_content: str, chain_ids: Set[str]) -> Tuple[list, set]:
-    """Parse _struct_conn from CIF; return rows for selected chains and conn_type_ids."""
+def _build_coord_lookup(cif_str: str):
+    """Build (label_asym_id, label_seq_id, label_atom_id) → (x, y, z) lookup
+    from a prediction CIF string.  Falls back to auth_seq_id for non-polymer
+    residues whose label_seq_id is '?' or '.'."""
+    try:
+        d = MMCIF2Dict(StringIO(cif_str))
+    except Exception:
+        return lambda *_a, **_kw: None
+    if "_atom_site.Cartn_x" not in d:
+        return lambda *_a, **_kw: None
+    asym = d.get("_atom_site.label_asym_id", [])
+    seq = d.get("_atom_site.label_seq_id", [])
+    auth_seq = d.get("_atom_site.auth_seq_id", [])
+    name = d.get("_atom_site.label_atom_id", [])
+    xs = d.get("_atom_site.Cartn_x", [])
+    ys = d.get("_atom_site.Cartn_y", [])
+    zs = d.get("_atom_site.Cartn_z", [])
+    for var in (asym, seq, auth_seq, name, xs, ys, zs):
+        if not isinstance(var, list):
+            # Single-row CIF — normalise to lists below.
+            pass
+    def _tolist(v, default):
+        if isinstance(v, list):
+            return v
+        if v is None:
+            return default
+        return [v]
+    asym, seq, auth_seq, name, xs, ys, zs = (
+        _tolist(asym, []), _tolist(seq, []), _tolist(auth_seq, []),
+        _tolist(name, []), _tolist(xs, []), _tolist(ys, []), _tolist(zs, []),
+    )
+
+    table = {}
+    auth_table = {}
+    for i in range(len(asym)):
+        try:
+            x = float(xs[i]); y = float(ys[i]); z = float(zs[i])
+        except (TypeError, ValueError, IndexError):
+            continue
+        a = str(asym[i]) if i < len(asym) else ""
+        s = str(seq[i]) if i < len(seq) else "?"
+        ats = str(auth_seq[i]) if i < len(auth_seq) else "?"
+        nm = str(name[i]) if i < len(name) else ""
+        table[(a, s, nm)] = (x, y, z)
+        auth_table[(a, ats, nm)] = (x, y, z)
+
+    def lookup(asym_id, seq_id, atom_name):
+        key = (str(asym_id), str(seq_id), str(atom_name))
+        if key in table:
+            return table[key]
+        if key in auth_table:
+            return auth_table[key]
+        return None
+
+    return lookup
+
+
+def _parse_struct_conn(
+    cif_content: str,
+    chain_ids: Set[str],
+    coord_lookup=None,
+    max_bond_distance: float = 3.5,
+) -> Tuple[list, set]:
+    """Parse _struct_conn from CIF; return rows for selected chains and conn_type_ids.
+
+    When ``coord_lookup`` is provided (built from the prediction CIF), each
+    bond's distance is recomputed from the actual generated atom coordinates
+    and ``_struct_conn.pdbx_dist_value`` is rewritten.  Bonds whose distance
+    exceeds ``max_bond_distance`` are dropped, since they no longer represent
+    an actual covalent link in the predicted structure.
+    """
     if not cif_content or not chain_ids:
         return [], set()
     try:
@@ -56,13 +125,38 @@ def _parse_struct_conn(cif_content: str, chain_ids: Set[str]) -> Tuple[list, set
     if n is None or n == 0:
         return [], set()
     rows = []
+    dropped = 0
     for i in range(n):
         row = {k: (cif_dict[k][i] if i < len(cif_dict[k]) else "?") for k in conn_keys}
         p1 = row.get("_struct_conn.ptnr1_label_asym_id", "")
         p2 = row.get("_struct_conn.ptnr2_label_asym_id", "")
-        if p1 in chain_ids and p2 in chain_ids:
-            rows.append(row)
+        if p1 not in chain_ids or p2 not in chain_ids:
+            continue
+
+        if coord_lookup is not None:
+            c1 = coord_lookup(
+                p1,
+                row.get("_struct_conn.ptnr1_label_seq_id", "?"),
+                row.get("_struct_conn.ptnr1_label_atom_id", ""),
+            )
+            c2 = coord_lookup(
+                p2,
+                row.get("_struct_conn.ptnr2_label_seq_id", "?"),
+                row.get("_struct_conn.ptnr2_label_atom_id", ""),
+            )
+            if c1 is not None and c2 is not None:
+                dist = ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2) ** 0.5
+                if dist > max_bond_distance:
+                    dropped += 1
+                    continue
+                row["_struct_conn.pdbx_dist_value"] = f"{dist:.3f}"
+
+        rows.append(row)
     conn_type_ids = {row.get("_struct_conn.conn_type_id", "covale") for row in rows}
+    if dropped:
+        print(f"[merge_cif_blocks] Dropped {dropped} _struct_conn record(s) "
+              f"whose recomputed distance exceeded {max_bond_distance}Å "
+              f"(bond broken by inpainting).")
     return rows, conn_type_ids
 
 
@@ -334,8 +428,11 @@ def merge_template_blocks_into_cif(
 
     extra: list[str] = []
 
+    # Build a coord lookup from the prediction CIF so struct_conn distances
+    # are validated/recomputed against the generated coordinates.
+    coord_lookup = _build_coord_lookup(output_cif_str)
     struct_conn_rows, struct_conn_type_ids = _parse_struct_conn(
-        template_content, chain_ids
+        template_content, chain_ids, coord_lookup=coord_lookup
     )
     if struct_conn_rows:
         extra.append("loop_")
