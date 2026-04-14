@@ -51,8 +51,60 @@ def format_sequence_for_cif(sequence: str, width: int = 80) -> str:
     return '\n'.join(lines)
 
 
-def parse_struct_conn(cif_content: Optional[str], chain_ids: Set[str]) -> Tuple[List[Dict[str, str]], Set[str]]:
-    """Parse _struct_conn from source CIF; return rows for selected chains and conn_type_ids."""
+def _atom_coord_lookup(atoms_by_chain: Optional[Dict[str, List[Dict]]]):
+    """Build a lookup (label_asym_id, label_seq_id, label_atom_id) → (x, y, z).
+
+    Returns a function that looks up atom coordinates by CIF struct_conn partner
+    fields.  ``label_seq_id`` may be '?' or '.' for non-polymer entities; in that
+    case the function also accepts auth_seq_id as a fallback.
+    """
+    if not atoms_by_chain:
+        return lambda *_args, **_kw: None
+
+    table: Dict[Tuple[str, str, str], Tuple[float, float, float]] = {}
+    auth_table: Dict[Tuple[str, str, str], Tuple[float, float, float]] = {}
+    for chain_id, atoms in atoms_by_chain.items():
+        for atom in atoms:
+            try:
+                x = float(atom.get('Cartn_x'))
+                y = float(atom.get('Cartn_y'))
+                z = float(atom.get('Cartn_z'))
+            except (TypeError, ValueError):
+                continue
+            label_seq = str(atom.get('label_seq_id', '?'))
+            auth_seq = str(atom.get('auth_seq_id', '?'))
+            atom_name = str(atom.get('label_atom_id', ''))
+            label_asym = str(atom.get('label_asym_id', chain_id))
+            table[(label_asym, label_seq, atom_name)] = (x, y, z)
+            auth_table[(label_asym, auth_seq, atom_name)] = (x, y, z)
+
+    def lookup(asym_id: str, seq_id: str, atom_name: str):
+        key = (asym_id, str(seq_id), atom_name)
+        if key in table:
+            return table[key]
+        if key in auth_table:
+            return auth_table[key]
+        return None
+
+    return lookup
+
+
+def parse_struct_conn(
+    cif_content: Optional[str],
+    chain_ids: Set[str],
+    atoms_by_chain: Optional[Dict[str, List[Dict]]] = None,
+    max_bond_distance: float = 3.5,
+) -> Tuple[List[Dict[str, str]], Set[str]]:
+    """Parse _struct_conn from source CIF; return rows for selected chains and conn_type_ids.
+
+    When ``atoms_by_chain`` is provided, each bond's distance is recomputed from
+    the actual (possibly regenerated) atom coordinates.  Bonds whose recomputed
+    distance exceeds ``max_bond_distance`` are dropped — they would otherwise
+    falsely claim an unbroken covalent link that the generated coordinates do
+    not support.  The ``pdbx_dist_value`` field is rewritten with the new
+    distance so downstream consumers see a value consistent with the output
+    coordinates.
+    """
     if not cif_content:
         return [], set()
     try:
@@ -73,14 +125,46 @@ def parse_struct_conn(cif_content: Optional[str], chain_ids: Set[str]) -> Tuple[
             cif_dict[k] = [v]
     if n is None or n == 0:
         return [], set()
+
+    coord_lookup = _atom_coord_lookup(atoms_by_chain)
     rows = []
+    dropped = 0
     for i in range(n):
         row = {k: (cif_dict[k][i] if i < len(cif_dict[k]) else '?') for k in conn_keys}
         p1 = row.get('_struct_conn.ptnr1_label_asym_id', '')
         p2 = row.get('_struct_conn.ptnr2_label_asym_id', '')
-        if p1 in chain_ids and p2 in chain_ids:
-            rows.append(row)
+        if p1 not in chain_ids or p2 not in chain_ids:
+            continue
+
+        if atoms_by_chain:
+            c1 = coord_lookup(
+                p1,
+                row.get('_struct_conn.ptnr1_label_seq_id', '?'),
+                row.get('_struct_conn.ptnr1_label_atom_id', ''),
+            )
+            c2 = coord_lookup(
+                p2,
+                row.get('_struct_conn.ptnr2_label_seq_id', '?'),
+                row.get('_struct_conn.ptnr2_label_atom_id', ''),
+            )
+            if c1 is not None and c2 is not None:
+                dist = ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2) ** 0.5
+                if dist > max_bond_distance:
+                    dropped += 1
+                    continue
+                row['_struct_conn.pdbx_dist_value'] = f"{dist:.3f}"
+
+        rows.append(row)
     conn_type_ids = {row.get('_struct_conn.conn_type_id', 'covale') for row in rows}
+    if dropped:
+        # Inform the caller via a side-channel — parse_struct_conn is used in a
+        # few places; logging here keeps the signature compatible.
+        try:
+            from .processor.log import warning
+            warning(f"Dropped {dropped} _struct_conn record(s) whose recomputed "
+                    f"distance exceeded {max_bond_distance}Å (likely broken by inpainting).")
+        except Exception:
+            pass
     return rows, conn_type_ids
 
 
@@ -392,7 +476,16 @@ def generate_cif(
     lines.append("#")
 
     chain_id_set = set(chain_ids)
-    struct_conn_rows, struct_conn_type_ids = parse_struct_conn(cif_content, chain_id_set)
+    # Build chain_id -> atoms mapping so parse_struct_conn can recompute bond
+    # distances from actual (possibly regenerated) coordinates.
+    atoms_by_chain = {
+        cid: all_chains_data[cid].get('atoms', [])
+        for cid in chain_ids
+        if all_chains_data.get(cid)
+    }
+    struct_conn_rows, struct_conn_type_ids = parse_struct_conn(
+        cif_content, chain_id_set, atoms_by_chain=atoms_by_chain
+    )
     author_for_label = {cid: all_chains_data[cid].get('author_chain_id', cid) for cid in chain_ids}
     if struct_conn_rows:
         lines.append("loop_")
