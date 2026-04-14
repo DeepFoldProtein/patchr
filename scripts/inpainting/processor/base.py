@@ -284,7 +284,11 @@ class StructureProcessor(
                 added = [c for c in ligand_chains if c not in self.chain_ids]
                 for c in added:
                     self.chain_ids = list(self.chain_ids) + [c]
-                    self.author_chain_ids[c] = c
+                    # Resolve author chain ID from _atom_site if possible.
+                    if hasattr(self, 'label_to_auth') and self.label_to_auth:
+                        self.author_chain_ids[c] = self.label_to_auth.get(c.upper(), c)
+                    else:
+                        self.author_chain_ids[c] = c
                 if added:
                     info(f"Include ligands: added chain(s) {added}")
         
@@ -300,14 +304,12 @@ class StructureProcessor(
                 error(f"Please specify sequences for each chain: --sequence A:SEQ1,B:SEQ2")
                 fatal(f"Detected chains: {','.join(self.chain_ids)}")
         
-        # Deduplicate author_chain_ids: when any author IDs collide (including
-        # after fallback to label_asym_id), use label_asym_id for ALL chains.
-        # label_asym_ids are guaranteed unique so this is always safe.
-        from collections import Counter
-        auth_vals = [self.author_chain_ids.get(c, c) for c in self.chain_ids]
-        if len(set(auth_vals)) < len(auth_vals):
-            for cid in self.chain_ids:
-                self.author_chain_ids[cid] = cid
+        # NOTE: author_chain_ids may contain duplicates (e.g. 8WLO where all
+        # NAG ligand asym_ids share auth "A"/"B"/"C" with the polymer chains).
+        # That is fine because the output CIF / YAML / metadata key off
+        # label_asym_id (which is guaranteed unique).  The original author
+        # IDs are preserved in _atom_site.auth_asym_id and in the metadata's
+        # chain_mapping, so downstream tools can still recover them.
 
         # Process each chain
         all_chains_data = {}
@@ -327,7 +329,7 @@ class StructureProcessor(
                         author_chain_id = self.author_chain_ids.get(chain_id, chain_id)
                         for atom in atoms:
                             atom['auth_asym_id'] = author_chain_id
-                            atom['label_asym_id'] = author_chain_id
+                            atom['label_asym_id'] = chain_id  # keep unique label
                         assembly_solvent_atoms.extend(atoms)
                         info(f"Chain {chain_id}: solvent ({len(atoms)} atoms)")
                 continue
@@ -412,6 +414,7 @@ class StructureProcessor(
                     atom['label_seq_id'] = 1
                     atom['auth_seq_id'] = atom.get('auth_seq_id') or 1
                     atom['auth_asym_id'] = author_chain_id
+                    atom['label_asym_id'] = chain_id  # unique label
                 # Ligand chains are fully fixed (all atoms from template structure)
                 ligand_atom_names = set(a.get('label_atom_id', '') for a in atoms)
                 ligand_inpainting_meta = {
@@ -795,18 +798,24 @@ class StructureProcessor(
         success(f"Saved CIF file: {cif_path.absolute()}")
 
         # Save inpainting metadata JSON (per-chain, matching boltz2 format)
-        # Must be saved before config so the path can be embedded in it
+        # Must be saved before config so the path can be embedded in it.
+        # Use label_asym_id as the key (matches CIF / YAML chain IDs) and
+        # include a label→author mapping so downstream tools can recover
+        # original author IDs.
         metadata_path = None
         inpainting_meta_by_chain = {}
+        chain_mapping: Dict[str, str] = {}
         for cid, cdata in all_chains_data.items():
             meta = cdata.get('inpainting_metadata')
             if meta is not None:
-                author_cid = cdata.get('author_chain_id', cid)
-                inpainting_meta_by_chain[author_cid] = meta
+                inpainting_meta_by_chain[cid] = meta
+            chain_mapping[cid] = cdata.get('author_chain_id', cid)
         if inpainting_meta_by_chain:
             meta_filename = f"{self.pdb_id.lower()}{suffix}_inpainting_metadata.json"
             metadata_path = output_dir / meta_filename
-            self.save_inpainting_metadata(inpainting_meta_by_chain, metadata_path)
+            self.save_inpainting_metadata(
+                inpainting_meta_by_chain, metadata_path, chain_mapping=chain_mapping
+            )
 
         # Generate and save config (YAML or Protenix JSON)
         if self.output_format == 'protenix-json':

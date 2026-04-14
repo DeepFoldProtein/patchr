@@ -325,8 +325,7 @@ def generate_cif(
     lines.append("_entity_name_com.name")
     for chain_id in chain_ids:
         entity_id = all_chains_data[chain_id]['entity_id']
-        author_chain_id = all_chains_data[chain_id].get('author_chain_id', chain_id)
-        lines.append(f"{entity_id} 'Chain {author_chain_id}'")
+        lines.append(f"{entity_id} 'Chain {chain_id}'")
     if water_entity_id is not None:
         lines.append(f"{water_entity_id} 'Water'")
     lines.append("#")
@@ -388,8 +387,7 @@ def generate_cif(
             lines.append(";")
             lines.append(format_sequence_for_cif(formatted_seq))
             lines.append(";")
-            author_chain_id = all_chains_data[chain_id].get('author_chain_id', chain_id)
-            lines.append(f"{author_chain_id} ?")
+            lines.append(f"{chain_id} ?")
         lines.append("#")
 
         lines.append("loop_")
@@ -464,9 +462,8 @@ def generate_cif(
     lines.append("_struct_asym.entity_id")
     lines.append("_struct_asym.details")
     for chain_id in chain_ids:
-        author_chain_id = all_chains_data[chain_id].get('author_chain_id', chain_id)
         entity_id = all_chains_data[chain_id]['entity_id']
-        lines.append(f"{author_chain_id} N N {entity_id} ?")
+        lines.append(f"{chain_id} N N {entity_id} ?")
     if water_entity_id is not None:
         solvent_asym_ids = sorted({a['label_asym_id'] for a in solvent_atoms}) if solvent_atoms else []
         for asym_id in solvent_asym_ids:
@@ -517,33 +514,20 @@ def generate_cif(
         for k in struct_conn_keys:
             lines.append(k)
         for row in struct_conn_rows:
+            # label_asym_id: keep source CIF's label_asym_id (unique), which
+            # matches the label_asym_id we now write in _atom_site / _struct_asym.
+            # auth_asym_id: translate to our output author ID (may collide, but
+            # preserved for PDB-format compatibility / viewer tooltips).
             p1_label = row.get('_struct_conn.ptnr1_label_asym_id', '?')
             p2_label = row.get('_struct_conn.ptnr2_label_asym_id', '?')
             out_p1_auth = author_for_label.get(p1_label, row.get('_struct_conn.ptnr1_auth_asym_id', '?'))
             out_p2_auth = author_for_label.get(p2_label, row.get('_struct_conn.ptnr2_auth_asym_id', '?'))
-            out_p1_auth_seq = row.get('_struct_conn.ptnr1_label_seq_id', '?')
-            out_p2_auth_seq = row.get('_struct_conn.ptnr2_label_seq_id', '?')
-            out_p1_auth_comp = row.get('_struct_conn.ptnr1_label_comp_id', '?')
-            out_p2_auth_comp = row.get('_struct_conn.ptnr2_label_comp_id', '?')
             vals = []
             for k in struct_conn_keys:
-                if k == '_struct_conn.ptnr1_label_asym_id':
-                    # Translate source label ID to auth ID for consistency
-                    vals.append(author_for_label.get(row.get(k, '?'), row.get(k, '?')))
-                elif k == '_struct_conn.ptnr2_label_asym_id':
-                    vals.append(author_for_label.get(row.get(k, '?'), row.get(k, '?')))
-                elif k == '_struct_conn.ptnr1_auth_asym_id':
+                if k == '_struct_conn.ptnr1_auth_asym_id':
                     vals.append(out_p1_auth)
                 elif k == '_struct_conn.ptnr2_auth_asym_id':
                     vals.append(out_p2_auth)
-                elif k == '_struct_conn.ptnr1_auth_seq_id':
-                    vals.append(out_p1_auth_seq)
-                elif k == '_struct_conn.ptnr2_auth_seq_id':
-                    vals.append(out_p2_auth_seq)
-                elif k == '_struct_conn.ptnr1_auth_comp_id':
-                    vals.append(out_p1_auth_comp)
-                elif k == '_struct_conn.ptnr2_auth_comp_id':
-                    vals.append(out_p2_auth_comp)
                 else:
                     vals.append(row.get(k, '?'))
             lines.append(' '.join(_cif_value(v) for v in vals))
@@ -588,6 +572,9 @@ def generate_cif(
     next_atom_id = 1
     for chain_id in chain_ids:
         atoms = all_chains_data[chain_id]['atoms']
+        # label_asym_id in the output CIF is the processor's chain_id (label).
+        # auth_asym_id preserves the original author chain (may collide).
+        author_chain_id = all_chains_data[chain_id].get('author_chain_id', chain_id)
         use_atom_for_chain = (
             bool(modifications_from_entity_poly.get(chain_id)) or
             any(a.get('group_PDB') == 'HETATM' for a in atoms)
@@ -599,13 +586,13 @@ def generate_cif(
             atom_rows.append([
                 group_pdb, str(atom_id), atom['type_symbol'],
                 atom['label_atom_id'], atom['label_alt_id'],
-                atom['label_comp_id'], atom['auth_asym_id'],
+                atom['label_comp_id'], chain_id,
                 str(atom['label_entity_id']), str(atom['label_seq_id']),
                 atom['pdbx_PDB_ins_code'], atom['Cartn_x'],
                 atom['Cartn_y'], atom['Cartn_z'],
                 atom['occupancy'], atom['B_iso_or_equiv'],
                 atom['pdbx_formal_charge'], str(atom['auth_seq_id']),
-                atom['auth_comp_id'], atom['auth_asym_id'],
+                atom['auth_comp_id'], author_chain_id,
                 atom['auth_atom_id'], str(atom['pdbx_PDB_model_num']),
             ])
     for atom in solvent_atoms:

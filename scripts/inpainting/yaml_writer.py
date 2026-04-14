@@ -40,15 +40,16 @@ def generate_yaml(
             False, paths are relative to *output_dir*.
     """
     chains = []
-    auth_ids = []  # author_asym_id (what goes into chain_id in YAML)
+    label_ids = []  # label_asym_id (what goes into chain_id in YAML)
 
     for chain_id in chain_ids:
         d = all_chains_data[chain_id]
-        auth_id = d.get("author_chain_id", chain_id)
-        auth_ids.append(auth_id)
-        # Use auth_id as sequence id so everything is consistent around auth chain IDs.
+        # Use label_asym_id everywhere — it is guaranteed unique in mmCIF,
+        # unlike auth_asym_id which can collide (e.g. a polymer chain and its
+        # glycan fragments sharing author chain "A" in 8WLO).
+        label_ids.append(chain_id)
         entry = {
-            "id": auth_id,
+            "id": chain_id,
             "sequence": d.get("sequence", ""),
             "entity_type": d.get("entity_type", "protein"),
             "modifications": [
@@ -68,14 +69,14 @@ def generate_yaml(
         chains=chains, cif_path=cif_path_str, use_absolute_path=False
     )
 
-    # Always replace chain_id with auth IDs (no query_id field).
+    # Always replace chain_id with label IDs (no query_id field).
     # For 6+ single-character IDs, use compact string notation (e.g. "ABCDEFGH").
     lines = yaml_content.split("\n")
     new_lines = []
     for line in lines:
         if line.strip().startswith("chain_id:"):
             # Always use explicit list notation to avoid ambiguity (e.g. "AA" vs ["A","A"])
-            quoted = [_yaml_str(aid) for aid in auth_ids]
+            quoted = [_yaml_str(cid) for cid in label_ids]
             new_lines.append(f"    chain_id: [{', '.join(quoted)}]")
             # Add inpainting_metadata path right after chain_id (relative to output_dir)
             if inpainting_metadata_path is not None:

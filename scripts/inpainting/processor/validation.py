@@ -354,12 +354,20 @@ class ValidationMixin:
 
         return (0, 0), metadata
 
-    def save_inpainting_metadata(self, all_inpainting_metadata: Dict[str, Dict[str, Any]], output_path: Path) -> None:
+    def save_inpainting_metadata(
+        self,
+        all_inpainting_metadata: Dict[str, Dict[str, Any]],
+        output_path: Path,
+        chain_mapping: Optional[Dict[str, str]] = None,
+    ) -> None:
         """Save per-chain inpainting metadata as JSON (matching boltz2 format).
 
         Args:
-            all_inpainting_metadata: chain_id -> metadata dict from determine_inpainting_region
+            all_inpainting_metadata: chain_id(label) -> metadata dict
             output_path: Path to write the JSON file
+            chain_mapping: label_asym_id -> author_asym_id mapping. Allows
+                downstream tools to recover original author chain IDs even
+                though the CIF / YAML use label_asym_id as the primary key.
         """
         import numpy as np
 
@@ -373,7 +381,12 @@ class ValidationMixin:
                     return obj.tolist()
                 return super().default(obj)
 
-        data = {"chains": all_inpainting_metadata}
+        data: Dict[str, Any] = {"chains": all_inpainting_metadata}
+        if chain_mapping:
+            data["chain_mapping"] = {
+                "label_to_author": dict(chain_mapping),
+                "author_to_label": {v: k for k, v in chain_mapping.items()},
+            }
         with open(output_path, "w") as f:
             json.dump(data, f, indent=4, cls=_NumpyEncoder)
         info(f"Saved inpainting metadata: {output_path.absolute()}")
