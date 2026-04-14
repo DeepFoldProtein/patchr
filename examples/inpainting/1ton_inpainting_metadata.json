@@ -234,7 +234,16 @@
                 {
                     "residue": 79,
                     "fixed_atoms": 1,
-                    "total_atoms": 8
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "C",
+                        "CA",
+                        "CB",
+                        "CD1",
+                        "CG1",
+                        "CG2",
+                        "O"
+                    ]
                 }
             ],
             "fully_inpainted_residues": [
