@@ -762,23 +762,17 @@ class StructureProcessor(
         # Generate output files
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # File naming: use only chains that were actually included in the output
-        # (chains skipped due to CCD issues, unsafe IDs, etc. are excluded)
+        # File naming: use only the PDB ID (e.g. 6AAW.cif / 6aaw.yaml).
+        # Modifiers (--uniprot, --skip-terminal) are still reflected as suffixes
+        # so separate runs don't overwrite each other.
         suffix = ""
         if self.uniprot_mode:
             suffix += "_uniprot"
         if self.skip_terminal:
             suffix += "_trimmed"
-        output_chain_ids = [c for c in self.chain_ids if c in all_chains_data]
-        chain_ids_str_short: str = ''.join(output_chain_ids)
-        max_chain_chars = 15  # leave room for pdb_id, _chain, suffix, .cif
-        if len(chain_ids_str_short) > max_chain_chars:
-            chain_ids_str_short = f"ALL_{len(self.chain_ids)}chains"
-        cif_filename = f"{self.pdb_id}_chain{chain_ids_str_short}{suffix}.cif"
-        if self.output_format == 'protenix-json':
-            config_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.json"
-        else:
-            config_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}.yaml"
+        cif_filename = f"{self.pdb_id}{suffix}.cif"
+        ext = 'json' if self.output_format == 'protenix-json' else 'yaml'
+        config_filename = f"{self.pdb_id.lower()}{suffix}.{ext}"
 
         cif_path = output_dir / cif_filename
         config_path = output_dir / config_filename
@@ -810,7 +804,7 @@ class StructureProcessor(
                 author_cid = cdata.get('author_chain_id', cid)
                 inpainting_meta_by_chain[author_cid] = meta
         if inpainting_meta_by_chain:
-            meta_filename = f"{self.pdb_id.lower()}_{chain_ids_str_short}{suffix}_inpainting_metadata.json"
+            meta_filename = f"{self.pdb_id.lower()}{suffix}_inpainting_metadata.json"
             metadata_path = output_dir / meta_filename
             self.save_inpainting_metadata(inpainting_meta_by_chain, metadata_path)
 
