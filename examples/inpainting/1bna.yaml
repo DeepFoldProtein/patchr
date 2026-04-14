@@ -10,5 +10,5 @@ sequences:
       sequence: CGCGAATTCGCG
 
 templates:
-  - cif: 1BNA_chainAB.cif
+  - cif: 1BNA.cif
     chain_id: ['A', 'B']

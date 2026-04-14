@@ -407,7 +407,25 @@
             "total_atoms_with_structure": 2095,
             "total_expected_atoms": 2330
         },
-        "B": {
+        "C": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 24,
+            "total_expected_atoms": 24
+        },
+        "D": {
+            "fully_fixed_residues": [
+                1
+            ],
+            "partially_fixed_residues": [],
+            "fully_inpainted_residues": [],
+            "total_atoms_with_structure": 6,
+            "total_expected_atoms": 6
+        },
+        "B-2": {
             "fully_fixed_residues": [
                 5,
                 6,
@@ -809,24 +827,14 @@
             ],
             "total_atoms_with_structure": 1988,
             "total_expected_atoms": 2330
-        },
-        "C": {
-            "fully_fixed_residues": [
-                1
-            ],
-            "partially_fixed_residues": [],
-            "fully_inpainted_residues": [],
-            "total_atoms_with_structure": 24,
-            "total_expected_atoms": 24
-        },
-        "D": {
-            "fully_fixed_residues": [
-                1
-            ],
-            "partially_fixed_residues": [],
-            "fully_inpainted_residues": [],
-            "total_atoms_with_structure": 6,
-            "total_expected_atoms": 6
+        }
+    },
+    "chain_mapping": {
+        "label_to_author": {
+            "A": "A",
+            "C": "A",
+            "D": "A",
+            "B-2": "B-2"
         }
     }
 }
