@@ -62,6 +62,6 @@ sequences:
       ccd: 'NAG'
 
 templates:
-  - cif: 7EOQ_chainABCDEFGHIJKLMN.cif
-    chain_id: ABCDEFGHIJKLMN
-    inpainting_metadata: 7eoq_ABCDEFGHIJKLMN_inpainting_metadata.json
+  - cif: 7EOQ.cif
+    chain_id: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
+    inpainting_metadata: 7eoq_inpainting_metadata.json

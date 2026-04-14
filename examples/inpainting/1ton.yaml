@@ -11,6 +11,6 @@ sequences:
       ccd: 'ZN'
 
 templates:
-  - cif: 1TON_chainAB.cif
+  - cif: 1TON.cif
     chain_id: ['A', 'B']
-    inpainting_metadata: 1ton_AB_inpainting_metadata.json
+    inpainting_metadata: 1ton_inpainting_metadata.json

@@ -383,9 +383,12 @@ class ValidationMixin:
 
         data: Dict[str, Any] = {"chains": all_inpainting_metadata}
         if chain_mapping:
+            # Only store label_to_author. author_to_label is not a proper
+            # inverse when author IDs collide (e.g. 1TON where polymer chain
+            # "A" and its ZN ligand both have author_asym_id "A"); callers
+            # that need the reverse should iterate over label_to_author.
             data["chain_mapping"] = {
                 "label_to_author": dict(chain_mapping),
-                "author_to_label": {v: k for k, v in chain_mapping.items()},
             }
         with open(output_path, "w") as f:
             json.dump(data, f, indent=4, cls=_NumpyEncoder)
