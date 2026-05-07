@@ -6,7 +6,13 @@ import pickle
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .constants import STANDARD_AA_CODES, STANDARD_AA_THREE_LETTER, get_boltz_cache
+from .constants import (
+    STANDARD_AA_CODES,
+    STANDARD_AA_THREE_LETTER,
+    STANDARD_RES_ONE_LETTER,
+    STANDARD_RES_THREE_LETTER,
+    get_boltz_cache,
+)
 
 
 def load_ccd_dict(ccd_path: Path) -> dict:
@@ -66,8 +72,14 @@ def is_ccd_available(ccd: Optional[dict], ccd_code: str,
 
 
 def get_non_standard_parent_from_ccd(ccd: Optional[dict], ccd_code: str) -> Optional[Tuple[str, str]]:
-    """Get parent residue for a non-standard comp_id from CCD (ccd.pkl dict). Returns (parent_three_letter, parent_one_letter) or None."""
-    if ccd_code in STANDARD_AA_THREE_LETTER:
+    """Get parent residue for a non-standard comp_id from CCD (ccd.pkl dict).
+
+    Returns (parent_three_letter, parent_one_letter) or None.  Accepts both
+    protein and nucleic-acid parents — previously this only recognised the
+    20 standard amino acids and silently dropped DNA/RNA parents (e.g. BRU's
+    CCD parent ``DU``).
+    """
+    if ccd_code in STANDARD_RES_THREE_LETTER:
         return None
 
     mol = load_ccd_molecule(ccd or {}, ccd_code)
@@ -77,18 +89,8 @@ def get_non_standard_parent_from_ccd(ccd: Optional[dict], ccd_code: str) -> Opti
     try:
         if mol.HasProp("_chem_comp.mon_nstd_parent_comp_id"):
             parent = mol.GetProp("_chem_comp.mon_nstd_parent_comp_id")
-            if parent and parent in STANDARD_AA_THREE_LETTER:
-                return (parent, STANDARD_AA_CODES[parent])
-
-        atom_names = set()
-        for atom in mol.GetAtoms():
-            if atom.HasProp("name"):
-                atom_names.add(atom.GetProp("name"))
-
-        backbone_atoms = {"N", "CA", "C", "O"}
-        if backbone_atoms.issubset(atom_names):
-            if "CB" in atom_names or ccd_code in ['GLY']:
-                pass
+            if parent and parent in STANDARD_RES_THREE_LETTER:
+                return (parent, STANDARD_RES_ONE_LETTER[parent])
     except Exception:
         pass
 
