@@ -870,9 +870,11 @@ def parse_polymer(
     # Get coordinates and masks
     parsed = []
     for res_idx, res_name in enumerate(sequence):
-        # Check if modified residue
-        # Map MSE to MET
-        res_corrected = res_name if res_name != "MSE" else "MET"
+        # Preserve non-standard residue identity (including MSE).  Previously
+        # MSE was hardcoded to MET here, which forced selenomethionine to be
+        # written out as plain methionine.  Treat every non-standard residue
+        # via the CCD path so the original CCD code survives to the writer.
+        res_corrected = res_name
 
         # Handle non-standard residues
         if res_corrected not in ref_res:

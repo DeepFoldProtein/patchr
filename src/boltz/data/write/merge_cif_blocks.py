@@ -215,6 +215,64 @@ def _parse_chem_comp(cif_content: str, comp_ids: Set[str]) -> list:
     return lines
 
 
+_MOD_RESIDUE_KEYS = [
+    "_pdbx_struct_mod_residue.id",
+    "_pdbx_struct_mod_residue.label_asym_id",
+    "_pdbx_struct_mod_residue.label_seq_id",
+    "_pdbx_struct_mod_residue.label_comp_id",
+    "_pdbx_struct_mod_residue.auth_asym_id",
+    "_pdbx_struct_mod_residue.auth_seq_id",
+    "_pdbx_struct_mod_residue.auth_comp_id",
+    "_pdbx_struct_mod_residue.PDB_ins_code",
+    "_pdbx_struct_mod_residue.parent_comp_id",
+    "_pdbx_struct_mod_residue.details",
+]
+
+
+def _parse_mod_residue(cif_content: str, chain_ids: Set[str]) -> list:
+    """Parse _pdbx_struct_mod_residue from template CIF, filtered to chains
+    that survived into the prediction output.
+
+    Returns a list of pre-formatted data row strings (one per record), with
+    record IDs renumbered from 1 so the merged loop is well-formed even when
+    some input chains were dropped.
+    """
+    if not cif_content:
+        return []
+    try:
+        cif_dict = MMCIF2Dict(StringIO(cif_content))
+    except Exception:
+        return []
+    if _MOD_RESIDUE_KEYS[0] not in cif_dict:
+        return []
+
+    cols = []
+    n = None
+    for k in _MOD_RESIDUE_KEYS:
+        v = cif_dict.get(k, [])
+        if isinstance(v, str):
+            v = [v]
+        cols.append(v)
+        if n is None and v:
+            n = len(v)
+    if not n:
+        return []
+    # pad short columns with '?'
+    cols = [list(c) + ["?"] * (n - len(c)) if len(c) < n else list(c) for c in cols]
+
+    rows = []
+    new_id = 0
+    for i in range(n):
+        label_asym = cols[1][i]
+        if chain_ids and label_asym not in chain_ids:
+            continue
+        new_id += 1
+        # Renumber the id column so the merged loop has a clean 1..N sequence.
+        vals = [str(new_id)] + [str(cols[j][i]) for j in range(1, len(cols))]
+        rows.append(" ".join(_quote_cif(v) for v in vals))
+    return rows
+
+
 def _parse_crystallographic(
     cif_content: str, entry_id: str
 ) -> Tuple[list, list, list]:
@@ -463,6 +521,14 @@ def merge_template_blocks_into_cif(
         extra.append("_chem_comp.formula")
         extra.append("_chem_comp.formula_weight")
         extra.extend(chem_comp_lines)
+        extra.append("#")
+
+    mod_res_rows = _parse_mod_residue(template_content, chain_ids)
+    if mod_res_rows:
+        extra.append("loop_")
+        for k in _MOD_RESIDUE_KEYS:
+            extra.append(k)
+        extra.extend(mod_res_rows)
         extra.append("#")
 
     cell_lines, symmetry_lines, atom_sites_lines = _parse_crystallographic(
