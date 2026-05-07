@@ -367,7 +367,9 @@ def generate_cif(
             has_mods = bool(modifications_from_entity_poly.get(chain_id))
             nstd_monomer = 'yes' if has_mods else 'no'
             lines.append(f"{entity_id} {poly_type} no {nstd_monomer}")
-            if has_mods and entity_type == 'protein':
+            # `pdbx_seq_one_letter_code`: bracketed 3-letter codes for non-standard
+            # residues (mmCIF spec).  Applies to protein, DNA and RNA equally.
+            if has_mods:
                 mod_positions = {m['position']: m['ccd'] for m in modifications_from_entity_poly.get(chain_id, [])}
                 bracketed_seq = []
                 for pos, aa in enumerate(sequence, 1):
@@ -378,14 +380,30 @@ def generate_cif(
                 formatted_seq = ''.join(bracketed_seq)
             else:
                 formatted_seq = sequence
+            # `_can`: canonical 1-letter sequence — substitute parent's 1-letter
+            # code at modification positions.  The chain's enriched
+            # modifications list (built in StructureProcessor) carries
+            # parent_one; falls back to 'X' when truly unresolvable.  Applies
+            # to protein, DNA and RNA equally.
+            if has_mods:
+                chain_mods = all_chains_data[chain_id].get('modifications', [])
+                pos_to_parent_one = {m['position']: (m.get('parent_one') or 'X')
+                                     for m in chain_mods}
+                canonical_chars = list(sequence)
+                for pos, p_one in pos_to_parent_one.items():
+                    if 1 <= pos <= len(canonical_chars):
+                        canonical_chars[pos - 1] = p_one
+                canonical_seq = ''.join(canonical_chars)
+            else:
+                canonical_seq = sequence
+            # First field: pdbx_seq_one_letter_code (bracketed form for non-std)
             lines.append(";")
             lines.append(format_sequence_for_cif(formatted_seq))
             lines.append(";")
             lines.append("")
-            # Use bracketed form for second field when we have mods so gemmi's full_sequence
-            # matches entity_poly_seq and atom_site (avoids Alignment mismatch! in boltz parse_polymer)
+            # Second field: pdbx_seq_one_letter_code_can (canonical 1-letter codes)
             lines.append(";")
-            lines.append(format_sequence_for_cif(formatted_seq))
+            lines.append(format_sequence_for_cif(canonical_seq))
             lines.append(";")
             lines.append(f"{chain_id} ?")
         lines.append("#")
@@ -416,6 +434,39 @@ def generate_cif(
                     three_letter = code_map.get(base, 'UNK' if entity_type == 'protein' else base)
                 lines.append(f"{entity_id} {i} {three_letter} n")
         lines.append("#")
+
+        # _pdbx_struct_mod_residue: explicit catalog of modified residues with
+        # parent assignments. Standard mmCIF category — used by RCSB, PyMOL,
+        # Chimera, etc. to surface non-standard residues without requiring
+        # _entity_poly_seq + _chem_comp cross-referencing.
+        mod_rows: list[tuple] = []
+        for chain_id in polymer_chain_ids:
+            chain_mods = all_chains_data[chain_id].get('modifications', [])
+            for m in chain_mods:
+                if m.get('ccd') in (None, ''):
+                    continue
+                mod_rows.append((
+                    chain_id,
+                    int(m['position']),
+                    m['ccd'],
+                    m.get('parent') or '?',
+                ))
+        if mod_rows:
+            lines.append("loop_")
+            lines.append("_pdbx_struct_mod_residue.id")
+            lines.append("_pdbx_struct_mod_residue.label_asym_id")
+            lines.append("_pdbx_struct_mod_residue.label_seq_id")
+            lines.append("_pdbx_struct_mod_residue.label_comp_id")
+            lines.append("_pdbx_struct_mod_residue.auth_asym_id")
+            lines.append("_pdbx_struct_mod_residue.auth_seq_id")
+            lines.append("_pdbx_struct_mod_residue.auth_comp_id")
+            lines.append("_pdbx_struct_mod_residue.PDB_ins_code")
+            lines.append("_pdbx_struct_mod_residue.parent_comp_id")
+            lines.append("_pdbx_struct_mod_residue.details")
+            for idx, (cid, pos, ccd, parent) in enumerate(mod_rows, 1):
+                author_chain = all_chains_data[cid].get('author_chain_id', cid)
+                lines.append(f"{idx} {cid} {pos} {ccd} {author_chain} {pos} {ccd} ? {parent} ?")
+            lines.append("#")
 
     comp_ids_for_chem = set()
     for chain_id in chain_ids:
@@ -575,14 +626,15 @@ def generate_cif(
         # label_asym_id in the output CIF is the processor's chain_id (label).
         # auth_asym_id preserves the original author chain (may collide).
         author_chain_id = all_chains_data[chain_id].get('author_chain_id', chain_id)
-        use_atom_for_chain = (
-            bool(modifications_from_entity_poly.get(chain_id)) or
-            any(a.get('group_PDB') == 'HETATM' for a in atoms)
-        )
         for atom in atoms:
             atom_id = next_atom_id
             next_atom_id += 1
-            group_pdb = 'ATOM' if use_atom_for_chain else atom['group_PDB']
+            # Per wwPDB convention: ATOM for standard polymer residues, HETATM
+            # for non-standard residues (MSE, TPO, PTR, ...), ligands, ions,
+            # and water — even when polymer-embedded. Trust the source group_PDB
+            # captured in atom_parse.py; for parent-rewritten residues the
+            # processor explicitly normalises group_PDB to 'ATOM' upstream.
+            group_pdb = atom.get('group_PDB', 'ATOM')
             atom_rows.append([
                 group_pdb, str(atom_id), atom['type_symbol'],
                 atom['label_atom_id'], atom['label_alt_id'],

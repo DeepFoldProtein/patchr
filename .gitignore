@@ -198,3 +198,25 @@ reference_pr/
 *sandbox
 uv.lock
 patchr_jobs/
+# Ninja CUDA extension build artifacts (per-environment, do not commit)
+src/protenix/model/layer_norm/.ninja_deps
+src/protenix/model/layer_norm/.ninja_log
+src/protenix/model/layer_norm/build.ninja
+src/protenix/model/layer_norm/*.o
+
+# Local working / scratch directories
+.claude/
+deepfold3-dev/
+patchr_inputs_post_fix
+scripts/predict_batch/
+
+# Per-run data caches (keep curated CSVs in data/, exclude large generated subtrees)
+data/atlas_pdb_list.txt
+data/cifs/
+data/jsons/
+data/yamls/
+data/test_1qmz/
+data/mod_test/
+
+# Auto-generated release info
+docs/RELEASE_INFO.md

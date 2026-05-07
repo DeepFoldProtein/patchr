@@ -625,14 +625,11 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
             # Increment polymer index
             i += 1
 
-        # Map MSE to MET, put the selenium atom in the sulphur column
-        if res_name == "MSE":
-            res_name = "MET"
-            if "SE" in name_to_atom:
-                name_to_atom["SD"] = name_to_atom["SE"]
-
-        # Handle non-standard residues
-        elif res_name not in ref_res:
+        # Handle non-standard residues (including MSE) via the CCD path so the
+        # residue identity is preserved through to the writer.  Previously MSE
+        # was hardcoded to MET, which destroyed selenomethionine identity in
+        # the prediction output.
+        if res_name not in ref_res:
             try:
                 modified_mol = get_mol(res_name, mols, moldir)
             except ValueError:

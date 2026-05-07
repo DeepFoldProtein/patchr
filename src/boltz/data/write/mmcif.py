@@ -14,6 +14,61 @@ from boltz.data import const
 from boltz.data.types import Structure
 
 
+# Hardcoded fallback for non-standard residues whose parent residue is known
+# but not in ihm's built-in alphabet.  Mirrors
+# scripts/inpainting/constants.py:NONSTANDARD_TO_STANDARD so the prediction
+# writer can fill `code_canonical` with the parent's one-letter code instead
+# of a blanket "X" / "N".
+_NONSTANDARD_PARENT_ONE_LETTER_AA = {
+    # Selenium / sulfur variants
+    "MSE": "M", "SEC": "C", "PYL": "K", "FME": "M",
+    # Phosphorylation
+    "SEP": "S", "TPO": "T", "PTR": "Y",
+    # Methylation
+    "MLY": "K", "M3L": "K", "AGM": "R",
+    # Cysteine variants
+    "CYX": "C", "CSD": "C", "CME": "C", "OCS": "C", "CSO": "C",
+    "CSS": "C", "SMC": "C", "OAS": "C",
+    # Methionine oxidation / N-terminal cap
+    "MHO": "M", "OMT": "M", "CXM": "M",
+    # Histidine variants
+    "HSD": "H", "HSE": "H", "HSP": "H",
+    "HIE": "H", "HID": "H", "HIP": "H",
+    # Hydroxylation / cyclization
+    "HYP": "P", "PCA": "E", "5HP": "E",
+    # Misc protein
+    "ASX": "B", "GLX": "Z",
+    "ABA": "A", "AIB": "A",
+}
+
+_NONSTANDARD_PARENT_ONE_LETTER_DNA = {
+    "DU": "T",
+}
+
+_NONSTANDARD_PARENT_ONE_LETTER_RNA = {
+    "PSU": "U", "5MU": "U", "OMU": "U",
+    "OMC": "C",
+    "1MA": "A", "6MA": "A",
+    "7MG": "G", "OMG": "G",
+}
+
+
+def _build_three_letter_alphabet(base_alphabet, fallback_canonical):
+    """Build a 3-letter-keyed lookup from an ``ihm`` Alphabet.
+
+    ``ihm.LPeptideAlphabet`` / ``DNAAlphabet`` / ``RNAAlphabet`` use 1-letter
+    keys ("A", "G", ...), but Structure residues are stored using 3-letter
+    CCD codes ("ALA", "MSE", ...).  Re-key the alphabet by the ChemComp's
+    ``id`` so the writer can look up by 3-letter codes.
+
+    Returns a dict mapping 3-letter code -> ChemComp instance.
+    """
+    out = {}
+    for comp in base_alphabet._comps.values():
+        out[comp.id] = comp
+    return out
+
+
 def to_mmcif(
     structure: Structure,
     plddts: Optional[Tensor] = None,
@@ -69,14 +124,29 @@ def to_mmcif(
         mol_type = entity_to_moltype[entity]
 
         if mol_type == const.chain_type_ids["PROTEIN"]:
-            alphabet = ihm.LPeptideAlphabet()
-            chem_comp = lambda x: ihm.LPeptideChemComp(id=x, code=x, code_canonical="X")  # noqa: E731
+            alphabet = _build_three_letter_alphabet(
+                ihm.LPeptideAlphabet(), fallback_canonical="X"
+            )
+            chem_comp = lambda x: ihm.LPeptideChemComp(  # noqa: E731
+                id=x, code=x,
+                code_canonical=_NONSTANDARD_PARENT_ONE_LETTER_AA.get(x, "X"),
+            )
         elif mol_type == const.chain_type_ids["DNA"]:
-            alphabet = ihm.DNAAlphabet()
-            chem_comp = lambda x: ihm.DNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+            alphabet = _build_three_letter_alphabet(
+                ihm.DNAAlphabet(), fallback_canonical="N"
+            )
+            chem_comp = lambda x: ihm.DNAChemComp(  # noqa: E731
+                id=x, code=x,
+                code_canonical=_NONSTANDARD_PARENT_ONE_LETTER_DNA.get(x, "N"),
+            )
         elif mol_type == const.chain_type_ids["RNA"]:
-            alphabet = ihm.RNAAlphabet()
-            chem_comp = lambda x: ihm.RNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+            alphabet = _build_three_letter_alphabet(
+                ihm.RNAAlphabet(), fallback_canonical="N"
+            )
+            chem_comp = lambda x: ihm.RNAChemComp(  # noqa: E731
+                id=x, code=x,
+                code_canonical=_NONSTANDARD_PARENT_ONE_LETTER_RNA.get(x, "N"),
+            )
         elif len(sequence) > 1:
             alphabet = {}
             chem_comp = lambda x: ihm.SaccharideChemComp(id=x)  # noqa: E731

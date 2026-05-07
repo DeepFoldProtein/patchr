@@ -9,9 +9,12 @@ from ..ccd_utils import load_ccd_dict, get_non_standard_parent_from_ccd, is_ccd_
 from ..constants import (
     get_boltz_cache,
     get_default_ccd_path,
+    NONSTANDARD_TO_STANDARD,
     STANDARD_AA_CODES,
     STANDARD_AA_THREE_LETTER,
     STANDARD_NUCLEOTIDE_CODES,
+    STANDARD_RES_ONE_LETTER,
+    STANDARD_RES_THREE_LETTER,
     ref_atoms,
 )
 
@@ -697,45 +700,129 @@ class StructureProcessor(
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)
             chain_modifications.sort(key=lambda m: m['position'])
-            # Filter out modifications whose CCD is not available in boltz's CCD database.
-            # Also collect positions to scrub from the template CIF atoms so that boltz's
-            # parse_mmcif does not encounter an unsupported residue name.
+
+            # Enrich each modification with parent info (some sources omit it,
+            # e.g. _modifications_from_entity_poly_seq → only {position, ccd}).
             _ccd_db = getattr(self, 'ccd', None)
-            filtered_mods = []
-            _unavailable_seq_positions: set = set()
+            _ns_key = self._base_chain_id(chain_id)
+            if _ns_key not in self.non_standard_residues and chain_id in self.non_standard_residues:
+                _ns_key = chain_id
+            _ns_chain = self.non_standard_residues.get(_ns_key, {})
             for _m in chain_modifications:
-                _ccd_code = _m.get('ccd', '')
-                if _ccd_code in STANDARD_AA_THREE_LETTER or _ccd_code in STANDARD_NUCLEOTIDE_CODES:
+                if _m.get('parent') in STANDARD_RES_THREE_LETTER:
+                    # Even if the parent was set by an earlier source, make sure
+                    # parent_one is filled with the correct 1-letter code.
+                    if not _m.get('parent_one'):
+                        _m['parent_one'] = STANDARD_RES_ONE_LETTER.get(_m['parent'], 'X')
+                    continue
+                # (a) non_standard_residues keyed by untrimmed SEQRES position
+                ns_info = _ns_chain.get(_m['position'] + trim_offset)
+                if ns_info and ns_info.get('parent') in STANDARD_RES_THREE_LETTER:
+                    _m['parent'] = ns_info['parent']
+                    _m['parent_one'] = ns_info.get('parent_one') or STANDARD_RES_ONE_LETTER.get(ns_info['parent'], 'X')
+                    continue
+                # (b) ccd.pkl fallback (resolves _chem_comp.mon_nstd_parent_comp_id)
+                resolved = get_non_standard_parent_from_ccd(_ccd_db, _m.get('ccd', ''))
+                if resolved:
+                    _m['parent'], _m['parent_one'] = resolved
+                    continue
+                # (c) hardcoded common-modification table (covers cases where
+                #     ccd.pkl was built without `mon_nstd_parent_comp_id` props).
+                hard_parent = NONSTANDARD_TO_STANDARD.get(_m.get('ccd', '').upper())
+                if hard_parent and hard_parent in STANDARD_RES_THREE_LETTER:
+                    _m['parent'] = hard_parent
+                    _m['parent_one'] = STANDARD_RES_ONE_LETTER[hard_parent]
+
+            # Categorise each modification:
+            #   1) standard AA / nucleotide  → keep as-is
+            #   2) MSE                       → keep (Boltz hardcodes MSE→MET, SE→SD)
+            #   3) CCD mol available         → keep
+            #   4) CCD missing + parent OK   → drop from mods, rewrite atoms to parent
+            #   5) CCD missing + no parent   → drop from mods, rewrite atoms to UNK
+            # In all cases the atom coordinates are preserved (categories 4 and 5 may
+            # drop atoms whose names are absent from the parent / UNK ref_atoms set).
+            filtered_mods = []
+            _rewrites: Dict[int, str] = {}  # position -> parent three-letter (or 'UNK')
+            for _m in chain_modifications:
+                ccd = _m.get('ccd', '')
+                parent = _m.get('parent', '')
+                if ccd in STANDARD_RES_THREE_LETTER:
                     filtered_mods.append(_m)
-                elif is_ccd_available(_ccd_db, _ccd_code):
+                elif ccd == 'MSE' or is_ccd_available(_ccd_db, ccd):
                     filtered_mods.append(_m)
+                elif parent in STANDARD_RES_THREE_LETTER:
+                    _rewrites[_m['position']] = parent
+                    info(f"Chain {chain_id}: CCD '{ccd}' at position {_m['position']} "
+                         f"unavailable in boltz mols; substituting atoms with parent '{parent}' "
+                         f"(coordinates preserved)")
                 else:
-                    warning(f"Chain {chain_id}: modification CCD '{_ccd_code}' at position "
-                            f"{_m.get('position')} not found in boltz CCD database, skipping modification "
-                            f"and removing its atoms from template CIF")
-                    _unavailable_seq_positions.add(_m.get('position'))
+                    _rewrites[_m['position']] = 'UNK'
+                    warning(f"Chain {chain_id}: CCD '{ccd}' at position {_m['position']} "
+                            f"unavailable in boltz mols and no parent resolvable; "
+                            f"labeling atoms as UNK (coordinates preserved)")
             chain_modifications = filtered_mods
-            # Remove atoms at positions with unavailable CCD so the template CIF is clean.
-            if _unavailable_seq_positions:
+
+            # Apply atom rewrites for parent / UNK substitutions.
+            # Drop atoms whose names are not in the target residue's ref_atoms set
+            # (e.g. SEP's PO3 group, MLY's CM1/CM2) so the template CIF stays valid
+            # under boltz's per-residue ref_atoms filter (mmcif.py:660).
+            if _rewrites:
                 def _atom_seq_pos(a):
                     try:
                         return int(a.get('label_seq_id', -1))
                     except (ValueError, TypeError):
                         return -1
-                renumbered_atoms = [
-                    a for a in renumbered_atoms
-                    if _atom_seq_pos(a) not in _unavailable_seq_positions
-                ]
-            # Modification positions: set X for non-standard residues only (e.g. PTR, TPO); keep standard AA (e.g. ASN) as is
+                _new_atoms = []
+                for atom in renumbered_atoms:
+                    pos = _atom_seq_pos(atom)
+                    if pos in _rewrites:
+                        new_comp = _rewrites[pos]
+                        parent_ref = set(ref_atoms.get(new_comp, ref_atoms.get('UNK', [])))
+                        atom_name = (atom.get('label_atom_id') or '').strip()
+                        if atom_name in parent_ref:
+                            atom['label_comp_id'] = new_comp
+                            atom['auth_comp_id'] = new_comp
+                            # Atom now belongs to a standard residue → normalise
+                            # group_PDB to 'ATOM' (was 'HETATM' as the source
+                            # non-standard residue). UNK fallback stays HETATM.
+                            if new_comp != 'UNK':
+                                atom['group_PDB'] = 'ATOM'
+                            _new_atoms.append(atom)
+                        # else: drop atom (not part of the target ref set)
+                    else:
+                        _new_atoms.append(atom)
+                renumbered_atoms = _new_atoms
+
+                # cif_writer (_entity_poly_seq, _chem_comp) reads monomer_ids first;
+                # keep it consistent with the rewritten atoms or alignment will break.
+                for pos, new_comp in _rewrites.items():
+                    seq_pos_to_monomer[pos] = new_comp
+
+                # Reflect rewrites in the sequence so YAML carries the parent one-letter
+                # at category-4 positions (instead of the placeholder 'X').
+                seq_list = list(final_sequence)
+                for pos, new_comp in _rewrites.items():
+                    if 1 <= pos <= len(seq_list):
+                        seq_list[pos - 1] = STANDARD_RES_ONE_LETTER.get(new_comp, 'X')
+                final_sequence = ''.join(seq_list)
+            # Modification positions in the YAML sequence: replace with the
+            # *parent* one-letter code when known (e.g. BRU → 'U', MSE → 'M'),
+            # falling back to 'X' only when no parent can be resolved.  This
+            # matches RCSB's `pdbx_seq_one_letter_code_can` convention.
             output_sequence = final_sequence
             for mod in chain_modifications:
                 pos = mod.get('position')
                 ccd = mod.get('ccd', '')
-                if pos and 1 <= pos <= len(output_sequence) and ccd not in STANDARD_AA_THREE_LETTER and ccd not in STANDARD_NUCLEOTIDE_CODES:
-                    # Set X only for non-standard modifications (standard AA/nucleotide residues stay as-is)
-                    seq_list = list(output_sequence)
-                    seq_list[pos - 1] = 'X'
-                    output_sequence = ''.join(seq_list)
+                if not (pos and 1 <= pos <= len(output_sequence)):
+                    continue
+                if ccd in STANDARD_RES_THREE_LETTER:
+                    # Standard AA / nucleotide listed as a "modification" — leave the
+                    # SEQRES letter as-is.
+                    continue
+                replacement = mod.get('parent_one') or 'X'
+                seq_list = list(output_sequence)
+                seq_list[pos - 1] = replacement
+                output_sequence = ''.join(seq_list)
             if chain_modifications:
                 info(f"Chain {chain_id} has {len(chain_modifications)} modification(s):")
                 for mod in chain_modifications:
