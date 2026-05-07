@@ -3,7 +3,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from ..ccd_utils import load_ccd_dict, get_non_standard_parent_from_ccd
-from ..constants import STANDARD_AA_CODES, STANDARD_AA_THREE_LETTER, STANDARD_NUCLEOTIDE_CODES
+from ..constants import (
+    NONSTANDARD_TO_STANDARD,
+    STANDARD_AA_CODES,
+    STANDARD_AA_THREE_LETTER,
+    STANDARD_NUCLEOTIDE_CODES,
+    STANDARD_RES_ONE_LETTER,
+    STANDARD_RES_THREE_LETTER,
+)
 from .log import info, warning
 
 
@@ -73,14 +80,23 @@ class ModificationsMixin:
                         # Get parent from CIF (most reliable)
                         parent_code = parent_comp_ids[i] if i < len(parent_comp_ids) else None
 
-                        # If parent not in CIF, resolve from CCD (ccd.pkl)
-                        if not parent_code or parent_code not in STANDARD_AA_THREE_LETTER:
+                        # If parent not in CIF (or not a recognised standard
+                        # protein/nucleic residue), resolve from CCD (ccd.pkl)
+                        if not parent_code or parent_code not in STANDARD_RES_THREE_LETTER:
                             resolved = get_non_standard_parent_from_ccd(ccd, ccd_code)
                             if resolved:
                                 parent_code = resolved[0]
 
-                        # Get one-letter code for parent
-                        parent_one = STANDARD_AA_CODES.get(parent_code, 'X') if parent_code else 'X'
+                        # Last-ditch fallback: hardcoded NONSTANDARD_TO_STANDARD
+                        # (covers cases where ccd.pkl was built without parent
+                        #  properties — common with pdbeccdutils-generated mol pickles).
+                        if not parent_code or parent_code not in STANDARD_RES_THREE_LETTER:
+                            hard = NONSTANDARD_TO_STANDARD.get(ccd_code.upper())
+                            if hard and hard in STANDARD_RES_THREE_LETTER:
+                                parent_code = hard
+
+                        # Get one-letter code for parent (covers protein + DNA + RNA).
+                        parent_one = STANDARD_RES_ONE_LETTER.get(parent_code, 'X') if parent_code else 'X'
 
                         if chain_id not in non_standard_residues:
                             non_standard_residues[chain_id] = {}
