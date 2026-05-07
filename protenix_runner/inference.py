@@ -514,21 +514,51 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                 )
 
                 # Copy inpainting_metadata JSON to predictions dir (matching Boltz output)
+                # AND enrich prediction CIF with template metadata (mod_residue,
+                # struct_conn, chem_comp, full _entity_poly with sequence strings).
                 for sample_entry in json_data:
-                    if sample_entry.get("name") == sample_name:
-                        meta_path = (
-                            sample_entry.get("inpainting", {}).get("metadata")
+                    if sample_entry.get("name") != sample_name:
+                        continue
+                    inpainting_info = sample_entry.get("inpainting", {})
+                    meta_path = inpainting_info.get("metadata")
+                    template_cif = inpainting_info.get("template_cif")
+                    pred_dir = runner.dumper._get_dump_dir(sample_name)
+
+                    if meta_path and os.path.isfile(meta_path):
+                        dest = opjoin(
+                            pred_dir,
+                            f"inpainting_metadata_{sample_name}.json",
                         )
-                        if meta_path and os.path.isfile(meta_path):
-                            dest = opjoin(
-                                runner.dumper._get_dump_dir(sample_name),
-                                f"inpainting_metadata_{sample_name}.json",
+                        shutil.copy2(meta_path, dest)
+                        logger.info(f"Copied inpainting metadata to {dest}")
+
+                    # Enrich every {sample_name}_model_*.cif with template metadata.
+                    if template_cif and os.path.isfile(template_cif):
+                        try:
+                            from protenix_runner.cif_postprocess import (
+                                enrich_with_template_metadata,
                             )
-                            shutil.copy2(meta_path, dest)
-                            logger.info(
-                                f"Copied inpainting metadata to {dest}"
+                        except Exception as _ex:
+                            logger.warning(
+                                f"cif_postprocess unavailable: {_ex}"
                             )
-                        break
+                        else:
+                            for fname in sorted(os.listdir(pred_dir)):
+                                if not fname.startswith(f"{sample_name}_model_"):
+                                    continue
+                                if not fname.endswith(".cif"):
+                                    continue
+                                cif_path = opjoin(pred_dir, fname)
+                                ok = enrich_with_template_metadata(
+                                    cif_path,
+                                    template_cif,
+                                    entry_id=sample_name,
+                                )
+                                if ok:
+                                    logger.info(
+                                        f"Enriched {fname} with template metadata"
+                                    )
+                    break
 
                 t2_end = time.time()
                 logger.info(
