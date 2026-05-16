@@ -9,6 +9,8 @@ const api = {
       ipcRenderer.invoke("project:create", projectName, parentDir),
     open: (projectPath: string) =>
       ipcRenderer.invoke("project:open", projectPath),
+    checkPaths: (paths: string[]) =>
+      ipcRenderer.invoke("project:check-paths", paths),
     openDialog: () => ipcRenderer.invoke("project:open-dialog"),
     createDialog: (defaultName?: string) =>
       ipcRenderer.invoke("project:create-dialog", defaultName),
@@ -61,7 +63,8 @@ const api = {
       cifContent: string,
       cifFilename: string,
       chainIds: string[],
-      customSequences: string
+      customSequences: string,
+      skipTerminal: boolean = false
     ) =>
       ipcRenderer.invoke(
         "boltz:upload-template",
@@ -69,7 +72,8 @@ const api = {
         cifContent,
         cifFilename,
         chainIds,
-        customSequences
+        customSequences,
+        skipTerminal
       ),
     getJobStatus: (apiUrl: string, jobId: string) =>
       ipcRenderer.invoke("boltz:get-job-status", apiUrl, jobId),

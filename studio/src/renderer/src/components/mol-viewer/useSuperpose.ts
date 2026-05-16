@@ -807,15 +807,14 @@ async function applyInpaintingMetadataColors(
       cifFileName.match(/_([A-Z])_/) || cifFileName.match(/_([A-Z])\./);
     const chainId = chainMatch ? chainMatch[1] : "A";
 
-    // Use the parent directory name as chain prefix (e.g., "4j76_ABCDEF" from ".../4j76_ABCDEF/file.cif")
+    // Use the parent directory name as chain prefix (e.g., "4j76_ABCDEF" from
+    // ".../4j76_ABCDEF/file.cif", or "1a22" from ".../1a22/file.cif").
     const parentDirName =
       pathParts.length >= 2 ? pathParts[pathParts.length - 2] : null;
     const chainPrefixFromDir =
       parentDirName &&
-      parentDirName.includes("_") &&
-      /[A-Z]/.test(parentDirName) &&
-      !parentDirName.includes("run_") &&
-      !parentDirName.includes("predictions")
+      !parentDirName.startsWith("run_") &&
+      parentDirName !== "predictions"
         ? parentDirName
         : null;
 
@@ -904,10 +903,8 @@ async function applyInpaintingMetadataColors(
           fully_inpainted_residues?: number[];
         };
       };
-      boundary_exclusion?: {
-        boundary_residues_by_chain?: {
-          [chainId: string]: number[];
-        };
+      lrd_boundary?: {
+        residues_by_chain?: { [chainId: string]: number[] };
       };
     };
 
@@ -1048,11 +1045,9 @@ async function applyInpaintingMetadataColors(
         continue;
       }
 
-      // 1. Color boundary exclusion residues first (Yellow: #eab308) - Lowest priority
+      // 1. Color LRD boundary residues first (Yellow: #eab308) - Lowest priority
       const boundaryResidues =
-        metadata.boundary_exclusion?.boundary_residues_by_chain?.[
-          currentChainId
-        ];
+        metadata.lrd_boundary?.residues_by_chain?.[currentChainId];
       if (boundaryResidues && boundaryResidues.length > 0) {
         const colorValue = 0xeab308; // Yellow
         const colorHex = `#${colorValue.toString(16).padStart(6, "0")}`;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   FolderOpen,
   FolderPlus,
@@ -41,6 +41,26 @@ export function ProjectWelcome(): React.ReactElement {
   const setError = useProjectStore(state => state.setError);
   const recentProjects = useRecentProjects();
   const [showSamples, setShowSamples] = useState(recentProjects.length === 0);
+
+  // Prune recent projects whose folders no longer exist on disk. Runs once
+  // on mount — newly added entries during the session are valid by construction.
+  useEffect(() => {
+    const initial = useProjectStore.getState().recentProjects;
+    if (initial.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const paths = initial.map(p => p.path);
+      const result = await window.api.project.checkPaths(paths);
+      if (cancelled || !result.success || !result.results) return;
+      const remove = useProjectStore.getState().removeRecentProject;
+      for (const [path, exists] of Object.entries(result.results)) {
+        if (!exists) remove(path);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleCreateProject = async (): Promise<void> => {
     setLoading(true);

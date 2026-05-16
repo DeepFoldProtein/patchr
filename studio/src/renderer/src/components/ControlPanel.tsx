@@ -4,7 +4,8 @@ import { MissingRegionReviewSection } from "./repair/GapReviewSection";
 import { ProjectManager } from "./ProjectManager";
 import {
   fastaInputAtom,
-  enableSequenceMappingAtom
+  enableSequenceMappingAtom,
+  skipTerminalAtom
 } from "../store/repair-atoms";
 import {
   apiUrlAtom,
@@ -52,6 +53,11 @@ import {
   CollapsibleContent
 } from "./ui/collapsible";
 import { Switch } from "./ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from "./ui/tooltip";
 import { SimulationSection, type SavedSimulation } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
@@ -476,19 +482,20 @@ function RepairConsole(): React.ReactElement {
             `[Quality Metrics] Searching metadata for: ${cifFileName} in ${cifDir}`
           );
 
-          // Extract chain prefix from filename or path
-          // Examples:
-          // - "1kx3_CDEFGHIJAB_model_0.cif" -> "1kx3_CDEFGHIJAB"
-          // - "1KX3_chainCDEFGHIJAB.cif" -> "1KX3_chainCDEFGHIJAB"
-          // - "1ton_A_model_0.cif" -> "1ton_A"
-          const chainPrefixMatch = pathParts.find(
-            part =>
-              part.includes("_") &&
-              /[A-Z]/.test(part) &&
-              !part.includes("run_") &&
-              !part.includes("predictions") &&
-              !part.endsWith(".cif")
-          );
+          // Use the directory immediately containing the CIF as the prefix
+          // when it isn't a reserved name. Examples:
+          // - ".../1kx3_CDEFGHIJAB/file.cif" -> "1kx3_CDEFGHIJAB"
+          // - ".../1ton_A/file.cif"          -> "1ton_A"
+          // - ".../1a22/file.cif"            -> "1a22"
+          const immediateDir =
+            pathParts.length >= 2 ? pathParts[pathParts.length - 2] : null;
+          const chainPrefixMatch =
+            immediateDir &&
+            !immediateDir.startsWith("run_") &&
+            immediateDir !== "predictions" &&
+            immediateDir !== "results"
+              ? immediateDir
+              : undefined;
 
           // Try to extract chain prefix from filename itself
           let chainPrefix: string | null = null;
@@ -1028,7 +1035,7 @@ function RepairConsole(): React.ReactElement {
                   style={{ backgroundColor: "#eab308" }}
                 />
                 <span className="text-muted-foreground">
-                  Boundary Exclusion (Flexible Region)
+                  LRD Boundary (Flexible Region)
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -1383,6 +1390,19 @@ function SequenceMappingSection(): React.ReactElement {
     Set<string>
   >(new Set());
 
+  // Bump on structure-ready events so useMemo below re-reads chain data after
+  // a structure is loaded into the plugin (plugin reference alone doesn't change).
+  const [structureTick, setStructureTick] = React.useState(0);
+  React.useEffect(() => {
+    const bump = (): void => setStructureTick(t => t + 1);
+    bus.on("structure:representations-ready", bump);
+    bus.on("structure:loaded", bump);
+    return () => {
+      bus.off("structure:representations-ready", bump);
+      bus.off("structure:loaded", bump);
+    };
+  }, []);
+
   // Get sequence data from structure using getSequencePanelData (includes polymerType)
   const chainSequenceData = React.useMemo(() => {
     if (!plugin)
@@ -1413,7 +1433,7 @@ function SequenceMappingSection(): React.ReactElement {
         { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
       >();
     }
-  }, [plugin]);
+  }, [plugin, structureTick]);
 
   // Simple chainId -> sequence map for backward compatibility
   const chainSequences = React.useMemo(() => {
@@ -1801,6 +1821,10 @@ function ContextInpaintSection({
   const currentProject = useCurrentProject();
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
+  const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
+  // When sequence mapping is on, the provided sequence drives terminal
+  // handling, so the skip-terminal flag is meaningless and we lock it off.
+  const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
 
   const apiUrl = useAtomValue(apiUrlAtom);
   const connectionStatus = useAtomValue(apiConnectionStatusAtom);
@@ -1920,7 +1944,8 @@ function ContextInpaintSection({
         cifContentResult.content,
         cifFile,
         availableChains,
-        customSequencesStr
+        customSequencesStr,
+        skipTerminalEffective
       );
 
       if (!uploadResult.success || !uploadResult.data) {
@@ -2236,6 +2261,49 @@ function ContextInpaintSection({
           )}
         </div>
       )}
+
+      {/* Inpainting Options */}
+      <div className="rounded-md border border-border bg-muted/20 p-3">
+        <Tooltip delayDuration={150}>
+          <TooltipTrigger asChild>
+            <div className="flex items-center justify-between gap-3">
+              <div
+                className={
+                  enableSequenceMapping
+                    ? "opacity-50 cursor-not-allowed"
+                    : undefined
+                }
+              >
+                <label
+                  htmlFor="skip-terminal"
+                  className={`text-xs font-medium ${
+                    enableSequenceMapping
+                      ? "cursor-not-allowed"
+                      : "cursor-pointer"
+                  }`}
+                >
+                  Skip N/C-terminal residues
+                </label>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Only inpaint internal gaps; leave dangling termini untouched.
+                </p>
+              </div>
+              <Switch
+                id="skip-terminal"
+                checked={skipTerminalEffective}
+                disabled={enableSequenceMapping}
+                onCheckedChange={setSkipTerminal}
+              />
+            </div>
+          </TooltipTrigger>
+          {enableSequenceMapping && (
+            <TooltipContent side="top" className="max-w-xs text-xs">
+              Disabled while Sequence Mapping is on. Turn off sequence mapping
+              to skip terminal residues.
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </div>
 
       {/* Error Display */}
       {error && (

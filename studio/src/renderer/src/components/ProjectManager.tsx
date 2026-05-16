@@ -1,11 +1,14 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { useProject } from "../hooks/useProject";
 import {
   useProjectStore,
   useCurrentProject,
   useProjectLoading,
-  useProjectError
+  useProjectError,
+  useStructureContent,
+  useStructureFilename
 } from "../store/project-store";
+import { parseStructureHeader } from "../lib/structureHeader";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -31,6 +34,12 @@ export function ProjectManager(): React.ReactElement {
   const currentProject = useCurrentProject();
   const isLoading = useProjectLoading();
   const error = useProjectError();
+  const structureContent = useStructureContent();
+  const structureFilename = useStructureFilename();
+  const structureHeader = useMemo(
+    () => parseStructureHeader(structureContent),
+    [structureContent]
+  );
 
   // Get action methods directly from store
   const store = useProjectStore();
@@ -143,6 +152,75 @@ export function ProjectManager(): React.ReactElement {
                 </div>
               </div>
             </div>
+
+            {structureHeader && (
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <div className="font-semibold text-sm text-muted-foreground">
+                  Structure Header
+                </div>
+                <dl className="text-sm grid grid-cols-[max-content,1fr] gap-x-3 gap-y-1">
+                  {structureFilename && (
+                    <>
+                      <dt className="font-semibold">File:</dt>
+                      <dd className="font-mono text-xs break-all">
+                        {structureFilename}
+                      </dd>
+                    </>
+                  )}
+                  {structureHeader.pdbId && (
+                    <>
+                      <dt className="font-semibold">PDB ID:</dt>
+                      <dd className="font-mono">{structureHeader.pdbId}</dd>
+                    </>
+                  )}
+                  {structureHeader.title && (
+                    <>
+                      <dt className="font-semibold">Title:</dt>
+                      <dd>{structureHeader.title}</dd>
+                    </>
+                  )}
+                  {structureHeader.classification && (
+                    <>
+                      <dt className="font-semibold">Classification:</dt>
+                      <dd>{structureHeader.classification}</dd>
+                    </>
+                  )}
+                  {structureHeader.experimentalMethod && (
+                    <>
+                      <dt className="font-semibold">Method:</dt>
+                      <dd>{structureHeader.experimentalMethod}</dd>
+                    </>
+                  )}
+                  {structureHeader.resolution && (
+                    <>
+                      <dt className="font-semibold">Resolution:</dt>
+                      <dd>{structureHeader.resolution} Å</dd>
+                    </>
+                  )}
+                  {structureHeader.depositionDate && (
+                    <>
+                      <dt className="font-semibold">Deposited:</dt>
+                      <dd className="font-mono">
+                        {structureHeader.depositionDate}
+                      </dd>
+                    </>
+                  )}
+                  {structureHeader.keywords && (
+                    <>
+                      <dt className="font-semibold">Keywords:</dt>
+                      <dd>{structureHeader.keywords}</dd>
+                    </>
+                  )}
+                  {structureHeader.authors &&
+                    structureHeader.authors.length > 0 && (
+                      <>
+                        <dt className="font-semibold">Authors:</dt>
+                        <dd>{structureHeader.authors.join(", ")}</dd>
+                      </>
+                    )}
+                </dl>
+              </div>
+            )}
 
             <div className="p-4 bg-muted/50 rounded-lg">
               <div className="text-xs text-muted-foreground space-y-1">

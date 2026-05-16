@@ -113,8 +113,8 @@ export function MissingRegionReviewSection(): React.ReactElement {
                           ></span>
                           <span className="text-xs font-medium">
                             {region.regionType === "complete"
-                              ? "Complete Missing Region"
-                              : "Partial Residue"}
+                              ? "Missing Residues"
+                              : "Incomplete Residues (missing atoms)"}
                           </span>
                           <span className="text-xs text-muted-foreground font-mono">
                             {regionRangeDisplay}
