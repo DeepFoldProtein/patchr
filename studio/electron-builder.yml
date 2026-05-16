@@ -48,7 +48,3 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
-publish:
-  provider: github
-  owner: DeepFoldProtein
-  repo: patchr
