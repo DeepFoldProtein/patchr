@@ -34,8 +34,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm build:mac -- --publish never
-
+        run: pnpm build:mac
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -68,8 +67,7 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.WIN_CERTIFICATE_PFX }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
-        run: pnpm build:win -- --publish never
-
+        run: pnpm build:win
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -97,8 +95,7 @@ jobs:
 
       - name: Build Electron app
         working-directory: studio
-        run: pnpm build:linux -- --publish never
-
+        run: pnpm build:linux
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
