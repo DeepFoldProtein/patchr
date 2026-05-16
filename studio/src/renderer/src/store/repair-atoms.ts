@@ -24,6 +24,11 @@ export const sequenceMappingsAtom = atom<SequenceMapping[]>([]);
 export const fastaInputAtom = atom<string>("");
 export const enableSequenceMappingAtom = atom<boolean>(false);
 
+// Skip N/C-terminal missing residues (only inpaint internal gaps).
+// Mutually exclusive with sequence mapping — when mapping is on, terminals
+// are derived from the provided sequence, so this flag is forced off.
+export const skipTerminalAtom = atom<boolean>(false);
+
 // Repair Context (Context & Inpaint 설정)
 export const repairContextsAtom = atom<Map<string, RepairContext>>(new Map());
 
@@ -40,6 +45,7 @@ export const resetRepairStateAtom = atom(null, (_get, set) => {
   set(sequenceMappingsAtom, []);
   set(fastaInputAtom, "");
   set(enableSequenceMappingAtom, false);
+  set(skipTerminalAtom, false);
   set(repairContextsAtom, new Map());
   set(repairResultsAtom, []);
   set(apiConnectionStatusAtom, "idle");

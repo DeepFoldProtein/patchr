@@ -17,6 +17,11 @@ export interface ProjectAPI {
   open: (
     projectPath: string
   ) => Promise<{ success: boolean; project?: ProjectInfo; error?: string }>;
+  checkPaths: (paths: string[]) => Promise<{
+    success: boolean;
+    results?: Record<string, boolean>;
+    error?: string;
+  }>;
   openDialog: () => Promise<{
     success: boolean;
     project?: ProjectInfo | null;
@@ -130,7 +135,8 @@ export interface BoltzAPI {
     cifContent: string,
     cifFilename: string,
     chainIds: string[],
-    customSequences: string
+    customSequences: string,
+    skipTerminal?: boolean
   ) => Promise<{
     success: boolean;
     data?: { job_id: string; status: string };

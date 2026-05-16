@@ -6,6 +6,7 @@ import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { createPluginUI } from "molstar/lib/mol-plugin-ui";
 import { renderReact18 } from "molstar/lib/mol-plugin-ui/react18";
 import { DefaultPluginUISpec } from "molstar/lib/mol-plugin-ui/spec";
+import { PluginConfig } from "molstar/lib/mol-plugin/config";
 import { logger } from "../../lib/logger";
 import { THEME_COLORS } from "../../lib/constants";
 
@@ -112,12 +113,12 @@ export function usePluginContext(): {
           }
         };
 
-        // Configure representation settings to exclude water by default
-        if (spec.config) {
-          spec.config = {
-            ...spec.config
-          };
-        }
+        // Disable Mol*'s built-in fullscreen / expand affordances
+        spec.config = [
+          ...(spec.config ?? []),
+          [PluginConfig.Viewport.ShowExpand, false],
+          [PluginConfig.Viewport.ShowToggleFullscreen, false]
+        ];
 
         // Initialize Mol* plugin
         const pluginUI = await createPluginUI({
@@ -144,6 +145,19 @@ export function usePluginContext(): {
             }
           });
         }
+
+        // Hard-disable expand/fullscreen even if something else flips the layout state
+        pluginUI.layout.events.updated.subscribe(() => {
+          if (
+            pluginUI.layout.state.isExpanded ||
+            pluginUI.layout.state.expandToFullscreen
+          ) {
+            pluginUI.layout.setProps({
+              isExpanded: false,
+              expandToFullscreen: false
+            });
+          }
+        });
 
         pluginInstanceRef.current = pluginUI;
         logger.log("✓ Mol* viewer initialized");

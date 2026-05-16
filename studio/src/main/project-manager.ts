@@ -570,6 +570,18 @@ export function registerProjectIPC(): void {
     }
   });
 
+  ipcMain.handle("project:check-paths", (_event, paths: string[]) => {
+    const results: Record<string, boolean> = {};
+    for (const p of paths) {
+      try {
+        results[p] = existsSync(p);
+      } catch {
+        results[p] = false;
+      }
+    }
+    return { success: true, results };
+  });
+
   ipcMain.handle("project:open-dialog", async () => {
     try {
       const project = await projectManager.showOpenDialog();
@@ -1332,7 +1344,8 @@ export function registerProjectIPC(): void {
       cifContent: string,
       cifFilename: string,
       chainIds: string[],
-      customSequences: string
+      customSequences: string,
+      skipTerminal: boolean = false
     ) => {
       try {
         validateApiUrl(apiUrl);
@@ -1351,6 +1364,13 @@ export function registerProjectIPC(): void {
         formDataParts.push(
           Buffer.from(
             `--${boundary}\r\nContent-Disposition: form-data; name="custom_sequences"\r\n\r\n${customSequences}\r\n`
+          )
+        );
+
+        // Add skip_terminal field
+        formDataParts.push(
+          Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="skip_terminal"\r\n\r\n${skipTerminal ? "true" : "false"}\r\n`
           )
         );
 
