@@ -252,7 +252,7 @@ export function useStructure(
         setInfo(structInfo);
 
         // 이벤트 발행
-        bus.emit("structure:loaded", structInfo);
+        bus.emit("structure:loaded", { format: structInfo.format, chainCount: structInfo.chainIds.length });
 
         logger.log(`✅ Structure loaded and rendered (${format})`);
       } catch (err) {
