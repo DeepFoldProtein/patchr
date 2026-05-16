@@ -1,6 +1,6 @@
 {
   "name": "patchr-studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Patchr Studio - AI-powered protein structure inpainting tool",
   "main": "./out/main/index.js",
   "author": "delibae",
