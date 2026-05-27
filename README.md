@@ -24,20 +24,29 @@
 ---
 
 <div align="center">
-<img src="docs/e2e_demo.gif" width="480"/>
+<table>
+  <tr><td align="center"><img src="docs/e2e_demo.gif" width="480"/></td></tr>
+  <tr align="center"><td><b>PATCHR-Studio</b> : end-to-end desktop workflow &mdash; load a structure, mark gaps, inpaint, and export</td></tr>
+</table>
 </div>
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><img src="docs/inpainting_1kx3.gif" width="300"/></td>
-    <td align="center"><img src="docs/inpainting_6gis_ext.gif" width="300"/></td>
-    <td align="center"><img src="docs/inpainting_8gzr.gif" width="300"/></td>
+    <td align="center"><img src="docs/inpainting_1kx3.gif" width="360"/></td>
+    <td align="center"><img src="docs/inpainting_6gis_ext.gif" width="360"/></td>
   </tr>
   <tr align="center">
     <td><b>1KX3</b> : nucleosome histone-tail inpainting</td>
     <td><b>6GIS</b> : PCNA + 50 bp DNA extension</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/inpainting_8gzr.gif" width="360"/></td>
+    <td align="center"><img src="docs/inpainting_4zlo.gif" width="360"/></td>
+  </tr>
+  <tr align="center">
     <td><b>8GZR</b> : NS3 polymerase + RNA reconstruction</td>
+    <td><b>4ZLO</b> : kinase + ligand inpainting</td>
   </tr>
 </table>
 </div>
