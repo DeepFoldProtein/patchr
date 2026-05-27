@@ -191,9 +191,10 @@ class ModificationsMixin:
         if isinstance(mon_id, str):
             mon_id = [mon_id]
         num = [int(n) for n in num]
-        by_entity: Dict[int, List[Tuple[int, str]]] = {}
+        # entity_id can be numeric (mmCIF) or alphabetic (gemmi PDB→CIF); keep as-is.
+        by_entity: Dict[Any, List[Tuple[int, str]]] = {}
         for i, ent in enumerate(eid):
-            ent_id = int(ent) if isinstance(ent, str) else ent
+            ent_id = ent
             if ent_id not in by_entity:
                 by_entity[ent_id] = []
             by_entity[ent_id].append((num[i], mon_id[i]))
@@ -212,8 +213,8 @@ class ModificationsMixin:
             asym_ids = [asym_ids]
         if isinstance(asym_entity, str):
             asym_entity = [asym_entity]
-        for chain_id, eid in zip(asym_ids, asym_entity):
-            ent_id = int(eid) if isinstance(eid, str) else eid
+        for chain_id, eid_val in zip(asym_ids, asym_entity):
+            ent_id = eid_val
             if ent_id in entity_mods:
                 out[chain_id] = entity_mods[ent_id]
         return out

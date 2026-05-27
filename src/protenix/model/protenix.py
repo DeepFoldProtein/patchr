@@ -440,7 +440,7 @@ class Protenix(nn.Module):
         inpainting_cfg = getattr(self.configs, "inpainting", None) or {}
         for key, default in [
             ("boundary_refinement_enabled", True),
-            ("boundary_refinement_window", 2),
+            ("boundary_refinement_window", 3),
             ("boundary_refinement_sigma_start", 1.5),
             ("boundary_refinement_steps", 25),
         ]:

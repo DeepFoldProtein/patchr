@@ -107,8 +107,9 @@ click.rich_click.OPTION_GROUPS = {
     help="Exclude non-polymer (ligand) chains from output.",
 )
 @click.option(
-    "--assembly", type=str, default=None, metavar="ID",
-    help='Biological assembly ID or "best" for auto-selection.',
+    "--assembly", type=str, default="1", metavar="ID",
+    help='Biological assembly ID or "best" for auto-selection. Default is "1" '
+         '(first biological assembly); pass "none" to use the full asymmetric unit.',
 )
 @click.option(
     "--list-assemblies", is_flag=True,
@@ -167,7 +168,9 @@ def main(
             custom_sequences['_default_'] = sequence.strip()
 
     # Resolve input source
-    assembly_id = assembly
+    # Sentinel "none" means: do not select any biological assembly,
+    # fall back to the full asymmetric unit.
+    assembly_id = None if (isinstance(assembly, str) and assembly.lower() == "none") else assembly
     cif_file_path = None
 
     if input_file:

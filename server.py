@@ -154,6 +154,10 @@ class TemplateGenerateRequest(BaseModel):
         None,
         description="Custom sequences for chains (e.g., {'A': 'ACDEFG...', 'B': 'MNOPQR...'})",
     )
+    skip_terminal: bool = Field(
+        False,
+        description="Skip N/C-terminal missing residues (only inpaint internal gaps)",
+    )
 
 
 class PredictionRequest(BaseModel):
@@ -548,6 +552,7 @@ async def run_template_generation(
     uniprot: bool,
     custom_sequences: Optional[Dict[str, str]],
     cif_file_path: Optional[Path] = None,
+    skip_terminal: bool = False,
 ):
     """Background task to generate inpainting template."""
     try:
@@ -573,6 +578,9 @@ async def run_template_generation(
         if custom_sequences:
             seq_str = ",".join([f"{chain}:{seq}" for chain, seq in custom_sequences.items()])
             cmd.extend(["--sequence", seq_str])
+
+        if skip_terminal:
+            cmd.append("--skip-terminal")
 
         cmd.extend(["-o", str(output_dir)])
 
@@ -1086,6 +1094,7 @@ async def generate_template(
         chain_ids=request.chain_ids,
         uniprot=request.uniprot,
         custom_sequences=request.custom_sequences,
+        skip_terminal=request.skip_terminal,
     )
 
     return JobStatusResponse(**job_record)
@@ -1097,6 +1106,7 @@ async def upload_structure(
     cif_file: UploadFile = File(..., description="Structure file (CIF or PDB)"),
     chain_ids: str = Form(..., description="Chain IDs (e.g., 'A' or 'A,B')"),
     custom_sequences: Optional[str] = Form(None, description="Custom sequences in format 'A:SEQ1,B:SEQ2'"),
+    skip_terminal: bool = Form(False, description="Skip N/C-terminal missing residues (only inpaint internal gaps)"),
 ):
     """Upload a structure file (CIF or PDB) and generate inpainting template."""
     print(f"[API] POST /api/v1/template/upload filename={cif_file.filename} chain_ids={chain_ids}")
@@ -1163,6 +1173,7 @@ async def upload_structure(
         uniprot=False,
         custom_sequences=custom_seq_dict,
         cif_file_path=cif_path,
+        skip_terminal=skip_terminal,
     )
 
     return JobStatusResponse(**job_record)

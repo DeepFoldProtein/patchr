@@ -122,7 +122,7 @@ def _get_boundary_region_mask(
     template_mask: torch.Tensor,  # (n_atoms,) bool
     atom_to_token_idx: torch.Tensor,  # (n_atoms,) int – index into token dim
     asym_id: torch.Tensor,  # (n_tokens,) int
-    boundary_window: int = 2,
+    boundary_window: int = 3,
 ) -> torch.Tensor:
     """Return bool atom mask for atoms within *boundary_window* residues of the
     template/generated boundary (on both sides).
@@ -162,7 +162,10 @@ def _get_boundary_region_mask(
             # Check all tokens between i and bi are same chain
             lo, hi = (i, bi.item()) if i <= bi else (bi.item(), i)
             same_chain = (asym_id[lo:hi + 1] == asym_id[i]).all()
-            if same_chain and abs(i - bi.item()) <= boundary_window:
+            # Two adjacent residues (template + gap) at the transition are both
+            # tagged as initial boundary, so this comparison uses strict-less-than
+            # to make boundary_window=N mean exactly ±N residues from the edge.
+            if same_chain and abs(i - bi.item()) < boundary_window:
                 boundary_expanded[i] = True
                 break
 
@@ -192,7 +195,7 @@ def sample_diffusion(
     enable_efficient_fusion: bool = False,
     # Inpainting parameters
     boundary_refinement_enabled: bool = True,
-    boundary_refinement_window: int = 2,
+    boundary_refinement_window: int = 3,
     boundary_refinement_sigma_start: float = 1.5,
     boundary_refinement_steps: int = 25,
 ) -> torch.Tensor:
