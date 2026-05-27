@@ -1,0 +1,2113 @@
+{
+    "chains": {
+        "A": {
+            "fully_fixed_residues": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                29,
+                30,
+                31,
+                32,
+                33,
+                35,
+                36,
+                37,
+                38,
+                39,
+                40,
+                41,
+                42,
+                45,
+                46,
+                47,
+                48,
+                49,
+                50,
+                51,
+                52,
+                53,
+                54,
+                55,
+                56,
+                57,
+                58,
+                59,
+                60,
+                61,
+                62,
+                63,
+                64,
+                65,
+                66,
+                67,
+                68,
+                69,
+                70,
+                72,
+                73,
+                74,
+                75,
+                76,
+                77,
+                78,
+                79,
+                80,
+                81,
+                82,
+                83,
+                84,
+                85,
+                87,
+                88,
+                89,
+                90,
+                91,
+                93,
+                97,
+                99,
+                100,
+                101,
+                102,
+                103,
+                104,
+                106,
+                108,
+                111,
+                112,
+                113,
+                115,
+                117,
+                119,
+                120,
+                121,
+                122,
+                128,
+                130,
+                132,
+                134,
+                135,
+                138,
+                140,
+                141,
+                142,
+                143,
+                144,
+                145,
+                146,
+                147,
+                148,
+                149,
+                150,
+                151,
+                152,
+                153,
+                154,
+                155,
+                156,
+                158,
+                159,
+                160,
+                161,
+                162,
+                164,
+                167,
+                168,
+                169,
+                170,
+                171,
+                172,
+                173,
+                174,
+                176,
+                177,
+                179,
+                180,
+                181,
+                183,
+                185,
+                195,
+                196,
+                197,
+                198,
+                200,
+                201,
+                203,
+                204,
+                205,
+                206,
+                207,
+                208,
+                209,
+                210,
+                212,
+                213,
+                214,
+                215,
+                216,
+                217,
+                218,
+                219,
+                220,
+                221,
+                222,
+                223,
+                224,
+                225,
+                226,
+                227,
+                228,
+                229,
+                230,
+                231,
+                232,
+                234,
+                235,
+                236,
+                237,
+                238,
+                239,
+                240,
+                242,
+                243,
+                245,
+                246,
+                247,
+                248,
+                249,
+                250,
+                251,
+                252,
+                253,
+                254
+            ],
+            "partially_fixed_residues": [
+                {
+                    "residue": 34,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 43,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 44,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 71,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 86,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 92,
+                    "fixed_atoms": 7,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 94,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 95,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 96,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 98,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 105,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 107,
+                    "fixed_atoms": 4,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CB",
+                        "CD",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 109,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 110,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 114,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 116,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 118,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 123,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 124,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 125,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 126,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 127,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CD2",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 129,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 131,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 133,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 136,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "SG"
+                    ]
+                },
+                {
+                    "residue": 137,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 139,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 157,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 163,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "SG"
+                    ]
+                },
+                {
+                    "residue": 165,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 166,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 175,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 178,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 182,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 184,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 186,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2",
+                        "OG1"
+                    ]
+                },
+                {
+                    "residue": 193,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 194,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 199,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 202,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 211,
+                    "fixed_atoms": 6,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CD",
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 233,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 241,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 244,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 255,
+                    "fixed_atoms": 7,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CE",
+                        "NZ"
+                    ]
+                }
+            ],
+            "fully_inpainted_residues": [
+                1,
+                187,
+                188,
+                189,
+                190,
+                191,
+                192,
+                256,
+                257,
+                258,
+                259,
+                260,
+                261,
+                262
+            ],
+            "total_atoms_with_structure": 1770,
+            "total_expected_atoms": 2018
+        },
+        "B": {
+            "fully_fixed_residues": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                13,
+                14,
+                15,
+                16,
+                17,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                27,
+                29,
+                30,
+                31,
+                32,
+                33,
+                35,
+                36,
+                37,
+                38,
+                39,
+                41,
+                42,
+                45,
+                46,
+                47,
+                48,
+                49,
+                50,
+                51,
+                52,
+                53,
+                56,
+                57,
+                58,
+                59,
+                60,
+                61,
+                62,
+                63,
+                64,
+                65,
+                66,
+                67,
+                68,
+                69,
+                70,
+                71,
+                72,
+                73,
+                74,
+                75,
+                76,
+                77,
+                78,
+                79,
+                80,
+                81,
+                82,
+                83,
+                84,
+                87,
+                89,
+                90,
+                91,
+                93,
+                95,
+                97,
+                99,
+                100,
+                101,
+                102,
+                103,
+                104,
+                105,
+                106,
+                107,
+                108,
+                110,
+                113,
+                114,
+                115,
+                117,
+                119,
+                120,
+                128,
+                129,
+                130,
+                131,
+                132,
+                134,
+                135,
+                136,
+                137,
+                138,
+                140,
+                141,
+                142,
+                143,
+                144,
+                145,
+                146,
+                147,
+                148,
+                149,
+                151,
+                152,
+                153,
+                154,
+                155,
+                156,
+                157,
+                158,
+                159,
+                160,
+                161,
+                162,
+                163,
+                164,
+                166,
+                167,
+                168,
+                169,
+                170,
+                171,
+                172,
+                173,
+                174,
+                176,
+                177,
+                178,
+                179,
+                180,
+                181,
+                183,
+                184,
+                185,
+                195,
+                196,
+                197,
+                198,
+                200,
+                203,
+                204,
+                205,
+                206,
+                207,
+                208,
+                209,
+                210,
+                211,
+                212,
+                213,
+                214,
+                215,
+                216,
+                217,
+                218,
+                219,
+                220,
+                221,
+                222,
+                223,
+                224,
+                225,
+                226,
+                227,
+                228,
+                229,
+                230,
+                231,
+                232,
+                234,
+                235,
+                236,
+                237,
+                238,
+                239,
+                240,
+                242,
+                243,
+                245,
+                246,
+                247,
+                248,
+                249,
+                250,
+                251,
+                252,
+                253,
+                254
+            ],
+            "partially_fixed_residues": [
+                {
+                    "residue": 1,
+                    "fixed_atoms": 5,
+                    "total_atoms": 10,
+                    "missing_atoms": [
+                        "CD2",
+                        "CE1",
+                        "CG",
+                        "ND1",
+                        "NE2"
+                    ]
+                },
+                {
+                    "residue": 12,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 18,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 25,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 26,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 28,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "SG"
+                    ]
+                },
+                {
+                    "residue": 34,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 40,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 43,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 44,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 54,
+                    "fixed_atoms": 5,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 55,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 85,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 86,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 88,
+                    "fixed_atoms": 7,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1"
+                    ]
+                },
+                {
+                    "residue": 92,
+                    "fixed_atoms": 5,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 94,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 96,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 98,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 109,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 111,
+                    "fixed_atoms": 8,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 112,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 116,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 118,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 121,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 122,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CD2",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 123,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 124,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 125,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 126,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 127,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CD2",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 133,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 139,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 150,
+                    "fixed_atoms": 6,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CD",
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 165,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 175,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 182,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 186,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2",
+                        "OG1"
+                    ]
+                },
+                {
+                    "residue": 192,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 193,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 194,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 199,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 201,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 202,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 233,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 241,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 244,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 255,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                }
+            ],
+            "fully_inpainted_residues": [
+                187,
+                188,
+                189,
+                190,
+                191,
+                256,
+                257,
+                258,
+                259,
+                260,
+                261,
+                262
+            ],
+            "total_atoms_with_structure": 1772,
+            "total_expected_atoms": 2018
+        },
+        "C": {
+            "fully_fixed_residues": [
+                2,
+                3,
+                4,
+                5,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                27,
+                28,
+                29,
+                30,
+                32,
+                34,
+                35,
+                36,
+                37,
+                38,
+                39,
+                40,
+                41,
+                42,
+                43,
+                45,
+                47,
+                48,
+                49,
+                50,
+                51,
+                52,
+                53,
+                54,
+                56,
+                57,
+                58,
+                59,
+                60,
+                61,
+                63,
+                65,
+                66,
+                67,
+                68,
+                69,
+                70,
+                71,
+                72,
+                73,
+                74,
+                75,
+                76,
+                77,
+                79,
+                80,
+                81,
+                82,
+                83,
+                84,
+                85,
+                86,
+                87,
+                88,
+                89,
+                90,
+                91,
+                93,
+                95,
+                97,
+                99,
+                100,
+                101,
+                102,
+                103,
+                104,
+                106,
+                107,
+                108,
+                112,
+                113,
+                114,
+                115,
+                116,
+                117,
+                119,
+                120,
+                128,
+                129,
+                130,
+                132,
+                133,
+                134,
+                137,
+                138,
+                140,
+                141,
+                142,
+                143,
+                144,
+                145,
+                146,
+                147,
+                148,
+                149,
+                151,
+                152,
+                153,
+                154,
+                155,
+                156,
+                157,
+                158,
+                161,
+                163,
+                164,
+                167,
+                168,
+                169,
+                170,
+                172,
+                173,
+                174,
+                175,
+                176,
+                177,
+                178,
+                179,
+                180,
+                181,
+                183,
+                184,
+                185,
+                195,
+                196,
+                197,
+                198,
+                200,
+                202,
+                203,
+                206,
+                207,
+                208,
+                209,
+                210,
+                211,
+                212,
+                213,
+                214,
+                215,
+                216,
+                217,
+                219,
+                220,
+                221,
+                222,
+                223,
+                224,
+                225,
+                226,
+                227,
+                228,
+                229,
+                230,
+                231,
+                232,
+                234,
+                235,
+                236,
+                237,
+                238,
+                239,
+                240,
+                242,
+                243,
+                245,
+                246,
+                247,
+                248,
+                249,
+                250,
+                251,
+                252,
+                253,
+                254
+            ],
+            "partially_fixed_residues": [
+                {
+                    "residue": 6,
+                    "fixed_atoms": 8,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CZ",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 26,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 31,
+                    "fixed_atoms": 7,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1"
+                    ]
+                },
+                {
+                    "residue": 33,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 44,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 46,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 55,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 62,
+                    "fixed_atoms": 5,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 64,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 78,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 92,
+                    "fixed_atoms": 8,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CZ",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 94,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 96,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 98,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 105,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 109,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 110,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 111,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 118,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 121,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 122,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CD2",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 123,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 124,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 125,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 126,
+                    "fixed_atoms": 4,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CB",
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 127,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CD1",
+                        "CD2",
+                        "CG"
+                    ]
+                },
+                {
+                    "residue": 131,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 135,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 136,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "SG"
+                    ]
+                },
+                {
+                    "residue": 139,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 150,
+                    "fixed_atoms": 7,
+                    "total_atoms": 11,
+                    "missing_atoms": [
+                        "CZ",
+                        "NE",
+                        "NH1",
+                        "NH2"
+                    ]
+                },
+                {
+                    "residue": 159,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 160,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 162,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 165,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 166,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 171,
+                    "fixed_atoms": 5,
+                    "total_atoms": 6,
+                    "missing_atoms": [
+                        "OG"
+                    ]
+                },
+                {
+                    "residue": 182,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 186,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG2",
+                        "OG1"
+                    ]
+                },
+                {
+                    "residue": 194,
+                    "fixed_atoms": 6,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 199,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "OE1",
+                        "OE2"
+                    ]
+                },
+                {
+                    "residue": 201,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "ND2",
+                        "OD1"
+                    ]
+                },
+                {
+                    "residue": 204,
+                    "fixed_atoms": 5,
+                    "total_atoms": 7,
+                    "missing_atoms": [
+                        "CG1",
+                        "CG2"
+                    ]
+                },
+                {
+                    "residue": 205,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CG",
+                        "NE2",
+                        "OE1"
+                    ]
+                },
+                {
+                    "residue": 218,
+                    "fixed_atoms": 8,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 233,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                },
+                {
+                    "residue": 241,
+                    "fixed_atoms": 5,
+                    "total_atoms": 9,
+                    "missing_atoms": [
+                        "CD",
+                        "CE",
+                        "CG",
+                        "NZ"
+                    ]
+                },
+                {
+                    "residue": 244,
+                    "fixed_atoms": 5,
+                    "total_atoms": 8,
+                    "missing_atoms": [
+                        "CG",
+                        "OD1",
+                        "OD2"
+                    ]
+                }
+            ],
+            "fully_inpainted_residues": [
+                1,
+                187,
+                188,
+                189,
+                190,
+                191,
+                192,
+                193,
+                255,
+                256,
+                257,
+                258,
+                259,
+                260,
+                261,
+                262
+            ],
+            "total_atoms_with_structure": 1751,
+            "total_expected_atoms": 2018
+        }
+    },
+    "chain_mapping": {
+        "label_to_author": {
+            "A": "A",
+            "B": "B",
+            "C": "C",
+            "D": "D",
+            "E": "E"
+        }
+    }
+}

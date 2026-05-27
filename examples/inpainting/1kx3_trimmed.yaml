@@ -1,0 +1,107 @@
+version: 1
+
+sequences:
+  - dna:
+      id: 'A'
+      sequence: ATCAATATCCACCTGCAGATTCTACCAAAAGTGTATTTGGAAACTGCTCCATCAAAAGGCATGTTCAGCTGAATTCAGCTGAACATGCCTTTTGATGGAGCAGTTTCCAAATACACTTTTGGTAGAATCTGCAGGTGGATATTGAT
+
+  - dna:
+      id: 'B'
+      sequence: ATCAATATCCACCTGCAGATTCTACCAAAAGTGTATTTGGAAACTGCTCCATCAAAAGGCATGTTCAGCTGAATTCAGCTGAACATGCCTTTTGATGGAGCAGTTTCCAAATACACTTTTGGTAGAATCTGCAGGTGGATATTGAT
+
+  - protein:
+      id: 'C'
+      sequence: PHRYRPGTVALREIRRYQKSTELLIRKLPFQRLVREIAQDFKTDLRFQSSAVMALQEASEAYLVALFEDTNLCAIHAKRVTIMPKDIQLARRIRGERA
+      msa: empty
+
+  - protein:
+      id: 'D'
+      sequence: VLRDNIQGITKPAIRRLARRGGVKRISGLIYEETRGVLKVFLENVIRDAVTYTEHAKRKTVTAMDVVYALKRQGRTLYGFGG
+      msa: empty
+
+  - protein:
+      id: 'E'
+      sequence: AKTRSSRAGLQFPVGRVHRLLRKGNYAERVGAGAPVYLAAVLEYLTAEILELAGNAARDNKKTRIIPRHLQLAVRNDEELNKLLGRVTIAQGGVLPNIQSVLLPKKT
+      msa: empty
+
+  - protein:
+      id: 'F'
+      sequence: TRKESYAIYVYKVLKQVHPDTGISSKAMSIMNSFVNDVFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK
+      msa: empty
+
+  - protein:
+      id: 'G'
+      sequence: PHRYRPGTVALREIRRYQKSTELLIRKLPFQRLVREIAQDFKTDLRFQSSAVMALQEASEAYLVALFEDTNLCAIHAKRVTIMPKDIQLARRIRGERA
+      msa: empty
+
+  - protein:
+      id: 'H'
+      sequence: KRHRKVLRDNIQGITKPAIRRLARRGGVKRISGLIYEETRGVLKVFLENVIRDAVTYTEHAKRKTVTAMDVVYALKRQGRTLYGFGG
+      msa: empty
+
+  - protein:
+      id: 'I'
+      sequence: AKTRSSRAGLQFPVGRVHRLLRKGNYAERVGAGAPVYLAAVLEYLTAEILELAGNAARDNKKTRIIPRHLQLAVRNDEELNKLLGRVTIAQGGVLPNIQSVLLPKK
+      msa: empty
+
+  - protein:
+      id: 'J'
+      sequence: TRKESYAIYVYKVLKQVHPDTGISSKAMSIMNSFVNDVFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK
+      msa: empty
+
+  - ligand:
+      id: 'K'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'L'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'M'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'N'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'O'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'P'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'Q'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'R'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'S'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'T'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'U'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'V'
+      ccd: 'MN'
+
+  - ligand:
+      id: 'W'
+      ccd: 'MN'
+
+templates:
+  - cif: examples/inpainting/1KX3_trimmed.cif
+    chain_id: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W']
+    inpainting_metadata: examples/inpainting/1kx3_trimmed_inpainting_metadata.json
