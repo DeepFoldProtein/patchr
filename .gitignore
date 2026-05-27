@@ -220,3 +220,7 @@ data/mod_test/
 
 # Auto-generated release info
 docs/RELEASE_INFO.md
+
+inputs/
+outputs/
+slurm-*
