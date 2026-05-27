@@ -236,6 +236,10 @@ Beyond the headline RMSDs above, PATCHR also produces simulation-ready geometry:
 
 </details>
 
+## Future Work
+
+Any model trained on the AlphaFold3 framework can be converted into an inpainting model through the PATCHR protocol. Currently implemented for **Boltz-2** and **Protenix** only; extending to additional AF3-family backends is planned.
+
 ## Acknowledgments
 
 PATCHR builds upon [Boltz-2](https://github.com/jwohlwend/boltz) by Passaro, Corso, Wohlwend et al. and [Protenix](https://github.com/bytedance/protenix) by ByteDance.
