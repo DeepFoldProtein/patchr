@@ -46,7 +46,7 @@
   </tr>
   <tr align="center">
     <td><b>8GZR</b> : NS3 polymerase + RNA reconstruction</td>
-    <td><b>4ZLO</b> : kinase + ligand inpainting</td>
+    <td><b>4ZLO</b> : Kinase inpainting with ligand</td>
   </tr>
 </table>
 </div>
