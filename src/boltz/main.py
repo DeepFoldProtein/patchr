@@ -16,6 +16,19 @@ from typing import Literal, Optional
 import click
 import torch
 from pytorch_lightning import Trainer, seed_everything
+
+# PyTorch 2.6+ defaults to weights_only=True, which fails on checkpoints carrying
+# OmegaConf hyperparameters. Boltz checkpoints come from a trusted source, so
+# force the legacy behavior to avoid having to allowlist every internal class.
+_torch_load_orig = torch.load
+
+
+def _torch_load_no_weights_only(*args, **kwargs):
+    kwargs["weights_only"] = False
+    return _torch_load_orig(*args, **kwargs)
+
+
+torch.load = _torch_load_no_weights_only
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from rdkit import Chem
@@ -1003,6 +1016,23 @@ def cli() -> None:
     help="The model to use for prediction. Default is boltz2.",
 )
 @click.option(
+    "--save_trajectory",
+    is_flag=True,
+    help=(
+        "Save the diffusion denoising trajectory as a multi-model PDB per sample "
+        "(written next to the final structure as trajectory_<id>_model_<rank>.pdb)."
+    ),
+)
+@click.option(
+    "--trajectory_stride",
+    type=int,
+    default=1,
+    help=(
+        "Keep every Nth diffusion step in the trajectory (default 1 = all steps). "
+        "Only used when --save_trajectory is set."
+    ),
+)
+@click.option(
     "--method",
     type=str,
     help="The method to use for prediction. Default is None.",
@@ -1109,6 +1139,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     no_kernels: bool = False,
     write_embeddings: bool = False,
     disable_boundary_refinement: bool = False,
+    save_trajectory: bool = False,
+    trajectory_stride: int = 1,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1349,6 +1381,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
             "boundary_refinement_enabled": not disable_boundary_refinement,
+            "save_trajectory": save_trajectory,
+            "trajectory_stride": max(1, int(trajectory_stride)),
         }
 
         steering_args = BoltzSteeringParams()

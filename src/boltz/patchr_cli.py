@@ -231,6 +231,24 @@ def _validate_inpainting_input(data: str) -> None:
 @click.option("--inpainting/--no-inpainting", default=True, help="Enable inpainting mode. Default: enabled.")
 @click.option("--disable_boundary_refinement", is_flag=True, help="Disable boundary refinement (LRD).")
 @click.option(
+    "--save_trajectory",
+    is_flag=True,
+    help=(
+        "Save the diffusion denoising trajectory as a multi-model PDB per sample "
+        "(written next to the final structure as trajectory_<id>_model_<rank>.pdb). "
+        "Boltz backend only."
+    ),
+)
+@click.option(
+    "--trajectory_stride",
+    type=int,
+    default=1,
+    help=(
+        "Keep every Nth diffusion step in the trajectory (default 1 = all steps). "
+        "Only used when --save_trajectory is set."
+    ),
+)
+@click.option(
     "--preprocessing-threads",
     type=int,
     default=multiprocessing.cpu_count(),
@@ -273,6 +291,8 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
     use_potentials: bool,
     inpainting: bool,
     disable_boundary_refinement: bool,
+    save_trajectory: bool,
+    trajectory_stride: int,
     preprocessing_threads: int,
     max_msa_seqs: int,
     subsample_msa: bool,
@@ -333,6 +353,8 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
             use_potentials=use_potentials,
             inpainting=inpainting,
             disable_boundary_refinement=disable_boundary_refinement,
+            save_trajectory=save_trajectory,
+            trajectory_stride=trajectory_stride,
             preprocessing_threads=preprocessing_threads,
             max_msa_seqs=max_msa_seqs,
             subsample_msa=subsample_msa,
@@ -415,6 +437,8 @@ def _predict_boltz(
     use_potentials: bool,
     inpainting: bool,
     disable_boundary_refinement: bool,
+    save_trajectory: bool,
+    trajectory_stride: int,
     preprocessing_threads: int,
     max_msa_seqs: int,
     subsample_msa: bool,
@@ -598,6 +622,8 @@ def _predict_boltz(
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
             "boundary_refinement_enabled": not disable_boundary_refinement,
+            "save_trajectory": save_trajectory,
+            "trajectory_stride": max(1, int(trajectory_stride)),
         }
 
         steering_args = BoltzSteeringParams()

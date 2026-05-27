@@ -584,9 +584,17 @@ class Boltz2(LightningModule):
                 with torch.autocast("cuda", enabled=False):
                     # Get boundary refinement setting from predict_args if available
                     boundary_refinement_enabled = None
+                    save_trajectory = False
+                    trajectory_stride = 1
                     if self.predict_args is not None:
                         boundary_refinement_enabled = self.predict_args.get(
                             "boundary_refinement_enabled", None
+                        )
+                        save_trajectory = bool(
+                            self.predict_args.get("save_trajectory", False)
+                        )
+                        trajectory_stride = max(
+                            1, int(self.predict_args.get("trajectory_stride", 1))
                         )
 
                     struct_out = self.structure_module.sample(
@@ -601,6 +609,8 @@ class Boltz2(LightningModule):
                         diffusion_conditioning=diffusion_conditioning,
                         progress_tracker=progress_tracker,  # Pass progress tracker
                         boundary_refinement_enabled=boundary_refinement_enabled,
+                        save_trajectory=save_trajectory,
+                        trajectory_stride=trajectory_stride,
                     )
                     dict_out.update(struct_out)
 
@@ -1170,6 +1180,12 @@ class Boltz2(LightningModule):
             # Store inpainting metadata if available (for JSON export)
             if "inpainting_metadata" in out:
                 pred_dict["inpainting_metadata"] = out["inpainting_metadata"]
+
+            # Store diffusion trajectory if available (for visualization).
+            if "trajectory" in out:
+                pred_dict["trajectory"] = out["trajectory"]
+            if "trajectory_npz" in out:
+                pred_dict["trajectory_npz"] = out["trajectory_npz"]
 
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)

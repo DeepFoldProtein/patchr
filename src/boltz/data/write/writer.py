@@ -18,6 +18,64 @@ from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 
 
+def _write_trajectory_pdb(
+    traj_frames: Tensor,
+    pad_mask: Tensor,
+    structure,
+    plddts,
+    boltz2: bool,
+    output_path: Path,
+) -> None:
+    """Write a denoising trajectory as a multi-model PDB.
+
+    Each frame's coords are substituted into ``structure.atoms["coords"]`` and
+    rendered with ``to_pdb``; per-frame ATOM/HETATM records are wrapped in
+    ``MODEL N`` / ``ENDMDL`` blocks. The final ``END`` plus a single CONECT
+    block (shared across models) is emitted once at the end.
+    """
+    mask_np = pad_mask.bool().cpu().numpy()
+    num_frames = int(traj_frames.shape[0])
+
+    # Snapshot existing coords so callers' subsequent writes are unaffected by
+    # the in-place mutation we do per-frame below.
+    original_coords = structure.atoms["coords"].copy()
+
+    out_lines: list[str] = []
+    conect_lines: list[str] = []
+    for frame_idx in range(num_frames):
+        frame_coords = traj_frames[frame_idx][mask_np].cpu().numpy()
+        # Substitute coords (atoms array is mutable; final structure write at the
+        # end of write_on_batch_end will overwrite it back to the final coords).
+        structure.atoms["coords"] = frame_coords
+        if boltz2:
+            structure_coords_view = np.array([(x,) for x in frame_coords], dtype=Coords)
+            new_struct = replace(structure, coords=structure_coords_view)
+        else:
+            new_struct = structure
+
+        pdb_str = to_pdb(new_struct, plddts=plddts, boltz2=boltz2)
+        atom_lines = []
+        for line in pdb_str.splitlines():
+            stripped = line.rstrip()
+            if stripped.startswith(("ATOM", "HETATM", "TER")):
+                atom_lines.append(line)
+            elif stripped.startswith("CONECT") and frame_idx == 0:
+                conect_lines.append(line)
+            # Drop END and blank lines per-frame; we emit them once at the end.
+
+        out_lines.append(f"MODEL{frame_idx + 1:>9}".ljust(80))
+        out_lines.extend(atom_lines)
+        out_lines.append("ENDMDL".ljust(80))
+
+    out_lines.extend(conect_lines)
+    out_lines.append("END".ljust(80))
+    out_lines.append("")
+    output_path.write_text("\n".join(out_lines))
+
+    # Restore so the caller's atoms array is unchanged on return.
+    structure.atoms["coords"] = original_coords
+
+
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
 
@@ -242,6 +300,76 @@ class BoltzWriter(BasePredictionWriter):
                     )
                     np.savez_compressed(path, plddt=plddt.cpu().numpy())
 
+                # Save diffusion trajectory as multi-model PDB (for Mol* / PyMOL playback).
+                # prediction["trajectory"] shape: (num_frames, multiplicity, n_atoms, 3),
+                # CPU float32 tensor produced by DiffusionV2.sample.
+                if "trajectory" in prediction:
+                    traj = prediction["trajectory"]
+                    if isinstance(traj, torch.Tensor):
+                        traj_frames = traj[:, model_idx]  # (num_frames, n_atoms, 3)
+                        traj_path = (
+                            struct_dir
+                            / f"trajectory_{record.id}_model_{idx_to_rank[model_idx]}.pdb"
+                        )
+                        _write_trajectory_pdb(
+                            traj_frames=traj_frames,
+                            pad_mask=pad_mask,
+                            structure=new_structure,
+                            plddts=plddts,
+                            boltz2=self.boltz2,
+                            output_path=traj_path,
+                        )
+
+                # Save detailed per-step NPZ trajectory (atom_coords, rotated template
+                # coords, and x̂_0 denoised prediction at every step + sigmas/stages).
+                if "trajectory_npz" in prediction:
+                    npz_in = prediction["trajectory_npz"]
+                    pad_mask_np = pad_mask.bool().cpu().numpy()
+                    save_dict: dict = {}
+
+                    def _unpad_frames(t: Tensor) -> np.ndarray:
+                        # t: (num_frames, multiplicity, n_atoms, 3) → (num_frames, n_real, 3)
+                        return t[:, model_idx][:, pad_mask_np].cpu().numpy()
+
+                    def _unpad_single(t: Tensor) -> np.ndarray:
+                        # t: (multiplicity, n_atoms, 3) → (n_real, 3)
+                        return t[model_idx][pad_mask_np].cpu().numpy()
+
+                    for key in ("atom_coords", "template_coords", "denoised_coords"):
+                        if key in npz_in and isinstance(npz_in[key], torch.Tensor):
+                            save_dict[key] = _unpad_frames(npz_in[key])
+                    for key in ("initial_coords", "initial_template_coords"):
+                        if key in npz_in and isinstance(npz_in[key], torch.Tensor):
+                            save_dict[key] = _unpad_single(npz_in[key])
+                    if "sigmas" in npz_in:
+                        save_dict["sigmas"] = npz_in["sigmas"].cpu().numpy()
+                    if "stages" in npz_in:
+                        save_dict["stages"] = npz_in["stages"].cpu().numpy()
+                    if "template_mask" in npz_in and isinstance(
+                        npz_in["template_mask"], torch.Tensor
+                    ):
+                        tmpl_mask = npz_in["template_mask"]
+                        if tmpl_mask.dim() == 2:
+                            tmpl_mask = tmpl_mask[model_idx]
+                        save_dict["template_mask"] = (
+                            tmpl_mask[pad_mask_np].cpu().numpy()
+                        )
+                    if "boundary_mask" in npz_in and isinstance(
+                        npz_in["boundary_mask"], torch.Tensor
+                    ):
+                        bnd_mask = npz_in["boundary_mask"]
+                        if bnd_mask.dim() == 2:
+                            bnd_mask = bnd_mask[model_idx]
+                        save_dict["boundary_mask"] = (
+                            bnd_mask[pad_mask_np].cpu().numpy()
+                        )
+
+                    npz_path = (
+                        struct_dir
+                        / f"detailed_trajectory_{record.id}_model_{idx_to_rank[model_idx]}.npz"
+                    )
+                    np.savez_compressed(npz_path, **save_dict)
+
                 # Save pae
                 if "pae" in prediction:
                     pae = prediction["pae"][model_idx]
@@ -336,20 +464,17 @@ class BoltzWriter(BasePredictionWriter):
                             )
                         converted_metadata["chains"][chain_name] = chain_data
                 
-                # Add boundary exclusion info if available, converting chain indices to chain names
-                if "boundary_exclusion" in inpainting_metadata:
-                    boundary_exclusion = inpainting_metadata["boundary_exclusion"].copy()
-                    
-                    # Convert boundary_residues_by_chain from chain index to chain name
-                    if "boundary_residues_by_chain" in boundary_exclusion:
-                        converted_boundary_by_chain = {}
-                        for chain_index, residues in boundary_exclusion["boundary_residues_by_chain"].items():
+                # Add LRD boundary info if available, converting chain indices to chain names
+                if "lrd_boundary" in inpainting_metadata:
+                    lrd_boundary = inpainting_metadata["lrd_boundary"].copy()
+                    if "residues_by_chain" in lrd_boundary:
+                        converted_lrd_by_chain = {}
+                        for chain_index, residues in lrd_boundary["residues_by_chain"].items():
                             chain_name = chain_index_to_name.get(int(chain_index), f"chain_{chain_index}")
-                            converted_boundary_by_chain[chain_name] = residues
-                        boundary_exclusion["boundary_residues_by_chain"] = converted_boundary_by_chain
-                    
-                    converted_metadata["boundary_exclusion"] = boundary_exclusion
-                
+                            converted_lrd_by_chain[chain_name] = residues
+                        lrd_boundary["residues_by_chain"] = converted_lrd_by_chain
+                    converted_metadata["lrd_boundary"] = lrd_boundary
+
                 path = struct_dir / f"inpainting_metadata_{record.id}.json"
                 with path.open("w") as f:
                     f.write(json.dumps(converted_metadata, indent=4))

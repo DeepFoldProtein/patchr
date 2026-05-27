@@ -34,7 +34,7 @@ from boltz.model.modules.utils import (
 from boltz.model.potentials.potentials import get_potentials
 
 
-def get_boundary_region_mask(template_mask, feats, boundary_window=2):
+def get_boundary_region_mask(template_mask, feats, boundary_window=3):
     """
     Get mask for atoms in boundary region (template side + generated side).
     
@@ -132,8 +132,11 @@ def get_boundary_region_mask(template_mask, feats, boundary_window=2):
                 
                 min_distance = min(min_distance, distance)
             
-            # Include residue if within boundary_window distance (both sides)
-            if min_distance <= boundary_window:
+            # Include residue if within boundary_window distance from the gap edge.
+            # Two adjacent residues (template + gap) at the transition are both
+            # tagged as initial boundary, so this comparison uses strict-less-than
+            # to make boundary_window=N mean exactly ±N residues from the edge.
+            if min_distance < boundary_window:
                 boundary_region_residues[b, i] = True
     
     # Convert residue mask to atom mask
@@ -344,7 +347,7 @@ class AtomDiffusion(Module):
         # Boundary refinement parameters (Global-to-Local Refinement)
         # After global diffusion, refine boundary regions with a short, focused diffusion
         self.boundary_refinement_enabled = True  # Enable boundary refinement for inpainting
-        self.boundary_refinement_window = 2 # ±N residues from boundary to refine
+        self.boundary_refinement_window = 3 # ±N residues from boundary to refine
         self.boundary_refinement_sigma_start = 1.5  # Start sigma for refinement (Å)
         self.boundary_refinement_steps = 25  # Number of refinement steps
         self.boundary_refinement_inpainting_region_mode = False  # If True, only refine inpainting region (generated side) of boundary
@@ -453,6 +456,9 @@ class AtomDiffusion(Module):
         boundary_refinement_sigma_start=None,
         boundary_refinement_steps=None,
         boundary_refinement_inpainting_region_mode=None,
+        # Trajectory capture for visualization
+        save_trajectory=False,
+        trajectory_stride=1,
         **network_condition_kwargs,
     ):
         # Extract inpainting information if available
@@ -530,6 +536,34 @@ class AtomDiffusion(Module):
 
         token_repr = None
         atom_coords_denoised = None
+
+        # Trajectory capture (for visualization). Frames are CPU float32 tensors
+        # of shape (multiplicity, n_atoms, 3). Stage 1 (main loop) and Stage 2
+        # (boundary refinement) both push frames here when save_trajectory is on.
+        #
+        # Two parallel streams:
+        #   - trajectory_frames: strided (every trajectory_stride steps), drives the
+        #     multi-model PDB output for Mol* / PyMOL playback.
+        #   - npz_*: every step, no stride, drives detailed_trajectory_*.npz which
+        #     also includes the rigid-aligned template coords and the model's x̂_0
+        #     prediction at each step.
+        trajectory_frames = []
+        trajectory_stride = max(1, int(trajectory_stride))
+        npz_initial_coords = None
+        npz_initial_template = None
+        npz_atom_frames = []
+        npz_template_frames = []
+        npz_denoised_frames = []
+        npz_sigmas = []
+        npz_stages = []  # 0 = main diffusion, 1 = boundary refinement
+        npz_boundary_mask = None  # filled in inside the LRD block when it runs
+        if save_trajectory:
+            # Frame 0 (PDB) = initial state (pure noise, plus any template injection)
+            trajectory_frames.append(atom_coords.detach().float().cpu())
+            # NPZ: capture initial state separately (no model prediction exists yet).
+            npz_initial_coords = atom_coords.detach().float().cpu()
+            if enable_inpainting:
+                npz_initial_template = template_coords_expanded.detach().float().cpu()
 
         # Update progress: diffusion started (40%)
         if progress_tracker:
@@ -919,6 +953,25 @@ class AtomDiffusion(Module):
                     template_coords_expanded[template_mask_expanded].to(atom_coords)
                 )
 
+            # Capture trajectory frame (post template-reset, the actual rolling state).
+            if save_trajectory and (
+                (step_idx + 1) % trajectory_stride == 0
+                or step_idx == len(schedule) - 1
+            ):
+                trajectory_frames.append(atom_coords.detach().float().cpu())
+
+            # NPZ: capture every step (full detail), including the rigid-aligned
+            # template_coords_expanded and the model's denoised prediction.
+            if save_trajectory:
+                npz_atom_frames.append(atom_coords.detach().float().cpu())
+                if enable_inpainting:
+                    npz_template_frames.append(
+                        template_coords_expanded.detach().float().cpu()
+                    )
+                npz_denoised_frames.append(atom_coords_denoised.detach().float().cpu())
+                npz_sigmas.append(float(sigma_from))
+                npz_stages.append(0)
+
             # Update progress: diffusion step completed (40-100%)
             if progress_tracker:
                 progress_tracker.update_diffusion_progress(
@@ -1003,6 +1056,11 @@ class AtomDiffusion(Module):
             boundary_atom_count = boundary_region_mask[0].sum().item()
             total_atom_count = atom_mask[0].sum().item()
             print(f"  - Boundary atoms to refine: {boundary_atom_count} / {total_atom_count}")
+
+            # Stash the boundary mask for the trajectory NPZ so the renderer can
+            # highlight LRD-active atoms separately from the static template/inpaint.
+            if save_trajectory:
+                npz_boundary_mask = boundary_region_mask.detach().cpu().bool()
 
             # ── BOUNDARY MASK DEBUG ──
             _atom_to_token = feats["atom_to_token"].float()  # (batch, n_atoms, n_residues)
@@ -1181,6 +1239,30 @@ class AtomDiffusion(Module):
 
                         atom_coords_refinement = atom_coords_next_ref
 
+                    # Capture refinement frame (use combined coords: refined boundary +
+                    # transformed-template elsewhere, matching the final reassembly).
+                    ref_frame = refinement_template_coords.clone()
+                    ref_frame[boundary_region_mask] = atom_coords_refinement[
+                        boundary_region_mask
+                    ]
+                    if save_trajectory and (
+                        (step_idx + 1) % trajectory_stride == 0
+                        or step_idx == len(refinement_schedule) - 1
+                    ):
+                        trajectory_frames.append(ref_frame.detach().float().cpu())
+
+                    # NPZ: every refinement step.
+                    if save_trajectory:
+                        npz_atom_frames.append(ref_frame.detach().float().cpu())
+                        npz_template_frames.append(
+                            refinement_template_coords.detach().float().cpu()
+                        )
+                        npz_denoised_frames.append(
+                            atom_coords_denoised_ref.detach().float().cpu()
+                        )
+                        npz_sigmas.append(float(sigma_from))
+                        npz_stages.append(1)
+
                     # DEBUG: detailed per-step logging (matching protenix format)
                     _c = atom_coords_refinement[0]
                     _c_tmpl = refinement_template_coords[0]
@@ -1224,13 +1306,37 @@ class AtomDiffusion(Module):
                 # Add boundary refinement metadata
                 if "inpainting_metadata" not in feats:
                     feats["inpainting_metadata"] = {}
-                feats["inpainting_metadata"]["boundary_refinement"] = {
+
+                # Per-chain LRD boundary residue numbers (chain-local 1-based,
+                # matching the format of fully_fixed_residues in the metadata).
+                _asym_id_t = feats.get("asym_id", None)
+                residues_by_chain: dict = {}
+                if _asym_id_t is not None and len(_bnd_expanded_toks) > 0:
+                    _asym_arr = (
+                        _asym_id_t[0].cpu().tolist()
+                        if _asym_id_t.dim() > 1
+                        else _asym_id_t.cpu().tolist()
+                    )
+                    _chain_first: dict = {}
+                    for _i, _cid in enumerate(_asym_arr):
+                        _cid_int = int(_cid)
+                        if _cid_int not in _chain_first:
+                            _chain_first[_cid_int] = _i
+                    for _ti in _bnd_expanded_toks:
+                        _cid = int(_asym_arr[_ti])
+                        _res_num = int(_ti + 1 - _chain_first[_cid])
+                        residues_by_chain.setdefault(_cid, []).append(_res_num)
+                    for _cid in residues_by_chain:
+                        residues_by_chain[_cid] = sorted(set(residues_by_chain[_cid]))
+
+                feats["inpainting_metadata"]["lrd_boundary"] = {
                     "enabled": True,
                     "boundary_window": int(_boundary_refinement_window),
                     "sigma_start": float(_boundary_refinement_sigma_start),
                     "num_steps": int(_boundary_refinement_steps),
                     "boundary_atoms_refined": int(boundary_atom_count),
                     "inpainting_region_mode": bool(_boundary_refinement_inpainting_region_mode),
+                    "residues_by_chain": residues_by_chain,
                 }
 
         # Inpainting: Align final coordinates back to original template coordinate system
@@ -1272,10 +1378,45 @@ class AtomDiffusion(Module):
         #         # every template-masked atom is pixel-perfect.
         #         atom_coords[template_mask_expanded] = template_coords_original[template_mask_expanded].to(atom_coords)
 
-        return dict(
+        # Stack trajectory frames into a single tensor for downstream writing.
+        # Shape: (num_frames, multiplicity, n_atoms, 3). Kept on CPU as float32.
+        trajectory_tensor = None
+        if save_trajectory and len(trajectory_frames) > 0:
+            trajectory_tensor = torch.stack(trajectory_frames, dim=0)
+
+        out = dict(
             sample_atom_coords=atom_coords,
             diff_token_repr=token_repr,
         )
+        if trajectory_tensor is not None:
+            out["trajectory"] = trajectory_tensor
+
+        # Detailed NPZ payload: every step, plus rigid-aligned template coords and
+        # the model's x̂_0 denoised prediction. Writer turns this into
+        # detailed_trajectory_<id>_model_<rank>.npz.
+        if save_trajectory and len(npz_atom_frames) > 0:
+            trajectory_npz: dict = {
+                "initial_coords": npz_initial_coords,
+                "atom_coords": torch.stack(npz_atom_frames, dim=0),
+                "denoised_coords": torch.stack(npz_denoised_frames, dim=0),
+                "sigmas": torch.tensor(npz_sigmas, dtype=torch.float32),
+                "stages": torch.tensor(npz_stages, dtype=torch.int8),
+            }
+            if len(npz_template_frames) > 0:
+                trajectory_npz["template_coords"] = torch.stack(
+                    npz_template_frames, dim=0
+                )
+            if npz_initial_template is not None:
+                trajectory_npz["initial_template_coords"] = npz_initial_template
+            if enable_inpainting and inpainting_template_mask is not None:
+                trajectory_npz["template_mask"] = (
+                    inpainting_template_mask.detach().cpu().bool()
+                )
+            if npz_boundary_mask is not None:
+                trajectory_npz["boundary_mask"] = npz_boundary_mask
+            out["trajectory_npz"] = trajectory_npz
+
+        return out
 
     def loss_weight(self, sigma):
         return (sigma**2 + self.sigma_data**2) / ((sigma * self.sigma_data) ** 2)
