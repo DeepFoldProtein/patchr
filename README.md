@@ -27,19 +27,38 @@
 <img src="docs/e2e_demo.gif" width="480"/>
 </div>
 
+<div align="center">
+<table>
+  <tr>
+    <td align="center"><img src="docs/inpainting_1kx3.gif" width="300"/></td>
+    <td align="center"><img src="docs/inpainting_6gis_ext.gif" width="300"/></td>
+    <td align="center"><img src="docs/inpainting_8gzr.gif" width="300"/></td>
+  </tr>
+  <tr align="center">
+    <td><b>1KX3</b> : nucleosome histone-tail inpainting</td>
+    <td><b>6GIS</b> : PCNA + 50 bp DNA extension</td>
+    <td><b>8GZR</b> : NS3 polymerase + RNA reconstruction</td>
+  </tr>
+</table>
+</div>
+
 Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. PATCHR fills them in using **diffusion-based inpainting** while keeping existing coordinates **exactly as-is**.
 
 - **Backend-agnostic** -- supports [Boltz-2](https://github.com/jwohlwend/boltz) and [Protenix](https://github.com/bytedance/protenix)
 - Works with **proteins, DNA, RNA**, and multi-chain complexes
 - 99.4% connectivity pass rate, from short loops to 600+ residue extensions
 
-| Method | Type | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
-|---|---|:---:|:---:|
-| **PATCHR (full)** | **All-atom** | **1.78** | **2.54** |
-| Boltz-2 (no modification) | All-atom | 11.19 | 11.93 |
-| Boltz-2 + template + steering (0.5 &#8491;) | All-atom | 3.22 | 3.89 |
-| RFdiffusion2 | All-atom | 9.19 | 10.20 |
-| RFdiffusion | Backbone-only | 2.04 | -- |
+**Benchmark** &mdash; 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. C&#945; and all-atom RMSD computed over inpainted residues only.
+
+| Method / Configuration | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
+|---|:---:|:---:|
+| **PATCHR (full, + LRD)** | **1.781** | **2.542** |
+| Boltz-2 + template conditioning | 4.647 | 5.510 |
+| Boltz-2 + template conditioning + steering (threshold = 5.0 &#8491;) | 3.675 | 4.342 |
+| Boltz-2 + template conditioning + steering (threshold = 2.0 &#8491;) | 3.397 | 4.081 |
+| Boltz-2 + template conditioning + steering (threshold = 0.5 &#8491;) | 3.219 | 3.889 |
+| RFdiffusion2 (all-atom) | 9.188 | 10.199 |
+| RFdiffusion (backbone-only) | 2.043 | &mdash; |
 
 ## Installation
 
@@ -177,20 +196,7 @@ Pre-computed completed structures for ~35,000 monomeric proteins (growing to ~16
 
 ## Performance
 
-Evaluated on 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics.
-
-### Comparison with existing methods
-
-| Method | Type | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
-|---|---|:---:|:---:|
-| **PATCHR (full)** | **All-atom** | **1.78** | **2.54** |
-| Boltz-2 (no modification) | All-atom | 11.19 | 11.93 |
-| &ensp;+ Template conditioning | All-atom | 4.65 | 5.51 |
-| &ensp;+ Steering (threshold 0.5 &#8491;) | All-atom | 3.22 | 3.89 |
-| RFdiffusion2 | All-atom | 9.19 | 10.20 |
-| RFdiffusion | Backbone-only | 2.04 | -- |
-
-### Overall metrics
+Beyond the headline RMSDs above, PATCHR also produces simulation-ready geometry:
 
 | Metric | Value |
 |---|---|
