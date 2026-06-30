@@ -1698,4 +1698,31 @@ class Boltz2(LightningModule):
         feats["inpainting_template_mask"] = template_mask_bool
         feats["inpainting_metadata"] = inpainting_metadata
 
+        # Local Clash Refinement (LCR): build a per-atom mask of residues that the
+        # metadata flags for refinement (clashing template residues).  Diffusion
+        # then runs the LRD-style refinement on them (noise current coords +
+        # short denoise) instead of keeping them frozen.
+        feats["inpainting_lcr_mask"] = None
+        lcr = (inpainting_metadata or {}).get("lcr_refine") if isinstance(inpainting_metadata, dict) else None
+        if lcr and atom_to_token is not None and asym_id_np is not None:
+            name_to_asym = {v: k for k, v in asym_id_to_chain_name.items()}
+            first_tok = {}
+            for _ti in range(num_tokens):
+                _cid = int(asym_id_np[_ti]) if _ti < len(asym_id_np) else None
+                if _cid is not None and _cid not in first_tok:
+                    first_tok[_cid] = _ti
+            lcr_mask = torch.zeros(template_mask_bool.shape[-1], dtype=torch.bool,
+                                   device=template_mask_bool.device)
+            for ch_name, resis in lcr.items():
+                asym = name_to_asym.get(ch_name)
+                if asym is None or asym not in first_tok:
+                    continue
+                for resi in resis:
+                    tok = first_tok[asym] + (int(resi) - 1)
+                    if 0 <= tok < num_tokens:
+                        lcr_mask |= atom_to_token[0, :, tok].bool()
+            if lcr_mask.any():
+                feats["inpainting_lcr_mask"] = lcr_mask.unsqueeze(0)
+                print(f"[Inpainting] LCR refine mask: {int(lcr_mask.sum().item())} atoms")
+
         print(f"\n[Inpainting] Validation complete. Template coordinates prepared.\n")

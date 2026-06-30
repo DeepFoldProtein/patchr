@@ -1051,7 +1051,19 @@ class AtomDiffusion(Module):
                 # Refinement region = boundary region AND inpainting region
                 boundary_region_mask = boundary_region_mask & inpainting_region_mask
                 print(f"  - Restricted to inpainting region (generated side only)")
-            
+
+            # Local Clash Refinement (LCR): also refine an externally-specified set
+            # of (template) atoms — clashing atoms identified post-merge.  Added
+            # after the filters so it is refined even though it is template/fixed.
+            _lcr_mask = feats.get("inpainting_lcr_mask", None)
+            if _lcr_mask is not None:
+                _lcr_mask = _lcr_mask.bool().to(boundary_region_mask.device)
+                if _lcr_mask.dim() == 1:
+                    _lcr_mask = _lcr_mask.unsqueeze(0)
+                _lcr_mask = _lcr_mask.repeat_interleave(multiplicity, 0)
+                boundary_region_mask = boundary_region_mask | _lcr_mask
+                print(f"  - LCR: +{int(_lcr_mask[0].sum().item())} clash atoms to refine")
+
             # Count boundary atoms
             boundary_atom_count = boundary_region_mask[0].sum().item()
             total_atom_count = atom_mask[0].sum().item()
