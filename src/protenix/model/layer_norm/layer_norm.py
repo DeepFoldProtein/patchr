@@ -41,18 +41,30 @@ sys.path.append(os.path.dirname(__file__))
 try:
     fast_layer_norm_cuda_v2 = importlib.import_module("fast_layer_norm_cuda_v2")
 except ImportError:
-    from protenix.model.layer_norm.torch_ext_compile import compile
+    try:
+        from protenix.model.layer_norm.torch_ext_compile import compile
 
-    current_dir = os.path.dirname(__file__)
-    fast_layer_norm_cuda_v2 = compile(
-        name="fast_layer_norm_cuda_v2",
-        sources=[
-            os.path.join(f"{current_dir}/kernel", file)
-            for file in ["layer_norm_cuda.cpp", "layer_norm_cuda_kernel.cu"]
-        ],
-        extra_include_paths=[f"{current_dir}/kernel"],
-        build_directory=current_dir,
-    )
+        current_dir = os.path.dirname(__file__)
+        fast_layer_norm_cuda_v2 = compile(
+            name="fast_layer_norm_cuda_v2",
+            sources=[
+                os.path.join(f"{current_dir}/kernel", file)
+                for file in ["layer_norm_cuda.cpp", "layer_norm_cuda_kernel.cu"]
+            ],
+            extra_include_paths=[f"{current_dir}/kernel"],
+            build_directory=current_dir,
+        )
+    except Exception as _exc:  # noqa: BLE001
+        # No CUDA toolchain (nvcc) to JIT-compile the fused kernel — fall back to
+        # torch-native layer norm (identical result, slightly slower). Lets
+        # Protenix run on environments without a full CUDA toolkit.
+        import warnings
+
+        warnings.warn(
+            f"fast_layer_norm_cuda_v2 unavailable ({_exc}); "
+            f"using torch-native layer norm."
+        )
+        fast_layer_norm_cuda_v2 = None
 
 
 class FusedLayerNormAffineFunction(torch.autograd.Function):
@@ -217,6 +229,10 @@ class FusedLayerNorm(torch.nn.Module):
             torch.nn.init.zeros_(self.bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if fast_layer_norm_cuda_v2 is None:
+            return torch.nn.functional.layer_norm(
+                input, self.normalized_shape, self.weight, self.bias, self.eps
+            )
         return FusedLayerNormAffineFunction.apply(
             input, self.weight, self.bias, self.normalized_shape, self.eps
         )
