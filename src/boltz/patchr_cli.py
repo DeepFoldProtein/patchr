@@ -874,7 +874,11 @@ def template(
         else:
             resolved_pdb_id = pdb_id
             resolved_chain_ids = chain_ids or "ALL"
-            if not chain_ids and assembly_id is None and not list_assemblies:
+            # Default to biological assembly 1 when no chains are restricted
+            # (no chains given, or the explicit "ALL"); a specific chain subset
+            # keeps the asymmetric unit.
+            whole = (not chain_ids) or str(chain_ids).strip().upper() == "ALL"
+            if whole and assembly_id is None and not list_assemblies:
                 assembly_id = "1"
     else:
         click.echo("Error: provide PDB_ID or --input.", err=True)
@@ -898,6 +902,210 @@ def template(
         use_absolute_path=not relative_paths,
     )
     processor.process(Path(out_dir))
+
+
+# ---------------------------------------------------------------------------
+# patchr chunk
+# ---------------------------------------------------------------------------
+
+@cli.command("chunk")
+@click.argument("data", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(), default=None,
+              help="Output directory for chunk YAMLs/CIFs. Default: ./<stem>_chunks/")
+@click.option("--chunk_size", type=int, default=384,
+              help="Max residues per chunk core (before overlap). Default: 384.")
+@click.option("--overlap", type=int, default=48,
+              help="Residues of overlap added each side for clash-free stitching. Default: 48.")
+@click.option("--contact_radius", type=float, default=8.0,
+              help="Distance (A) defining a residue-residue contact in the DP cost. Default: 8.0.")
+@click.option("--ligand_cutoff", type=float, default=6.0,
+              help="Max nearest-atom distance (A) for a ligand to be carried into a chunk. Default: 6.0.")
+@click.option("--chain", "chain", type=str, default=None,
+              help="Restrict chunking to these comma-separated polymer chain ids (default: all polymers).")
+def chunk(
+    data: str,
+    out_dir: Optional[str],
+    chunk_size: int,
+    overlap: int,
+    contact_radius: float,
+    ligand_cutoff: float,
+    chain: Optional[str],
+) -> None:
+    """Split a large inpainting target into overlapping contiguous chunks.
+
+    Produces one runnable YAML + sliced CIF per chunk (plus chunk_manifest.json).
+    Chunk boundaries are placed by dynamic programming at spatial necks that
+    minimise broken tertiary contacts (so the backbone is preserved), each
+    segment expanded by an overlap halo.  Ligands are carried into the single
+    chunk whose residues contact them, at their template position; distant
+    bulk-solvent ligands are dropped.
+
+    Run the resulting directory with 'patchr predict', then stitch with
+    'patchr merge'.
+
+    \b
+    Examples:
+      patchr chunk 1dp0.yaml --chunk_size 384 --overlap 48
+      patchr chunk big.yaml -o big_chunks --chunk_size 500 --chain A,B
+    """
+    from boltz.chunking import chunk_input
+
+    _validate_inpainting_input(data)
+
+    data_path = Path(data).expanduser()
+    if out_dir is None:
+        out_dir = f"./{data_path.stem}_chunks"
+    chains = [c.strip() for c in chain.split(",")] if chain else None
+
+    specs = chunk_input(
+        yaml_path=data_path,
+        out_dir=out_dir,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        ligand_cutoff=ligand_cutoff,
+        contact_radius=contact_radius,
+        chains=chains,
+    )
+    out_root = Path(out_dir).resolve()
+    inputs_dir = out_root / "inputs"
+    manifest_path = out_root / "chunk_manifest.json"
+    click.echo(f"Wrote {len(specs)} chunk(s) to {out_root}")
+    for s in specs:
+        seg_desc = ", ".join(
+            f"{seg.seg_chain_id}:{seg.gstart}-{seg.gend}" for seg in s.segments
+        )
+        click.echo(
+            f"  chunk_{s.index:03d}: {s.n_res} res in {len(s.segments)} segment(s) "
+            f"[{seg_desc}], {len(s.ligand_ids)} ligand(s): {', '.join(s.ligand_ids) or '-'}"
+        )
+    predictions_dir = out_root / "predictions"
+    click.echo(f"Manifest: {manifest_path}")
+    click.echo("Next:")
+    click.echo(f"  patchr predict {inputs_dir} --out_dir {predictions_dir}")
+    click.echo(f"  patchr merge {manifest_path} {predictions_dir}")
+    click.echo(f"  # merged structure is written under {predictions_dir}")
+
+
+# ---------------------------------------------------------------------------
+# patchr merge
+# ---------------------------------------------------------------------------
+
+@cli.command("merge")
+@click.argument("manifest", type=click.Path(exists=True))
+@click.argument("predictions", type=click.Path(exists=True))
+@click.option("-o", "--out", type=click.Path(), default=None, help="Output structure path. Default: ./<source>_merged.cif")
+@click.option("--no_superpose", is_flag=True, help="Skip overlap-CA superposition (chunks already share the template frame).")
+@click.option("--close_loops", is_flag=True,
+              help="Close inpainted loops that dangle off one anchor by rigid hinge rotation. "
+                   "Models a region the crystal does not resolve — use for a connected cartoon.")
+@click.option("--relax", is_flag=True,
+              help="Deterministically push apart clashing inpainted atoms (template atoms and "
+                   "ligands frozen, backbone preserved) until no heavy-atom clash remains.")
+def merge(
+    manifest: str,
+    predictions: str,
+    out: Optional[str],
+    no_superpose: bool,
+    close_loops: bool,
+    relax: bool,
+) -> None:
+    """Stitch predicted chunks (from 'patchr chunk') back into one structure.
+
+    MANIFEST is the chunk_manifest.json produced by 'patchr chunk'.
+    PREDICTIONS is a directory containing the predicted chunk structures
+    (searched recursively for files named like 'chunk_000...').
+
+    \b
+    Examples:
+      patchr merge chunks/chunk_manifest.json results/predictions -o full.cif
+    """
+    import glob
+    import json
+
+    from boltz.chunking import merge_chunks
+
+    manifest_data = json.loads(Path(manifest).read_text())
+    pred_path = Path(predictions)
+    if pred_path.is_dir():
+        files = sorted(
+            glob.glob(str(pred_path / "**" / "*chunk_*.cif"), recursive=True)
+            + glob.glob(str(pred_path / "**" / "*chunk_*.pdb"), recursive=True)
+        )
+    else:
+        files = [str(pred_path)]
+    if not files:
+        raise click.BadParameter(f"No predicted chunk structures found under {predictions}")
+
+    if out is None:
+        src_stem = Path(manifest_data.get("source_yaml", "merged")).stem
+        # Place the merged structure alongside the per-chunk predictions so all
+        # outputs live together under the predictions folder.
+        if pred_path.is_dir():
+            out = str(pred_path / f"{src_stem}_merged.cif")
+        else:
+            out = f"./{src_stem}_merged.cif"
+
+    result = merge_chunks(
+        manifest_path=manifest,
+        predictions=files,
+        out_path=out,
+        superpose=not no_superpose,
+        close_loops=close_loops,
+        relax=relax,
+    )
+    click.echo(f"Merged {len(files)} chunk structure(s) -> {result}")
+
+
+# ---------------------------------------------------------------------------
+# patchr lcr — Local Clash Refinement (diffusion)
+# ---------------------------------------------------------------------------
+
+@cli.command("lcr-prep")
+@click.argument("merged", type=click.Path(exists=True))
+@click.argument("manifest", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(), default=None,
+              help="Workspace for LCR chunks. Default: <merged_dir>/lcr/")
+@click.option("--radius", type=float, default=10.0, help="Fixed-context radius (A) around a clashing region. Default: 10.")
+@click.option("--clash_thresh", type=float, default=2.2, help="Heavy-atom clash distance (A). Default: 2.2.")
+def lcr_prep(merged: str, manifest: str, out_dir: Optional[str], radius: float, clash_thresh: float) -> None:
+    """Local Clash Refinement (prep) — like LRD but for clashes.
+
+    Finds clashing inpainted regions of a merged structure, groups spatially
+    close ones, and writes one chunk per group that re-diffuses that region with
+    its whole neighbourhood (every chain's placed atoms) held fixed.  Predict the
+    resulting inputs, then run 'patchr lcr-merge' to splice the refined regions
+    back.  Iterate until clashes stop dropping.
+    """
+    import json as _json
+
+    from boltz.chunking import build_relax_workspace
+
+    src = _json.loads(Path(manifest).read_text()).get("source_cif")
+    if not src:
+        raise click.BadParameter("manifest has no source_cif")
+    if out_dir is None:
+        out_dir = str(Path(merged).resolve().parent / "lcr")
+    n = build_relax_workspace(merged, src, out_dir, radius=radius, clash_thresh=clash_thresh)
+    out_root = Path(out_dir).resolve()
+    click.echo(f"LCR: {n} clashing region group(s) -> {out_root}")
+    if n:
+        click.echo("Next:")
+        click.echo(f"  patchr predict {out_root / 'inputs'} --out_dir {out_root / 'predictions'}")
+        click.echo(f"  patchr lcr-merge {out_root} {out_root / 'predictions'} -o <refined.cif>")
+    else:
+        click.echo("No clashes to refine.")
+
+
+@cli.command("lcr-merge")
+@click.argument("lcr_dir", type=click.Path(exists=True))
+@click.argument("predictions", type=click.Path(exists=True))
+@click.option("-o", "--out", type=click.Path(), required=True, help="Output refined structure path.")
+def lcr_merge(lcr_dir: str, predictions: str, out: str) -> None:
+    """Splice the diffusion-refined clashing regions back into the structure."""
+    from boltz.chunking import splice_relaxed
+
+    result = splice_relaxed(lcr_dir, predictions, out)
+    click.echo(f"LCR refined structure -> {result}")
 
 
 # ---------------------------------------------------------------------------

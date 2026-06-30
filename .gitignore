@@ -224,3 +224,6 @@ docs/RELEASE_INFO.md
 inputs/
 outputs/
 slurm-*
+# Sequence-chunking test workspace
+chunk_runs/
+bulk_run/

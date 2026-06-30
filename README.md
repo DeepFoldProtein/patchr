@@ -156,6 +156,22 @@ patchr predict my_templates/ --out_dir results --backend protenix --seeds 42,101
 
 </details>
 
+## Large Targets — Chunking
+
+Long chains or many-chain assemblies can be split into smaller chunks, predicted
+independently, and stitched back together:
+
+```bash
+patchr chunk  input.yaml -o workspace          # split (contact-optimal boundaries)
+patchr predict workspace/inputs --out_dir workspace/predictions
+patchr merge  workspace/chunk_manifest.json workspace/predictions   # stitch (+ optional --close_loops)
+```
+
+The merged structure (with pLDDT preserved) is written under `predictions/`.
+See [docs/chunking.md](docs/chunking.md) for the method — contact-graph DP
+boundaries, template-anchored seamless merging, loop closure, and mmCIF/Mol\*
+handling. Validated up to a 9,300-residue 60-chain capsid (1C2Y assembly 2).
+
 ## Simulation-Ready Output
 
 Go directly from structure completion to MD simulation input:
