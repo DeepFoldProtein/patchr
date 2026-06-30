@@ -568,6 +568,7 @@ class StructureProcessor(
             # --skip-terminal: trim sequence to exclude N/C-terminal missing residues.
             # Only internal (non-terminal) gaps will be left for inpainting.
             trim_offset = 0
+            n_trim = 0
             if self.skip_terminal and entity_type == 'protein':
                 present_positions = set(residue_mapping.values())
                 if present_positions:
@@ -582,8 +583,12 @@ class StructureProcessor(
                         detail(f"--skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
                                f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
 
-            # Apply skip-terminal offset to inpainting metadata
-            if chain_inpainting_metadata is not None and trim_offset > 0:
+            # Apply skip-terminal offset to inpainting metadata. Run whenever any
+            # terminal was trimmed (N *or* C): _shift_and_filter both shifts by the
+            # N-terminal offset and drops residues past the new C-terminus, so a
+            # C-terminal-only trim (trim_offset==0, n_trim>0) must still go through
+            # — otherwise the trimmed terminal residues stay listed as inpainted.
+            if chain_inpainting_metadata is not None and (trim_offset > 0 or n_trim > 0):
                 trimmed_len = len(final_sequence)
                 def _shift_and_filter(residues):
                     return [r - trim_offset for r in residues if trim_offset < r <= trim_offset + trimmed_len]
