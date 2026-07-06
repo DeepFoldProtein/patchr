@@ -8,7 +8,12 @@ import { useAtomValue } from "jotai";
 import { RefreshCw } from "lucide-react";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import { missingRegionsDetectedAtom } from "../store/repair-atoms";
-import { getChainSequences, type ChainSequence } from "../lib/chainSequences";
+import {
+  getChainSequences,
+  selectResiduesInViewer,
+  type ChainSequence,
+  type ResidueCell
+} from "../lib/chainSequences";
 import { cn } from "../lib/utils";
 
 interface Selection {
@@ -53,6 +58,20 @@ export function SequenceEditorPanel(): React.ReactElement {
     return { lo, hi };
   }, [selection]);
 
+  const selectedResidues = useMemo<ResidueCell[]>(
+    () =>
+      range && activeChain
+        ? activeChain.residues.slice(range.lo, range.hi + 1)
+        : [],
+    [range, activeChain]
+  );
+
+  // Mirror the sequence selection into the 3D viewer (highlight + zoom).
+  useEffect(() => {
+    if (!activeChain) return;
+    selectResiduesInViewer(plugin, activeChain.authChainId, selectedResidues);
+  }, [plugin, activeChain, selectedResidues]);
+
   const handleResidueClick = (index: number, e: React.MouseEvent): void => {
     if (e.shiftKey && selection) {
       setSelection({ anchor: selection.anchor, focus: index });
@@ -71,11 +90,6 @@ export function SequenceEditorPanel(): React.ReactElement {
       </div>
     );
   }
-
-  const selectedResidues =
-    range && activeChain
-      ? activeChain.residues.slice(range.lo, range.hi + 1)
-      : [];
 
   return (
     <div className="flex h-full flex-col">

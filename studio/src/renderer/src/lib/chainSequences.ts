@@ -10,6 +10,8 @@ import {
   StructureProperties,
   Unit
 } from "molstar/lib/mol-model/structure";
+import { OrderedSet } from "molstar/lib/mol-data/int";
+import { Loci } from "molstar/lib/mol-model/loci";
 
 export interface ResidueCell {
   /** Author residue number (auth_seq_id). */
@@ -161,4 +163,60 @@ export function getChainSequences(
 
   result.sort((a, b) => a.authChainId.localeCompare(b.authChainId));
   return result;
+}
+
+/**
+ * Select the given author residues (a contiguous slice of a chain) in the 3D
+ * viewer and focus the camera on them. Clears the selection when `residues` is
+ * empty. Returns true when a matching loci was found.
+ */
+export function selectResiduesInViewer(
+  plugin: PluginUIContext | null,
+  chainId: string,
+  residues: ResidueCell[]
+): boolean {
+  if (!plugin) return false;
+
+  const structures = plugin.managers.structure.hierarchy.current.structures;
+  const structure = structures?.[0]?.cell.obj?.data;
+  if (!structure) return false;
+
+  if (residues.length === 0) {
+    plugin.managers.interactivity.lociSelects.deselectAll();
+    return false;
+  }
+
+  const wanted = new Set(residues.map(r => `${r.authSeqId}|${r.insCode}`));
+  const elements: StructureElement.Loci["elements"][number][] = [];
+
+  for (const unit of structure.units) {
+    if (!Unit.isAtomic(unit)) continue;
+    const loc = StructureElement.Location.create(structure, unit);
+    const indices: StructureElement.UnitIndex[] = [];
+
+    for (let i = 0; i < unit.elements.length; i++) {
+      loc.element = unit.elements[i];
+      if (StructureProperties.chain.auth_asym_id(loc) !== chainId) continue;
+      const authSeqId = StructureProperties.residue.auth_seq_id(loc);
+      const insCode = StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
+      if (wanted.has(`${authSeqId}|${insCode}`)) {
+        indices.push(i as StructureElement.UnitIndex);
+      }
+    }
+
+    if (indices.length > 0) {
+      elements.push({ unit, indices: OrderedSet.ofSortedArray(indices) });
+    }
+  }
+
+  if (elements.length === 0) return false;
+
+  const loci = StructureElement.Loci(structure, elements);
+  plugin.managers.interactivity.lociSelects.selectOnly({ loci });
+
+  const bounds = Loci.getBoundingSphere(loci);
+  if (bounds)
+    plugin.canvas3d?.camera.focus(bounds.center, bounds.radius + 8, 400);
+
+  return true;
 }
