@@ -8,7 +8,14 @@
 //     modifications field.
 import React, { useEffect, useMemo, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { RefreshCw, Eraser, FlaskConical, Atom, Undo2 } from "lucide-react";
+import {
+  RefreshCw,
+  Eraser,
+  FlaskConical,
+  Atom,
+  Undo2,
+  Search
+} from "lucide-react";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import {
   missingRegionsDetectedAtom,
@@ -27,6 +34,7 @@ import {
 } from "../lib/chainSequences";
 import { parsePolySeqScheme } from "../lib/polySeq";
 import { cn } from "../lib/utils";
+import { logger } from "../lib/logger";
 
 interface Selection {
   anchor: number;
@@ -90,6 +98,10 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [mutateOpen, setMutateOpen] = useState(false);
   const [ptmOpen, setPtmOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [pdbId, setPdbId] = useState("");
+  const [uniprotStatus, setUniprotStatus] = useState<
+    "idle" | "searching" | "success" | "error"
+  >("idle");
 
   const refresh = React.useCallback(() => {
     const next = getChainSequences(plugin);
@@ -273,6 +285,54 @@ export function SequenceEditorPanel(): React.ReactElement {
     setPtmOpen(false);
   };
 
+  // Fetch full reference sequences from UniProt (by PDB id) to fill missing
+  // regions during inpainting. Protein chains are searched on UniProt; nucleic
+  // chains fall back to their full poly_seq_scheme sequence.
+  const handleUniprotSearch = async (): Promise<void> => {
+    if (!pdbId.trim() || chains.length === 0) return;
+    setUniprotStatus("searching");
+    try {
+      const proteinChains = chains
+        .filter(c => !c.isNucleic)
+        .map(c => c.authChainId);
+      const fastaLines: string[] = [];
+
+      if (proteinChains.length > 0) {
+        if (!window.api?.uniprot?.searchByPdb) {
+          throw new Error("UniProt API not available");
+        }
+        const result = await window.api.uniprot.searchByPdb(
+          pdbId.trim().toUpperCase(),
+          proteinChains
+        );
+        if (!result.success) {
+          throw new Error(result.error || "UniProt search failed");
+        }
+        for (const chainResult of result.results ?? []) {
+          if (chainResult.fasta) fastaLines.push(chainResult.fasta);
+        }
+      }
+
+      // Nucleic chains: use their full sequence from poly_seq_scheme if present.
+      for (const c of chains) {
+        if (!c.isNucleic) continue;
+        const seq = polySeq.get(c.authChainId)?.oneLetter;
+        if (seq) fastaLines.push(`>Chain ${c.authChainId}\n${seq}`);
+      }
+
+      if (fastaLines.length === 0) {
+        throw new Error("No sequences returned");
+      }
+      setFastaInput(fastaLines.join("\n"));
+      setEnableSequenceMapping(true);
+      setUniprotStatus("success");
+      setStaged(`UniProt sequences loaded (PDB ${pdbId.trim().toUpperCase()})`);
+    } catch (err) {
+      logger.error("[Sequence Editor] UniProt search failed:", err);
+      setUniprotStatus("error");
+    }
+  };
+
   if (!activeChain) {
     return (
       <div className="py-4 text-center text-sm text-muted-foreground">
@@ -298,6 +358,36 @@ export function SequenceEditorPanel(): React.ReactElement {
           <RefreshCw className="h-3 w-3" />
           Refresh
         </button>
+      </div>
+
+      {/* UniProt reference-sequence search */}
+      <div className="flex items-center gap-2">
+        <input
+          value={pdbId}
+          onChange={e => {
+            setPdbId(e.target.value);
+            setUniprotStatus("idle");
+          }}
+          placeholder="PDB ID (e.g. 1A22)"
+          className="h-7 w-28 rounded-md border border-border bg-transparent px-2 text-xs outline-none focus:border-blue-500"
+        />
+        <button
+          onClick={handleUniprotSearch}
+          disabled={!pdbId.trim() || uniprotStatus === "searching"}
+          title="Load full reference sequences from UniProt to fill missing regions"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+        >
+          <Search className="h-3 w-3" />
+          {uniprotStatus === "searching" ? "Searching…" : "UniProt"}
+        </button>
+        {uniprotStatus === "success" && (
+          <span className="text-xs text-green-600 dark:text-green-400">
+            loaded
+          </span>
+        )}
+        {uniprotStatus === "error" && (
+          <span className="text-xs text-red-500">not found</span>
+        )}
       </div>
 
       {/* Chain selector */}
