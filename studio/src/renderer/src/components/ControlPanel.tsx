@@ -989,7 +989,7 @@ function RepairConsole(): React.ReactElement {
     <div className="flex-1 min-h-0 overflow-auto">
       {/* Missing Region Review 섹션 */}
       <Section
-        title="Missing Region Analysis"
+        title="Missing & Incomplete Residues"
         expanded={expandedSections.has("missing-region-review")}
         onToggle={() => toggleSection("missing-region-review")}
       >
