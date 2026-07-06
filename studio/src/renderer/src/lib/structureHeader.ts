@@ -7,12 +7,31 @@ export interface StructureHeader {
   pdbId?: string;
   title?: string;
   classification?: string;
+  molecules?: string;
+  organism?: string;
   experimentalMethod?: string;
   resolution?: string;
+  spaceGroup?: string;
+  rWork?: string;
+  rFree?: string;
   depositionDate?: string;
   releaseDate?: string;
   keywords?: string;
   authors?: string[];
+}
+
+// Trim, drop blanks, and de-duplicate while preserving order.
+function dedupe(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const v = raw.trim();
+    if (v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
 }
 
 function detectFormat(content: string): "pdb" | "mmcif" | "unknown" {
@@ -185,10 +204,47 @@ function parseMmcif(content: string): StructureHeader {
     content,
     "_pdbx_database_status.recvd_initial_deposition_date"
   );
-  header.releaseDate = getCifItem(
+  // Release date = first entry of the revision history (initial release).
+  const revDates = extractLoopColumn(
     content,
-    "_pdbx_database_status.recvd_deposit_form"
+    "pdbx_audit_revision_history",
+    "revision_date"
   );
+  header.releaseDate =
+    revDates[0] ??
+    getCifItem(content, "_pdbx_audit_revision_history.revision_date");
+
+  // Molecule / entity descriptions (one per polymer entity).
+  const entityDescs = dedupe(
+    extractLoopColumn(content, "entity", "pdbx_description")
+  );
+  header.molecules =
+    entityDescs.length > 0
+      ? entityDescs.join(", ")
+      : getCifItem(content, "_entity.pdbx_description");
+
+  // Source organism — may live in several source categories.
+  const organisms = dedupe([
+    ...extractLoopColumn(
+      content,
+      "entity_src_gen",
+      "pdbx_gene_src_scientific_name"
+    ),
+    ...extractLoopColumn(content, "entity_src_nat", "pdbx_organism_scientific"),
+    ...extractLoopColumn(content, "pdbx_entity_src_syn", "organism_scientific")
+  ]);
+  if (organisms.length === 0) {
+    const singleOrg =
+      getCifItem(content, "_entity_src_gen.pdbx_gene_src_scientific_name") ??
+      getCifItem(content, "_entity_src_nat.pdbx_organism_scientific");
+    if (singleOrg) organisms.push(singleOrg);
+  }
+  if (organisms.length > 0) header.organism = organisms.join(", ");
+
+  // Crystallographic space group and refinement R-factors.
+  header.spaceGroup = getCifItem(content, "_symmetry.space_group_name_H-M");
+  header.rWork = getCifItem(content, "_refine.ls_R_factor_R_work");
+  header.rFree = getCifItem(content, "_refine.ls_R_factor_R_free");
 
   // Experimental method — may be a single item or a single-row loop.
   const exptlSingle = getCifItem(content, "_exptl.method");
@@ -277,6 +333,53 @@ function parsePdb(content: string): StructureHeader {
       .split(",")
       .map(s => s.trim())
       .filter(Boolean);
+  }
+
+  // COMPND: MOLECULE: <name>; (one per entity)
+  const compnd = collect("COMPND");
+  const molecules = dedupe(
+    [...compnd.matchAll(/MOLECULE:\s*([^;]+)/gi)].map(m => m[1])
+  );
+  if (molecules.length > 0) header.molecules = molecules.join(", ");
+
+  // SOURCE: ORGANISM_SCIENTIFIC: <name>;
+  const source = collect("SOURCE");
+  const organisms = dedupe(
+    [...source.matchAll(/ORGANISM_SCIENTIFIC:\s*([^;]+)/gi)].map(m => m[1])
+  );
+  if (organisms.length > 0) header.organism = organisms.join(", ");
+
+  // Release date: original release is REVDAT with the highest modNum ("1").
+  for (const line of lines) {
+    if (/^REVDAT\s+1\s/.test(line)) {
+      const d = line.slice(13, 22).trim();
+      if (d) header.releaseDate = d;
+      break;
+    }
+  }
+
+  // CRYST1: space group in columns 56–66.
+  for (const line of lines) {
+    if (line.startsWith("CRYST1")) {
+      const sg = line.slice(55, 66).trim();
+      if (sg) header.spaceGroup = sg;
+      break;
+    }
+  }
+
+  // REMARK 3 refinement R-factors (best-effort).
+  for (const line of lines) {
+    if (!line.startsWith("REMARK   3")) continue;
+    if (/R VALUE\s+\(WORKING SET\)\s*:/.test(line)) {
+      const m = line.match(/:\s*([\d.]+)/);
+      if (m) header.rWork = m[1];
+    } else if (
+      /FREE R VALUE\s*:/.test(line) &&
+      !/TEST|ERROR|SET|BIN/i.test(line)
+    ) {
+      const m = line.match(/:\s*([\d.]+)/);
+      if (m) header.rFree = m[1];
+    }
   }
 
   return header;
