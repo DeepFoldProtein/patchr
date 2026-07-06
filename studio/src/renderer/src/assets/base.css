@@ -104,6 +104,68 @@
   height: 100% !important;
 }
 
+/* Mol* light-mode theming.
+   `dark.scss` is compiled as the default skin (fixed dark colors baked in),
+   so we override the visible Mol* surfaces when the app is NOT in dark mode.
+   The `.dark` class lives on <html> only in dark mode, hence `html:not(.dark)`. */
+html:not(.dark) .msp-plugin .msp-plugin-content {
+  color: #1f2937;
+}
+
+/* Sequence panel */
+html:not(.dark) .msp-plugin .msp-sequence,
+html:not(.dark) .msp-plugin .msp-sequence-wrapper-non-empty {
+  background: #fafafa;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-select,
+html:not(.dark) .msp-plugin .msp-sequence-select > select {
+  background-color: #f4f4f5;
+  color: #1f2937;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-select > span {
+  color: #52525b;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-wrapper {
+  color: #1f2937;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-chain-label,
+html:not(.dark) .msp-plugin .msp-sequence-wrapper .msp-sequence-label,
+html:not(.dark) .msp-plugin .msp-sequence-wrapper .msp-sequence-number {
+  color: #2563eb;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-wrapper .msp-sequence-present {
+  color: #1f2937;
+}
+
+html:not(.dark) .msp-plugin .msp-sequence-wrapper .msp-sequence-missing {
+  color: #a1a1aa;
+}
+
+/* Viewport overlay control buttons (reset camera, settings, …) */
+html:not(.dark) .msp-plugin .msp-viewport-controls .msp-btn,
+html:not(.dark) .msp-plugin .msp-viewport-controls .msp-btn-icon,
+html:not(.dark) .msp-plugin .msp-viewport-controls button {
+  background: #f4f4f5;
+  color: #52525b;
+}
+
+html:not(.dark) .msp-plugin .msp-viewport-controls .msp-btn:hover,
+html:not(.dark) .msp-plugin .msp-viewport-controls .msp-btn-icon:hover,
+html:not(.dark) .msp-plugin .msp-viewport-controls button:hover {
+  background: #e4e4e7;
+  color: #2563eb;
+}
+
+html:not(.dark) .msp-plugin .msp-viewport-controls-panel,
+html:not(.dark) .msp-plugin .msp-semi-transparent-background {
+  background: #fafafa;
+}
+
 /* Custom scrollbar styles - Always visible */
 * {
   scrollbar-width: thin;

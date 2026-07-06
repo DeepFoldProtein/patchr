@@ -73,7 +73,7 @@ function MolViewerPanelInner({
   const error = pluginError || structureError;
 
   return (
-    <div className="flex h-full flex-col bg-neutral-950">
+    <div className="flex h-full flex-col bg-neutral-50 dark:bg-neutral-950">
       {error && (
         <Alert
           variant="destructive"
@@ -87,7 +87,7 @@ function MolViewerPanelInner({
       {/* Sequence panel container - 별도 영역에 표시 */}
       <div
         id="sequence-panel-container"
-        className="bg-neutral-900 border-b border-neutral-700"
+        className="bg-neutral-50 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-700"
         style={{ minHeight: "100px", maxHeight: "150px", overflow: "auto" }}
       />
 

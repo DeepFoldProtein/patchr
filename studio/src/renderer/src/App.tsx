@@ -7,7 +7,8 @@ import { AppLayout } from "@/components/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-// Import Mol* CSS at build time — both themes compiled into the bundle
+// Import Mol* CSS at build time. Only the dark skin is compiled here; light-mode
+// appearance is applied via `html:not(.dark)` overrides in assets/base.css.
 import "molstar/lib/mol-plugin-ui/skin/dark.scss";
 
 // Create a client
