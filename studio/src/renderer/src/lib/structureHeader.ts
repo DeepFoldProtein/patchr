@@ -36,7 +36,11 @@ function dedupe(values: string[]): string[] {
 
 function detectFormat(content: string): "pdb" | "mmcif" | "unknown" {
   const head = content.trimStart().slice(0, 200);
-  if (head.startsWith("data_") || /\n_[A-Za-z]/.test(head) || head.startsWith("_")) {
+  if (
+    head.startsWith("data_") ||
+    /\n_[A-Za-z]/.test(head) ||
+    head.startsWith("_")
+  ) {
     return "mmcif";
   }
   if (

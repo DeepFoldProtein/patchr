@@ -212,7 +212,9 @@ export function ProjectManager(): React.ReactElement {
                   {structureHeader.spaceGroup && (
                     <>
                       <dt className="font-semibold">Space group:</dt>
-                      <dd className="font-mono">{structureHeader.spaceGroup}</dd>
+                      <dd className="font-mono">
+                        {structureHeader.spaceGroup}
+                      </dd>
                     </>
                   )}
                   {(structureHeader.rWork || structureHeader.rFree) && (
