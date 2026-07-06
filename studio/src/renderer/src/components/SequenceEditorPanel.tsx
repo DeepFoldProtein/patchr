@@ -600,6 +600,18 @@ export function SequenceEditorPanel(): React.ReactElement {
           </button>
         </div>
 
+        {/* Contextual hint for why Mutate/PTM may be unavailable */}
+        {singleResidue && !chainPoly && (
+          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+            Mutate / PTM need an mmCIF with poly_seq_scheme (load the full CIF).
+          </p>
+        )}
+        {singleResidue && chainPoly && !activeChain.isNucleic && !canPtm && (
+          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+            PTM applies to Ser/Thr/Tyr/Lys — {singleResidue.resName} has none.
+          </p>
+        )}
+
         {ptmOpen && canPtm && singleResidue && ptmChoices && (
           <div className="mt-2 rounded-md border border-border p-2">
             <div className="mb-1.5 text-xs text-muted-foreground">
