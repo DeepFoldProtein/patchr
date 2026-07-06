@@ -64,7 +64,8 @@ const api = {
       cifFilename: string,
       chainIds: string[],
       customSequences: string,
-      skipTerminal: boolean = false
+      skipTerminal: boolean = false,
+      modifications: string = ""
     ) =>
       ipcRenderer.invoke(
         "boltz:upload-template",
@@ -73,7 +74,8 @@ const api = {
         cifFilename,
         chainIds,
         customSequences,
-        skipTerminal
+        skipTerminal,
+        modifications
       ),
     getJobStatus: (apiUrl: string, jobId: string) =>
       ipcRenderer.invoke("boltz:get-job-status", apiUrl, jobId),

@@ -6,7 +6,8 @@ import {
   fastaInputAtom,
   enableSequenceMappingAtom,
   skipTerminalAtom,
-  pendingEraseAtom
+  pendingEraseAtom,
+  pendingPtmAtom
 } from "../store/repair-atoms";
 import { eraseResiduesFromCif } from "../lib/cifErase";
 import {
@@ -1831,6 +1832,7 @@ function ContextInpaintSection({
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
   const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
   const [pendingErase, setPendingErase] = useAtom(pendingEraseAtom);
+  const [pendingPtm, setPendingPtm] = useAtom(pendingPtmAtom);
   // When sequence mapping is on, the provided sequence drives terminal
   // handling, so the skip-terminal flag is meaningless and we lock it off.
   const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
@@ -1967,6 +1969,15 @@ function ContextInpaintSection({
         setPendingErase(null);
       }
 
+      // 2c. Apply a staged "add PTM" edit: forwarded to the backend as a
+      // modifications field so Boltz models the modified residue.
+      let modificationsStr = "";
+      if (pendingPtm) {
+        modificationsStr = `${pendingPtm.chainId}:${pendingPtm.seqId}:${pendingPtm.ccd}`;
+        logger.log(`[PTM] Requesting modification ${modificationsStr}`);
+        setPendingPtm(null);
+      }
+
       // 3. Upload template
       if (!window.api?.boltz?.uploadTemplate) {
         throw new Error("Boltz API not available");
@@ -1978,7 +1989,8 @@ function ContextInpaintSection({
         cifFile,
         availableChains,
         customSequencesStr,
-        skipTerminalEffective
+        skipTerminalEffective,
+        modificationsStr
       );
 
       if (!uploadResult.success || !uploadResult.data) {

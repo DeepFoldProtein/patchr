@@ -34,6 +34,17 @@ export interface PendingErase {
 }
 export const pendingEraseAtom = atom<PendingErase | null>(null);
 
+// Staged "add PTM" request from the Sequence editor. The next inpainting run
+// forwards it to the backend as a `modifications` field so Boltz models the
+// modified residue (e.g. SEP) at that entity position.
+export interface PendingPtm {
+  chainId: string; // author chain id
+  seqId: number; // entity seq_id (_entity_poly_seq.num)
+  ccd: string; // component id, e.g. SEP / TPO / PTR / MLY
+  label: string; // human-readable summary
+}
+export const pendingPtmAtom = atom<PendingPtm | null>(null);
+
 // Skip N/C-terminal missing residues (only inpaint internal gaps).
 // Mutually exclusive with sequence mapping — when mapping is on, terminals
 // are derived from the provided sequence, so this flag is forced off.

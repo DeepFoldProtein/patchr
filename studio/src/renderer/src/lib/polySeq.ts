@@ -66,6 +66,8 @@ export interface ChainPolySeq {
   oneLetter: string;
   /** "authSeqNum|insCode" -> 0-based index into monIds/oneLetter. */
   keyToIndex: Map<string, number>;
+  /** "authSeqNum|insCode" -> entity seq_id (1-based, _entity_poly_seq.num). */
+  keyToSeqId: Map<string, number>;
 }
 
 function normalizeIns(ins: string | undefined): string {
@@ -157,6 +159,7 @@ export function parsePolySeqScheme(
   const authNumCol =
     cols["auth_seq_num"] ?? cols["pdb_seq_num"] ?? cols["ndb_seq_num"];
   const insCol = cols["pdb_ins_code"];
+  const seqIdCol = cols["seq_id"];
   if (strandCol === undefined || monCol === undefined) return result;
 
   for (const row of rows) {
@@ -170,7 +173,8 @@ export function parsePolySeqScheme(
         authChainId: chain,
         monIds: [],
         oneLetter: "",
-        keyToIndex: new Map()
+        keyToIndex: new Map(),
+        keyToSeqId: new Map()
       };
       result.set(chain, entry);
     }
@@ -182,7 +186,11 @@ export function parsePolySeqScheme(
       const authNum = row[authNumCol];
       const ins = insCol !== undefined ? normalizeIns(row[insCol]) : "";
       if (authNum && authNum !== "?" && authNum !== ".") {
-        entry.keyToIndex.set(`${authNum}|${ins}`, index);
+        const key = `${authNum}|${ins}`;
+        entry.keyToIndex.set(key, index);
+        const seqIdRaw = seqIdCol !== undefined ? row[seqIdCol] : undefined;
+        const seqId = seqIdRaw ? parseInt(seqIdRaw, 10) : index + 1;
+        entry.keyToSeqId.set(key, Number.isFinite(seqId) ? seqId : index + 1);
       }
     }
   }

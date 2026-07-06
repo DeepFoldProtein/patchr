@@ -1345,7 +1345,8 @@ export function registerProjectIPC(): void {
       cifFilename: string,
       chainIds: string[],
       customSequences: string,
-      skipTerminal: boolean = false
+      skipTerminal: boolean = false,
+      modifications: string = ""
     ) => {
       try {
         validateApiUrl(apiUrl);
@@ -1373,6 +1374,15 @@ export function registerProjectIPC(): void {
             `--${boundary}\r\nContent-Disposition: form-data; name="skip_terminal"\r\n\r\n${skipTerminal ? "true" : "false"}\r\n`
           )
         );
+
+        // Add modifications field (PTMs), only when present
+        if (modifications) {
+          formDataParts.push(
+            Buffer.from(
+              `--${boundary}\r\nContent-Disposition: form-data; name="modifications"\r\n\r\n${modifications}\r\n`
+            )
+          );
+        }
 
         // Add cif_file field
         // cifContent is already a string from readStructureFile

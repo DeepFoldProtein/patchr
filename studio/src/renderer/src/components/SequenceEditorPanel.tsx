@@ -5,11 +5,12 @@
 //   - Mutate: change residue identities and re-run via the custom-sequence path.
 import React, { useEffect, useMemo, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { RefreshCw, Eraser, FlaskConical } from "lucide-react";
+import { RefreshCw, Eraser, FlaskConical, Atom } from "lucide-react";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import {
   missingRegionsDetectedAtom,
   pendingEraseAtom,
+  pendingPtmAtom,
   fastaInputAtom,
   enableSequenceMappingAtom
 } from "../store/repair-atoms";
@@ -53,6 +54,17 @@ const AA_TARGETS = [
   "V"
 ];
 
+// PTMs offered per residue one-letter code → CCD component ids.
+const PTM_OPTIONS: Record<string, { label: string; ccd: string }[]> = {
+  S: [{ label: "Phosphoserine (SEP)", ccd: "SEP" }],
+  T: [{ label: "Phosphothreonine (TPO)", ccd: "TPO" }],
+  Y: [{ label: "Phosphotyrosine (PTR)", ccd: "PTR" }],
+  K: [
+    { label: "N6-methyllysine (MLY)", ccd: "MLY" },
+    { label: "N6,N6,N6-trimethyllysine (M3L)", ccd: "M3L" }
+  ]
+};
+
 export function SequenceEditorPanel(): React.ReactElement {
   const plugin = useAtomValue(pluginAtom);
   // Re-detection of missing regions is a reliable "structure is ready" signal.
@@ -61,6 +73,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const setPanelMode = useSetAtom(panelModeAtom);
   const setFastaInput = useSetAtom(fastaInputAtom);
   const setEnableSequenceMapping = useSetAtom(enableSequenceMappingAtom);
+  const setPendingPtm = useSetAtom(pendingPtmAtom);
   const structureContent = useStructureContent();
   const polySeq = useMemo(
     () => parsePolySeqScheme(structureContent),
@@ -72,6 +85,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [staged, setStaged] = useState<string | null>(null);
   const [mutateOpen, setMutateOpen] = useState(false);
+  const [ptmOpen, setPtmOpen] = useState(false);
 
   const refresh = React.useCallback(() => {
     const next = getChainSequences(plugin);
@@ -188,6 +202,42 @@ export function SequenceEditorPanel(): React.ReactElement {
     const label = `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`;
     setStaged(`Mutation ${label}`);
     setMutateOpen(false);
+    setPanelMode("repair");
+  };
+
+  // PTM options for the selected residue (by its one-letter code), plus the
+  // entity seq_id the backend needs to target the modification.
+  const ptmSeqId =
+    singleResidue && chainPoly
+      ? chainPoly.keyToSeqId.get(
+          `${singleResidue.authSeqId}|${singleResidue.insCode}`
+        )
+      : undefined;
+  const ptmChoices = singleResidue
+    ? PTM_OPTIONS[singleResidue.code]
+    : undefined;
+  const canPtm =
+    !!activeChain &&
+    !activeChain.isNucleic &&
+    !!ptmChoices &&
+    ptmSeqId !== undefined;
+
+  const handlePtm = (ccd: string, ptmLabel: string): void => {
+    if (!activeChain || !singleResidue || ptmSeqId === undefined) return;
+    setPendingPtm({
+      chainId: activeChain.authChainId,
+      seqId: ptmSeqId,
+      ccd,
+      label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${ptmLabel}`
+    });
+    // PTM is its own staged action — clear any prior erase / sequence edit.
+    setPendingErase(null);
+    setEnableSequenceMapping(false);
+    setFastaInput("");
+    setStaged(
+      `PTM ${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} → ${ccd}`
+    );
+    setPtmOpen(false);
     setPanelMode("repair");
   };
 
@@ -319,7 +369,44 @@ export function SequenceEditorPanel(): React.ReactElement {
             <FlaskConical className="h-3 w-3" />
             Mutate…
           </button>
+          <button
+            onClick={() => setPtmOpen(o => !o)}
+            disabled={!canPtm}
+            title={
+              canPtm
+                ? "Add a post-translational modification to the selected residue"
+                : "Select a single Ser/Thr/Tyr/Lys residue"
+            }
+            className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
+          >
+            <Atom className="h-3 w-3" />
+            PTM…
+          </button>
         </div>
+
+        {ptmOpen && canPtm && singleResidue && ptmChoices && (
+          <div className="mt-2 rounded-md border border-border p-2">
+            <div className="mb-1.5 text-xs text-muted-foreground">
+              Modify{" "}
+              <span className="font-mono">
+                {singleResidue.resName} {singleResidue.authSeqId}
+                {singleResidue.insCode}
+              </span>
+              :
+            </div>
+            <div className="flex flex-col gap-1">
+              {ptmChoices.map(choice => (
+                <button
+                  key={choice.ccd}
+                  onClick={() => handlePtm(choice.ccd, choice.label)}
+                  className="rounded bg-muted px-2 py-1 text-left text-xs transition-colors hover:bg-blue-500 hover:text-white"
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {mutateOpen && canMutate && singleResidue && (
           <div className="mt-2 rounded-md border border-border p-2">

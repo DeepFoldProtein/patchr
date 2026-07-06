@@ -136,7 +136,8 @@ export interface BoltzAPI {
     cifFilename: string,
     chainIds: string[],
     customSequences: string,
-    skipTerminal?: boolean
+    skipTerminal?: boolean,
+    modifications?: string
   ) => Promise<{
     success: boolean;
     data?: { job_id: string; status: string };
