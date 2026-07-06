@@ -23,7 +23,8 @@ import {
   erasedResidueKeysAtom,
   pendingPtmAtom,
   fastaInputAtom,
-  enableSequenceMappingAtom
+  enableSequenceMappingAtom,
+  skipTerminalAtom
 } from "../store/repair-atoms";
 import { useStructureContent } from "../store/project-store";
 import {
@@ -83,7 +84,10 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
   const erasedKeys = useAtomValue(erasedResidueKeysAtom);
   const setFastaInput = useSetAtom(fastaInputAtom);
-  const setEnableSequenceMapping = useSetAtom(enableSequenceMappingAtom);
+  const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
+    enableSequenceMappingAtom
+  );
+  const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
   const setPendingPtm = useSetAtom(pendingPtmAtom);
   const structureContent = useStructureContent();
   const polySeq = useMemo(
@@ -137,6 +141,15 @@ export function SequenceEditorPanel(): React.ReactElement {
         ? activeChain.residues.slice(range.lo, range.hi + 1)
         : [],
     [range, activeChain]
+  );
+
+  // N/C-terminal missing regions for the active chain (shown ghosted).
+  const chainMissing = useMemo(
+    () =>
+      activeChain
+        ? missingRegions.filter(r => r.chainId === activeChain.authChainId)
+        : [],
+    [missingRegions, activeChain]
   );
 
   // Mirror the sequence selection into the 3D viewer (highlight + zoom).
@@ -333,6 +346,23 @@ export function SequenceEditorPanel(): React.ReactElement {
     }
   };
 
+  const ntermRegion = chainMissing.find(r => r.terminalType === "nterm");
+  const ctermRegion = chainMissing.find(r => r.terminalType === "cterm");
+  const hasTerminals = !!ntermRegion || !!ctermRegion;
+  // Terminals are inpainted when the user opts in, or when a full sequence is
+  // provided (UniProt/mutation), since terminals then come from that sequence.
+  const terminalsIncluded = enableSequenceMapping || !skipTerminal;
+
+  const termChars = (
+    region: (typeof chainMissing)[number] | undefined
+  ): string[] => {
+    if (!region) return [];
+    if (region.sequenceKnown && region.sequence) {
+      return region.sequence.split("");
+    }
+    return Array.from({ length: region.regionLength ?? 0 }, () => "·");
+  };
+
   if (!activeChain) {
     return (
       <div className="py-4 text-center text-sm text-muted-foreground">
@@ -417,6 +447,24 @@ export function SequenceEditorPanel(): React.ReactElement {
       {/* Residue grid */}
       <div className="max-h-56 overflow-auto rounded-md border border-border p-2">
         <div className="select-none font-mono text-xs leading-6">
+          {termChars(ntermRegion).map((ch, idx) => (
+            <span
+              key={`nterm-${idx}`}
+              title={
+                terminalsIncluded
+                  ? "N-terminal missing — will be inpainted"
+                  : "N-terminal missing — skipped"
+              }
+              className={cn(
+                "inline-block w-[0.85rem] text-center",
+                terminalsIncluded
+                  ? "text-green-500/70"
+                  : "text-muted-foreground/30"
+              )}
+            >
+              {ch}
+            </span>
+          ))}
           {activeChain.residues.map((r, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
             const isErased =
@@ -450,8 +498,49 @@ export function SequenceEditorPanel(): React.ReactElement {
               </span>
             );
           })}
+          {termChars(ctermRegion).map((ch, idx) => (
+            <span
+              key={`cterm-${idx}`}
+              title={
+                terminalsIncluded
+                  ? "C-terminal missing — will be inpainted"
+                  : "C-terminal missing — skipped"
+              }
+              className={cn(
+                "inline-block w-[0.85rem] text-center",
+                terminalsIncluded
+                  ? "text-green-500/70"
+                  : "text-muted-foreground/30"
+              )}
+            >
+              {ch}
+            </span>
+          ))}
         </div>
       </div>
+
+      {/* N/C-terminal inpainting toggle */}
+      {hasTerminals && (
+        <label
+          className={cn(
+            "flex items-center gap-2 text-xs",
+            enableSequenceMapping && "opacity-50"
+          )}
+          title={
+            enableSequenceMapping
+              ? "Terminals come from the loaded reference sequence"
+              : "Ghosted terminal residues are only regenerated when this is on"
+          }
+        >
+          <input
+            type="checkbox"
+            checked={terminalsIncluded}
+            disabled={enableSequenceMapping}
+            onChange={e => setSkipTerminal(!e.target.checked)}
+          />
+          Include N/C-terminal residues in inpainting
+        </label>
+      )}
 
       {/* Selection summary + actions */}
       <div>

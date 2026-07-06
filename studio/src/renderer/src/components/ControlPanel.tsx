@@ -52,8 +52,6 @@ import {
   CollapsibleTrigger,
   CollapsibleContent
 } from "./ui/collapsible";
-import { Switch } from "./ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { SimulationSection, type SavedSimulation } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
@@ -1381,7 +1379,7 @@ function ContextInpaintSection({
   const currentProject = useCurrentProject();
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
-  const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
+  const skipTerminal = useAtomValue(skipTerminalAtom);
   const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
   const [pendingPtm, setPendingPtm] = useAtom(pendingPtmAtom);
   // When sequence mapping is on, the provided sequence drives terminal
@@ -1866,49 +1864,6 @@ function ContextInpaintSection({
           )}
         </div>
       )}
-
-      {/* Inpainting Options */}
-      <div className="rounded-md border border-border bg-muted/20 p-3">
-        <Tooltip delayDuration={150}>
-          <TooltipTrigger asChild>
-            <div className="flex items-center justify-between gap-3">
-              <div
-                className={
-                  enableSequenceMapping
-                    ? "opacity-50 cursor-not-allowed"
-                    : undefined
-                }
-              >
-                <label
-                  htmlFor="skip-terminal"
-                  className={`text-xs font-medium ${
-                    enableSequenceMapping
-                      ? "cursor-not-allowed"
-                      : "cursor-pointer"
-                  }`}
-                >
-                  Skip N/C-terminal residues
-                </label>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Only inpaint internal gaps; leave dangling termini untouched.
-                </p>
-              </div>
-              <Switch
-                id="skip-terminal"
-                checked={skipTerminalEffective}
-                disabled={enableSequenceMapping}
-                onCheckedChange={setSkipTerminal}
-              />
-            </div>
-          </TooltipTrigger>
-          {enableSequenceMapping && (
-            <TooltipContent side="top" className="max-w-xs text-xs">
-              Disabled while Sequence Mapping is on. Turn off sequence mapping
-              to skip terminal residues.
-            </TooltipContent>
-          )}
-        </Tooltip>
-      </div>
 
       {/* Error Display */}
       {error && (

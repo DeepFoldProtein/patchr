@@ -62,10 +62,11 @@ export interface PendingPtm {
 }
 export const pendingPtmAtom = atom<PendingPtm | null>(null);
 
-// Skip N/C-terminal missing residues (only inpaint internal gaps).
-// Mutually exclusive with sequence mapping — when mapping is on, terminals
-// are derived from the provided sequence, so this flag is forced off.
-export const skipTerminalAtom = atom<boolean>(false);
+// Skip N/C-terminal missing residues (only inpaint internal gaps). Defaults to
+// true: terminals are shown ghosted and left out of inpainting unless the user
+// opts in (or a full sequence is provided via UniProt/mutation, which forces
+// terminals on since they come from that sequence).
+export const skipTerminalAtom = atom<boolean>(true);
 
 // Repair Context (Context & Inpaint 설정)
 export const repairContextsAtom = atom<Map<string, RepairContext>>(new Map());
