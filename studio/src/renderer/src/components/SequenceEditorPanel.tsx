@@ -86,6 +86,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [staged, setStaged] = useState<string | null>(null);
   const [mutateOpen, setMutateOpen] = useState(false);
   const [ptmOpen, setPtmOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const refresh = React.useCallback(() => {
     const next = getChainSequences(plugin);
@@ -124,18 +125,41 @@ export function SequenceEditorPanel(): React.ReactElement {
   );
 
   // Mirror the sequence selection into the 3D viewer (highlight + zoom).
+  // Skip while dragging so a fast range-drag doesn't re-scan atoms on every
+  // step; the highlight applies once when the drag ends (dragging -> false).
   useEffect(() => {
-    if (!activeChain) return;
+    if (!activeChain || dragging) return;
     selectResiduesInViewer(plugin, activeChain.authChainId, selectedResidues);
-  }, [plugin, activeChain, selectedResidues]);
+  }, [plugin, activeChain, selectedResidues, dragging]);
 
-  const handleResidueClick = (index: number, e: React.MouseEvent): void => {
+  // Selection: click a residue, shift-click to extend, or drag across residues
+  // to select a range (for multi-residue erase).
+  const handleResidueMouseDown = (index: number, e: React.MouseEvent): void => {
+    e.preventDefault();
     if (e.shiftKey && selection) {
       setSelection({ anchor: selection.anchor, focus: index });
     } else {
       setSelection({ anchor: index, focus: index });
     }
+    setDragging(true);
   };
+
+  const handleResidueMouseEnter = (index: number): void => {
+    if (!dragging) return;
+    setSelection(prev =>
+      prev
+        ? { anchor: prev.anchor, focus: index }
+        : { anchor: index, focus: index }
+    );
+  };
+
+  // End a drag anywhere on the document (even outside the grid).
+  useEffect(() => {
+    if (!dragging) return;
+    const stop = (): void => setDragging(false);
+    window.addEventListener("mouseup", stop);
+    return () => window.removeEventListener("mouseup", stop);
+  }, [dragging]);
 
   const handleErase = (): void => {
     if (!activeChain || selectedResidues.length === 0) return;
@@ -298,14 +322,15 @@ export function SequenceEditorPanel(): React.ReactElement {
 
       {/* Residue grid */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-        <div className="font-mono text-xs leading-6">
+        <div className="select-none font-mono text-xs leading-6">
           {activeChain.residues.map((r, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
             const showNumber = r.authSeqId % 10 === 0 && r.insCode === "";
             return (
               <span
                 key={`${r.authSeqId}|${r.insCode}`}
-                onClick={e => handleResidueClick(i, e)}
+                onMouseDown={e => handleResidueMouseDown(i, e)}
+                onMouseEnter={() => handleResidueMouseEnter(i)}
                 title={`${r.resName} ${r.authSeqId}${r.insCode}`}
                 className={cn(
                   "relative inline-block w-[0.85rem] cursor-pointer text-center",
