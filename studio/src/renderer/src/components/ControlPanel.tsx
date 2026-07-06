@@ -65,7 +65,6 @@ import { SequenceEditorPanel } from "./SequenceEditorPanel";
 const TAB_ITEMS: { key: PanelMode; label: string }[] = [
   { key: "project", label: "Project" },
   { key: "repair", label: "Repair" },
-  { key: "sequence-editor", label: "Sequence" },
   { key: "simulation", label: "Simulation" }
 ];
 
@@ -106,14 +105,6 @@ export function ControlPanel(): React.ReactElement {
           className="flex-1 min-h-0 overflow-auto"
         >
           <RepairConsole />
-        </div>
-        <div
-          style={
-            panelMode === "sequence-editor" ? undefined : { display: "none" }
-          }
-          className="flex-1 min-h-0 overflow-auto"
-        >
-          <SequenceEditorPanel />
         </div>
         <div
           className="flex-1 overflow-auto p-4"
@@ -1005,13 +996,18 @@ function RepairConsole(): React.ReactElement {
         <MissingRegionReviewSection />
       </Section>
 
-      {/* Sequence Mapping 섹션 (Optional) */}
+      {/* Sequence 섹션 — 잔기 편집(Erase/Mutate/PTM) + 서열 매핑/UniProt */}
       <Section
-        title="Sequence Mapping / Uniprot Search (Optional)"
+        title="Sequence"
         expanded={expandedSections.has("sequence")}
         onToggle={() => toggleSection("sequence")}
       >
-        <SequenceMappingSection />
+        <div className="space-y-4">
+          <SequenceEditorPanel />
+          <div className="border-t border-border pt-4">
+            <SequenceMappingSection />
+          </div>
+        </div>
       </Section>
 
       {/* Context & Inpaint 섹션 */}

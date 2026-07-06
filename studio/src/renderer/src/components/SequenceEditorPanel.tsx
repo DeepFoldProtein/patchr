@@ -1,8 +1,11 @@
-// Sequence editor tab. Shows the resolved per-chain sequence of the loaded
-// structure and lets the user select a residue range. Selected ranges feed two
-// actions (wired in later slices):
+// Residue editor — embedded in the Repair tab's "Sequence" section. Shows the
+// resolved per-chain sequence of the loaded structure and lets the user select
+// residues (click, shift-click, or drag) to stage one of three actions, each of
+// which hands off to the inpainting run in the same tab:
 //   - Erase & Regenerate: strip the residues from the CIF and re-inpaint them.
-//   - Mutate: change residue identities and re-run via the custom-sequence path.
+//   - Mutate: change a residue's identity via the custom-sequence path.
+//   - PTM: add a modified residue (SEP/TPO/PTR/MLY/…) via the backend
+//     modifications field.
 import React, { useEffect, useMemo, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { RefreshCw, Eraser, FlaskConical, Atom } from "lucide-react";
@@ -14,7 +17,6 @@ import {
   fastaInputAtom,
   enableSequenceMappingAtom
 } from "../store/repair-atoms";
-import { panelModeAtom } from "../store/api-atoms";
 import { useStructureContent } from "../store/project-store";
 import {
   getChainSequences,
@@ -70,7 +72,6 @@ export function SequenceEditorPanel(): React.ReactElement {
   // Re-detection of missing regions is a reliable "structure is ready" signal.
   const missingRegions = useAtomValue(missingRegionsDetectedAtom);
   const setPendingErase = useSetAtom(pendingEraseAtom);
-  const setPanelMode = useSetAtom(panelModeAtom);
   const setFastaInput = useSetAtom(fastaInputAtom);
   const setEnableSequenceMapping = useSetAtom(enableSequenceMappingAtom);
   const setPendingPtm = useSetAtom(pendingPtmAtom);
@@ -175,8 +176,6 @@ export function SequenceEditorPanel(): React.ReactElement {
       label
     });
     setStaged(label);
-    // Hand off to the Repair tab where the inpainting run lives.
-    setPanelMode("repair");
   };
 
   // Mutation is available when exactly one protein residue is selected and its
@@ -226,7 +225,6 @@ export function SequenceEditorPanel(): React.ReactElement {
     const label = `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`;
     setStaged(`Mutation ${label}`);
     setMutateOpen(false);
-    setPanelMode("repair");
   };
 
   // PTM options for the selected residue (by its one-letter code), plus the
@@ -262,30 +260,25 @@ export function SequenceEditorPanel(): React.ReactElement {
       `PTM ${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} → ${ccd}`
     );
     setPtmOpen(false);
-    setPanelMode("repair");
   };
 
   if (!activeChain) {
     return (
-      <div className="p-6 text-center text-sm text-muted-foreground">
-        <p className="mb-1 font-medium">No structure loaded</p>
+      <div className="py-4 text-center text-sm text-muted-foreground">
         <p className="text-xs">
-          Open a project with a structure to edit its sequence.
+          Load a structure to select residues for erase / mutate / PTM.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="space-y-2">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div>
-          <h3 className="text-sm font-semibold">Sequence Editor</h3>
-          <p className="text-xs text-muted-foreground">
-            Select residues to erase &amp; regenerate or mutate.
-          </p>
-        </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Select residues (drag for a range) to erase, mutate, or add a PTM.
+        </p>
         <button
           onClick={refresh}
           title="Reload sequences from the current structure"
@@ -297,7 +290,7 @@ export function SequenceEditorPanel(): React.ReactElement {
       </div>
 
       {/* Chain selector */}
-      <div className="flex flex-wrap gap-1 border-b border-border px-4 py-2">
+      <div className="flex flex-wrap gap-1">
         {chains.map(c => (
           <button
             key={c.authChainId}
@@ -321,7 +314,7 @@ export function SequenceEditorPanel(): React.ReactElement {
       </div>
 
       {/* Residue grid */}
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+      <div className="max-h-56 overflow-auto rounded-md border border-border p-2">
         <div className="select-none font-mono text-xs leading-6">
           {activeChain.residues.map((r, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
@@ -352,7 +345,7 @@ export function SequenceEditorPanel(): React.ReactElement {
       </div>
 
       {/* Selection summary + actions */}
-      <div className="border-t border-border px-4 py-2">
+      <div>
         {range && selectedResidues.length > 0 ? (
           <div className="mb-2 text-xs">
             <span className="font-semibold">Selected:</span> Chain{" "}
@@ -470,9 +463,9 @@ export function SequenceEditorPanel(): React.ReactElement {
 
         {staged && (
           <div className="mt-2 rounded-md bg-blue-500/10 px-2 py-1.5 text-xs text-blue-600 dark:text-blue-400">
-            Staged <span className="font-mono">{staged}</span>. Open the{" "}
-            <span className="font-semibold">Repair</span> tab and press{" "}
-            <span className="font-semibold">Start</span> to regenerate.
+            Staged <span className="font-mono">{staged}</span>. Press{" "}
+            <span className="font-semibold">Start Inference</span> below to
+            regenerate.
           </div>
         )}
       </div>
