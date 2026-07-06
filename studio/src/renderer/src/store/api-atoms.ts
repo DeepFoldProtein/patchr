@@ -33,5 +33,5 @@ export const apiConnectionStatusAtom = atom<
 >("idle");
 
 /** Active panel tab — shared so child components can navigate. */
-export type PanelMode = "project" | "repair" | "simulation";
+export type PanelMode = "project" | "repair" | "sequence-editor" | "simulation";
 export const panelModeAtom = atom<PanelMode>("repair");

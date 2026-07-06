@@ -53,18 +53,16 @@ import {
   CollapsibleContent
 } from "./ui/collapsible";
 import { Switch } from "./ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from "./ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { SimulationSection, type SavedSimulation } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
+import { SequenceEditorPanel } from "./SequenceEditorPanel";
 
 const TAB_ITEMS: { key: PanelMode; label: string }[] = [
   { key: "project", label: "Project" },
   { key: "repair", label: "Repair" },
+  { key: "sequence-editor", label: "Sequence" },
   { key: "simulation", label: "Simulation" }
 ];
 
@@ -105,6 +103,14 @@ export function ControlPanel(): React.ReactElement {
           className="flex-1 min-h-0 overflow-auto"
         >
           <RepairConsole />
+        </div>
+        <div
+          style={
+            panelMode === "sequence-editor" ? undefined : { display: "none" }
+          }
+          className="flex-1 min-h-0 overflow-auto"
+        >
+          <SequenceEditorPanel />
         </div>
         <div
           className="flex-1 overflow-auto p-4"
