@@ -4,10 +4,14 @@
 //   - Erase & Regenerate: strip the residues from the CIF and re-inpaint them.
 //   - Mutate: change residue identities and re-run via the custom-sequence path.
 import React, { useEffect, useMemo, useState } from "react";
-import { useAtomValue } from "jotai";
-import { RefreshCw } from "lucide-react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { RefreshCw, Eraser } from "lucide-react";
 import { pluginAtom } from "../store/mol-viewer-atoms";
-import { missingRegionsDetectedAtom } from "../store/repair-atoms";
+import {
+  missingRegionsDetectedAtom,
+  pendingEraseAtom
+} from "../store/repair-atoms";
+import { panelModeAtom } from "../store/api-atoms";
 import {
   getChainSequences,
   selectResiduesInViewer,
@@ -25,10 +29,13 @@ export function SequenceEditorPanel(): React.ReactElement {
   const plugin = useAtomValue(pluginAtom);
   // Re-detection of missing regions is a reliable "structure is ready" signal.
   const missingRegions = useAtomValue(missingRegionsDetectedAtom);
+  const setPendingErase = useSetAtom(pendingEraseAtom);
+  const setPanelMode = useSetAtom(panelModeAtom);
 
   const [chains, setChains] = useState<ChainSequence[]>([]);
   const [activeChainId, setActiveChainId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [staged, setStaged] = useState<string | null>(null);
 
   const refresh = React.useCallback(() => {
     const next = getChainSequences(plugin);
@@ -78,6 +85,24 @@ export function SequenceEditorPanel(): React.ReactElement {
     } else {
       setSelection({ anchor: index, focus: index });
     }
+  };
+
+  const handleErase = (): void => {
+    if (!activeChain || selectedResidues.length === 0) return;
+    const first = selectedResidues[0];
+    const last = selectedResidues[selectedResidues.length - 1];
+    const label = `${activeChain.authChainId} ${first.authSeqId}${first.insCode}–${last.authSeqId}${last.insCode} (${selectedResidues.length})`;
+    setPendingErase({
+      chainId: activeChain.authChainId,
+      residues: selectedResidues.map(r => ({
+        authSeqId: r.authSeqId,
+        insCode: r.insCode
+      })),
+      label
+    });
+    setStaged(label);
+    // Hand off to the Repair tab where the inpainting run lives.
+    setPanelMode("repair");
   };
 
   if (!activeChain) {
@@ -187,10 +212,12 @@ export function SequenceEditorPanel(): React.ReactElement {
         )}
         <div className="flex gap-2">
           <button
-            disabled
-            title="Coming next"
-            className="flex-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium opacity-50"
+            onClick={handleErase}
+            disabled={selectedResidues.length === 0}
+            title="Strip the selected residues and regenerate them via inpainting"
+            className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
+            <Eraser className="h-3 w-3" />
             Erase &amp; Regenerate
           </button>
           <button
@@ -201,6 +228,13 @@ export function SequenceEditorPanel(): React.ReactElement {
             Mutate…
           </button>
         </div>
+        {staged && (
+          <div className="mt-2 rounded-md bg-blue-500/10 px-2 py-1.5 text-xs text-blue-600 dark:text-blue-400">
+            Staged erase of <span className="font-mono">{staged}</span>. Open
+            the <span className="font-semibold">Repair</span> tab and press{" "}
+            <span className="font-semibold">Start</span> to regenerate.
+          </div>
+        )}
       </div>
     </div>
   );

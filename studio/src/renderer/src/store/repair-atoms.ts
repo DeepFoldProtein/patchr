@@ -24,6 +24,16 @@ export const sequenceMappingsAtom = atom<SequenceMapping[]>([]);
 export const fastaInputAtom = atom<string>("");
 export const enableSequenceMappingAtom = atom<boolean>(false);
 
+// Staged "erase & regenerate" request from the Sequence editor. When set, the
+// next inpainting run strips these residues from the uploaded CIF so the
+// backend re-detects them as a missing region and regenerates them.
+export interface PendingErase {
+  chainId: string;
+  residues: { authSeqId: number; insCode: string }[];
+  label: string; // human-readable summary, e.g. "A 45–52 (8)"
+}
+export const pendingEraseAtom = atom<PendingErase | null>(null);
+
 // Skip N/C-terminal missing residues (only inpaint internal gaps).
 // Mutually exclusive with sequence mapping — when mapping is on, terminals
 // are derived from the provided sequence, so this flag is forced off.

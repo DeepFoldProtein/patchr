@@ -5,8 +5,10 @@ import { ProjectManager } from "./ProjectManager";
 import {
   fastaInputAtom,
   enableSequenceMappingAtom,
-  skipTerminalAtom
+  skipTerminalAtom,
+  pendingEraseAtom
 } from "../store/repair-atoms";
+import { eraseResiduesFromCif } from "../lib/cifErase";
 import {
   apiUrlAtom,
   apiConnectionStatusAtom,
@@ -1828,6 +1830,7 @@ function ContextInpaintSection({
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
   const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
+  const [pendingErase, setPendingErase] = useAtom(pendingEraseAtom);
   // When sequence mapping is on, the provided sequence drives terminal
   // handling, so the skip-terminal flag is meaningless and we lock it off.
   const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
@@ -1940,6 +1943,30 @@ function ContextInpaintSection({
         throw new Error("Failed to read structure file");
       }
 
+      // 2b. Apply a staged "erase & regenerate" edit from the Sequence editor:
+      // strip the selected residues so the backend re-detects them as missing.
+      let cifContent = cifContentResult.content;
+      if (pendingErase && pendingErase.residues.length > 0) {
+        const erased = eraseResiduesFromCif(
+          cifContent,
+          pendingErase.chainId,
+          pendingErase.residues
+        );
+        if (erased.erasedAtoms === 0) {
+          throw new Error(
+            `Erase failed: no matching atoms found for chain ${pendingErase.chainId} ` +
+              `(${pendingErase.label}). The structure may not be mmCIF.`
+          );
+        }
+        cifContent = erased.content;
+        logger.log(
+          `[Erase] Removed ${erased.erasedResidues} residue(s) / ` +
+            `${erased.erasedAtoms} atom(s) from chain ${pendingErase.chainId} before upload`
+        );
+        // One-shot: clear so a normal re-run doesn't keep erasing.
+        setPendingErase(null);
+      }
+
       // 3. Upload template
       if (!window.api?.boltz?.uploadTemplate) {
         throw new Error("Boltz API not available");
@@ -1947,7 +1974,7 @@ function ContextInpaintSection({
 
       const uploadResult = await window.api.boltz.uploadTemplate(
         apiUrl,
-        cifContentResult.content,
+        cifContent,
         cifFile,
         availableChains,
         customSequencesStr,
