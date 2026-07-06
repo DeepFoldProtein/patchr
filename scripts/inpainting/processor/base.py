@@ -45,7 +45,7 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml', use_absolute_path: bool = True):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, user_modifications: Optional[Dict[str, List[Dict]]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml', use_absolute_path: bool = True):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
@@ -86,6 +86,12 @@ class StructureProcessor(
         self.chain_data = {}  # chain_id -> {sequence, seqres_sequence, uniprot_id, ...}
         self.chain_entity_types = {}  # chain_id -> 'protein', 'dna', or 'rna'
         self.manual_sequences = custom_sequences or {}  # chain_id -> custom sequence (from CLI or interactive)
+        # User-requested modifications (PTMs) added via --modification, keyed by
+        # author (or label) chain id -> [{'position': entity_seq_id, 'ccd': CCD}].
+        # Injected into chain_modifications so the YAML carries {position, ccd},
+        # which is what Boltz uses to model the modified residue (incl. its extra
+        # atoms, e.g. a phosphate) when the CCD is available in the boltz mols set.
+        self.user_modifications = user_modifications or {}
         # Chain ID mapping (auth_asym_id <-> label_asym_id)
         self.auth_to_label = {}  # e.g., 'X' -> 'A'
         self.label_to_auth = {}  # e.g., 'A' -> 'X'
@@ -704,6 +710,21 @@ class StructureProcessor(
                     if comp_id not in STANDARD_AA_THREE_LETTER and comp_id not in STANDARD_NUCLEOTIDE_CODES and pos not in positions_added:
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)
+
+            # Inject user-requested modifications (PTMs) from --modification. The
+            # supplied position is an untrimmed entity seq_id (matches
+            # _entity_poly_seq.num); convert to the trimmed coordinate system like
+            # the other sources above. Keyed by author or label chain id.
+            _user_key = self.author_chain_ids.get(chain_id, chain_id)
+            _user_mods = self.user_modifications.get(_user_key) or self.user_modifications.get(chain_id)
+            if _user_mods:
+                for _um in _user_mods:
+                    _new_pos = _um['position'] - trim_offset
+                    if 1 <= _new_pos <= seq_len_trimmed and _new_pos not in positions_added:
+                        chain_modifications.append({'position': _new_pos, 'ccd': str(_um['ccd']).upper(), 'parent': None, 'parent_one': None})
+                        positions_added.add(_new_pos)
+                        info(f"Chain {chain_id}: user modification {_um['ccd']} at entity position {_um['position']} (trimmed {_new_pos})")
+
             chain_modifications.sort(key=lambda m: m['position'])
 
             # Enrich each modification with parent info (some sources omit it,

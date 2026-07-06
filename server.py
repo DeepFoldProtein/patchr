@@ -553,6 +553,7 @@ async def run_template_generation(
     custom_sequences: Optional[Dict[str, str]],
     cif_file_path: Optional[Path] = None,
     skip_terminal: bool = False,
+    modifications: Optional[List[str]] = None,
 ):
     """Background task to generate inpainting template."""
     try:
@@ -581,6 +582,10 @@ async def run_template_generation(
 
         if skip_terminal:
             cmd.append("--skip-terminal")
+
+        # Requested PTMs, forwarded as one --modification flag each.
+        for mod_spec in (modifications or []):
+            cmd.extend(["--modification", mod_spec])
 
         cmd.extend(["-o", str(output_dir)])
 
@@ -1107,6 +1112,7 @@ async def upload_structure(
     chain_ids: str = Form(..., description="Chain IDs (e.g., 'A' or 'A,B')"),
     custom_sequences: Optional[str] = Form(None, description="Custom sequences in format 'A:SEQ1,B:SEQ2'"),
     skip_terminal: bool = Form(False, description="Skip N/C-terminal missing residues (only inpaint internal gaps)"),
+    modifications: Optional[str] = Form(None, description="Requested PTMs in format 'A:87:SEP,A:90:TPO' (CHAIN:SEQID:CCD)"),
 ):
     """Upload a structure file (CIF or PDB) and generate inpainting template."""
     print(f"[API] POST /api/v1/template/upload filename={cif_file.filename} chain_ids={chain_ids}")
@@ -1153,6 +1159,10 @@ async def upload_structure(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid custom_sequences format: {str(e)}")
 
+    modification_specs: Optional[List[str]] = None
+    if modifications:
+        modification_specs = [s.strip() for s in modifications.split(",") if s.strip()]
+
     pdb_id = cif_path.stem.upper()
     job_record = {
         "job_id": job_id,
@@ -1174,6 +1184,7 @@ async def upload_structure(
         custom_sequences=custom_seq_dict,
         cif_file_path=cif_path,
         skip_terminal=skip_terminal,
+        modifications=modification_specs,
     )
 
     return JobStatusResponse(**job_record)

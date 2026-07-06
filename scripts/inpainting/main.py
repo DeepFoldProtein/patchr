@@ -91,6 +91,12 @@ click.rich_click.OPTION_GROUPS = {
     help='Custom sequence(s). Single: "ACDEFG". Multiple: "A:ACDEFG,B:MNOPQR".',
 )
 @click.option(
+    "--modification", "modification", type=str, multiple=True, metavar="CHAIN:SEQID:CCD",
+    help='Add a modified residue (PTM) at an entity sequence position, e.g. '
+         '"A:87:SEP" (phospho-Ser). Repeatable. CCD is a component id such as '
+         'SEP/TPO/PTR (phospho) or MLY/M3L (methyl-Lys).',
+)
+@click.option(
     "-o", "--output", "out_dir", type=click.Path(), default="examples/inpainting",
     help="Output directory.",
 )
@@ -136,6 +142,7 @@ def main(
     uniprot,
     interactive,
     sequence,
+    modification,
     out_dir,
     cache,
     include_solvent,
@@ -166,6 +173,32 @@ def main(
                     )
         else:
             custom_sequences['_default_'] = sequence.strip()
+
+    # Parse requested modifications (PTMs): "CHAIN:SEQID:CCD" (repeatable).
+    # SEQID is the entity sequence position (1-based, matches _entity_poly_seq.num
+    # / _pdbx_poly_seq_scheme.seq_id). Keyed by author chain id.
+    user_modifications: dict = {}
+    for spec in modification:
+        parts = spec.split(':')
+        if len(parts) != 3:
+            raise click.BadParameter(
+                f"Invalid modification: {spec}. Expected CHAIN:SEQID:CCD.",
+                param_hint="'--modification'",
+            )
+        chain, pos_str, ccd = parts[0].strip(), parts[1].strip(), parts[2].strip().upper()
+        try:
+            pos = int(pos_str)
+        except ValueError:
+            raise click.BadParameter(
+                f"Invalid position in modification: {spec}. SEQID must be an integer.",
+                param_hint="'--modification'",
+            )
+        if not chain or not ccd:
+            raise click.BadParameter(
+                f"Invalid modification: {spec}. Expected CHAIN:SEQID:CCD.",
+                param_hint="'--modification'",
+            )
+        user_modifications.setdefault(chain, []).append({'position': pos, 'ccd': ccd})
 
     # Resolve input source
     # Sentinel "none" means: do not select any biological assembly,
@@ -203,6 +236,7 @@ def main(
         cif_file_path=cif_file_path,
         interactive_sequence=interactive,
         custom_sequences=custom_sequences,
+        user_modifications=user_modifications,
         cache_dir=cache,
         include_solvent=include_solvent,
         include_ligands=not exclude_ligands,
