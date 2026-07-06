@@ -6,7 +6,7 @@ import {
   fastaInputAtom,
   enableSequenceMappingAtom,
   skipTerminalAtom,
-  pendingEraseAtom,
+  erasedRegionsAtom,
   pendingPtmAtom
 } from "../store/repair-atoms";
 import { eraseResiduesFromCif } from "../lib/cifErase";
@@ -1827,7 +1827,7 @@ function ContextInpaintSection({
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
   const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
-  const [pendingErase, setPendingErase] = useAtom(pendingEraseAtom);
+  const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
   const [pendingPtm, setPendingPtm] = useAtom(pendingPtmAtom);
   // When sequence mapping is on, the provided sequence drives terminal
   // handling, so the skip-terminal flag is meaningless and we lock it off.
@@ -1941,28 +1941,33 @@ function ContextInpaintSection({
         throw new Error("Failed to read structure file");
       }
 
-      // 2b. Apply a staged "erase & regenerate" edit from the Sequence editor:
-      // strip the selected residues so the backend re-detects them as missing.
+      // 2b. Apply erased regions marked in the Sequence editor: strip those
+      // residues so the backend re-detects them as missing and regenerates them.
       let cifContent = cifContentResult.content;
-      if (pendingErase && pendingErase.residues.length > 0) {
-        const erased = eraseResiduesFromCif(
-          cifContent,
-          pendingErase.chainId,
-          pendingErase.residues
-        );
-        if (erased.erasedAtoms === 0) {
-          throw new Error(
-            `Erase failed: no matching atoms found for chain ${pendingErase.chainId} ` +
-              `(${pendingErase.label}). The structure may not be mmCIF.`
+      if (erasedRegions.length > 0) {
+        let totalAtoms = 0;
+        let totalResidues = 0;
+        for (const region of erasedRegions) {
+          if (region.residues.length === 0) continue;
+          const erased = eraseResiduesFromCif(
+            cifContent,
+            region.chainId,
+            region.residues
           );
+          if (erased.erasedAtoms === 0) {
+            throw new Error(
+              `Erase failed: no matching atoms found for ${region.label}. ` +
+                `The structure may not be mmCIF.`
+            );
+          }
+          cifContent = erased.content;
+          totalAtoms += erased.erasedAtoms;
+          totalResidues += erased.erasedResidues;
         }
-        cifContent = erased.content;
         logger.log(
-          `[Erase] Removed ${erased.erasedResidues} residue(s) / ` +
-            `${erased.erasedAtoms} atom(s) from chain ${pendingErase.chainId} before upload`
+          `[Erase] Removed ${totalResidues} residue(s) / ${totalAtoms} atom(s) ` +
+            `across ${erasedRegions.length} region(s) before upload`
         );
-        // One-shot: clear so a normal re-run doesn't keep erasing.
-        setPendingErase(null);
       }
 
       // 2c. Apply a staged "add PTM" edit: forwarded to the backend as a
@@ -2015,6 +2020,10 @@ function ContextInpaintSection({
       const newJobId = uploadResult.data.job_id;
       setJobId(newJobId);
       setJobStatus("template_generating");
+
+      // The erased residues are now baked into the submitted job; clear the
+      // marks (and their 3D ghosting) so a later run starts clean.
+      if (erasedRegions.length > 0) setErasedRegions([]);
 
       // Store request info for error logging
       const requestInfo = {

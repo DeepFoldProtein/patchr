@@ -24,15 +24,32 @@ export const sequenceMappingsAtom = atom<SequenceMapping[]>([]);
 export const fastaInputAtom = atom<string>("");
 export const enableSequenceMappingAtom = atom<boolean>(false);
 
-// Staged "erase & regenerate" request from the Sequence editor. When set, the
-// next inpainting run strips these residues from the uploaded CIF so the
-// backend re-detects them as a missing region and regenerates them.
-export interface PendingErase {
-  chainId: string;
+// Residues marked for erasure in the Sequence editor. Each region is shown
+// semi-transparent in the 3D viewer and can be individually restored; the next
+// inpainting run strips all of them from the uploaded CIF so the backend
+// re-detects them as missing regions and regenerates them.
+export interface EraseRegion {
+  id: string; // stable id for restore
+  chainId: string; // author chain id
   residues: { authSeqId: number; insCode: string }[];
   label: string; // human-readable summary, e.g. "A 45–52 (8)"
 }
-export const pendingEraseAtom = atom<PendingErase | null>(null);
+export const erasedRegionsAtom = atom<EraseRegion[]>([]);
+
+// Flattened set of erased residue keys per chain, for the 3D transparency
+// overlay and quick membership checks. Derived from erasedRegionsAtom.
+export const erasedResidueKeysAtom = atom(get => {
+  const byChain = new Map<string, Set<string>>();
+  for (const region of get(erasedRegionsAtom)) {
+    let set = byChain.get(region.chainId);
+    if (!set) {
+      set = new Set();
+      byChain.set(region.chainId, set);
+    }
+    for (const r of region.residues) set.add(`${r.authSeqId}|${r.insCode}`);
+  }
+  return byChain;
+});
 
 // Staged "add PTM" request from the Sequence editor. The next inpainting run
 // forwards it to the backend as a `modifications` field so Boltz models the
@@ -69,6 +86,8 @@ export const resetRepairStateAtom = atom(null, (_get, set) => {
   set(skipTerminalAtom, false);
   set(repairContextsAtom, new Map());
   set(repairResultsAtom, []);
+  set(erasedRegionsAtom, []);
+  set(pendingPtmAtom, null);
   set(apiConnectionStatusAtom, "idle");
   logger.log("[Repair Atoms] Reset all repair state");
 });

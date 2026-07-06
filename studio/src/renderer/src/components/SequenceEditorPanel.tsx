@@ -7,12 +7,13 @@
 //   - PTM: add a modified residue (SEP/TPO/PTR/MLY/…) via the backend
 //     modifications field.
 import React, { useEffect, useMemo, useState } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
-import { RefreshCw, Eraser, FlaskConical, Atom } from "lucide-react";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { RefreshCw, Eraser, FlaskConical, Atom, Undo2 } from "lucide-react";
 import { pluginAtom } from "../store/mol-viewer-atoms";
 import {
   missingRegionsDetectedAtom,
-  pendingEraseAtom,
+  erasedRegionsAtom,
+  erasedResidueKeysAtom,
   pendingPtmAtom,
   fastaInputAtom,
   enableSequenceMappingAtom
@@ -71,7 +72,8 @@ export function SequenceEditorPanel(): React.ReactElement {
   const plugin = useAtomValue(pluginAtom);
   // Re-detection of missing regions is a reliable "structure is ready" signal.
   const missingRegions = useAtomValue(missingRegionsDetectedAtom);
-  const setPendingErase = useSetAtom(pendingEraseAtom);
+  const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
+  const erasedKeys = useAtomValue(erasedResidueKeysAtom);
   const setFastaInput = useSetAtom(fastaInputAtom);
   const setEnableSequenceMapping = useSetAtom(enableSequenceMappingAtom);
   const setPendingPtm = useSetAtom(pendingPtmAtom);
@@ -167,15 +169,28 @@ export function SequenceEditorPanel(): React.ReactElement {
     const first = selectedResidues[0];
     const last = selectedResidues[selectedResidues.length - 1];
     const label = `${activeChain.authChainId} ${first.authSeqId}${first.insCode}–${last.authSeqId}${last.insCode} (${selectedResidues.length})`;
-    setPendingErase({
-      chainId: activeChain.authChainId,
-      residues: selectedResidues.map(r => ({
-        authSeqId: r.authSeqId,
-        insCode: r.insCode
-      })),
-      label
-    });
-    setStaged(label);
+    setErasedRegions(prev => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        chainId: activeChain.authChainId,
+        residues: selectedResidues.map(r => ({
+          authSeqId: r.authSeqId,
+          insCode: r.insCode
+        })),
+        label
+      }
+    ]);
+    // Clear the working selection so the next region can be marked.
+    setSelection(null);
+  };
+
+  const handleRestore = (id: string): void => {
+    setErasedRegions(prev => prev.filter(r => r.id !== id));
+  };
+
+  const handleClearErased = (): void => {
+    setErasedRegions([]);
   };
 
   // Mutation is available when exactly one protein residue is selected and its
@@ -219,9 +234,6 @@ export function SequenceEditorPanel(): React.ReactElement {
     // and regenerates it as the target identity.
     setFastaInput(`>${activeChain.authChainId}\n${mutatedSeq}`);
     setEnableSequenceMapping(true);
-    // Mutation and erase are distinct staged actions — don't let a prior erase
-    // also fire on the next run.
-    setPendingErase(null);
     const label = `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`;
     setStaged(`Mutation ${label}`);
     setMutateOpen(false);
@@ -252,8 +264,7 @@ export function SequenceEditorPanel(): React.ReactElement {
       ccd,
       label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${ptmLabel}`
     });
-    // PTM is its own staged action — clear any prior erase / sequence edit.
-    setPendingErase(null);
+    // PTM is its own staged action — clear any prior sequence-mapping edit.
     setEnableSequenceMapping(false);
     setFastaInput("");
     setStaged(
@@ -318,18 +329,26 @@ export function SequenceEditorPanel(): React.ReactElement {
         <div className="select-none font-mono text-xs leading-6">
           {activeChain.residues.map((r, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
+            const isErased =
+              erasedKeys
+                .get(activeChain.authChainId)
+                ?.has(`${r.authSeqId}|${r.insCode}`) ?? false;
             const showNumber = r.authSeqId % 10 === 0 && r.insCode === "";
             return (
               <span
                 key={`${r.authSeqId}|${r.insCode}`}
                 onMouseDown={e => handleResidueMouseDown(i, e)}
                 onMouseEnter={() => handleResidueMouseEnter(i)}
-                title={`${r.resName} ${r.authSeqId}${r.insCode}`}
+                title={`${r.resName} ${r.authSeqId}${r.insCode}${
+                  isErased ? " (erased)" : ""
+                }`}
                 className={cn(
                   "relative inline-block w-[0.85rem] cursor-pointer text-center",
                   inRange
                     ? "rounded-sm bg-blue-500 text-white"
-                    : "hover:bg-accent"
+                    : isErased
+                      ? "text-red-400/60 line-through"
+                      : "hover:bg-accent"
                 )}
               >
                 {r.code}
@@ -368,11 +387,11 @@ export function SequenceEditorPanel(): React.ReactElement {
           <button
             onClick={handleErase}
             disabled={selectedResidues.length === 0}
-            title="Strip the selected residues and regenerate them via inpainting"
+            title="Mark the selected residues for erasure (shown ghosted; restore anytime)"
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
             <Eraser className="h-3 w-3" />
-            Erase &amp; Regenerate
+            Erase
           </button>
           <button
             onClick={() => setMutateOpen(o => !o)}
@@ -469,6 +488,48 @@ export function SequenceEditorPanel(): React.ReactElement {
           </div>
         )}
       </div>
+
+      {/* Erased regions — ghosted in 3D, restorable, regenerated on run */}
+      {erasedRegions.length > 0 && (
+        <div className="rounded-md border border-red-400/30 bg-red-500/5 p-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-semibold text-red-500 dark:text-red-400">
+              Erased ({erasedRegions.length})
+            </span>
+            <button
+              onClick={handleClearErased}
+              title="Restore all erased residues"
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear all
+            </button>
+          </div>
+          <ul className="space-y-1">
+            {erasedRegions.map(region => (
+              <li
+                key={region.id}
+                className="flex items-center justify-between gap-2 text-xs"
+              >
+                <span className="truncate font-mono text-muted-foreground line-through">
+                  {region.label}
+                </span>
+                <button
+                  onClick={() => handleRestore(region.id)}
+                  title="Restore this region"
+                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+            Erased residues are regenerated when you press{" "}
+            <span className="font-semibold">Start Inference</span>.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

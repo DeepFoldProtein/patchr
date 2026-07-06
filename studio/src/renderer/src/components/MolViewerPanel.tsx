@@ -11,6 +11,7 @@ import { useAutoYAMLGeneration } from "./mol-viewer/useAutoYAMLGeneration";
 import { useCanonicalMapping } from "./mol-viewer/useCanonicalMapping";
 import { useSuperpose } from "./mol-viewer/useSuperpose";
 import { useChainColors } from "./mol-viewer/useChainColors";
+import { useEraseVisuals } from "./mol-viewer/useEraseVisuals";
 import { AlertTriangle } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -57,6 +58,9 @@ function MolViewerPanelInner({
 
   // Apply chain colors (contrasting with inpainting colors)
   useChainColors(plugin, !loading && !!structureData);
+
+  // Ghost residues marked for erasure in the Sequence editor
+  useEraseVisuals(plugin);
 
   // Auto-generate YAML after missing region detection
   useAutoYAMLGeneration(!!currentProject);

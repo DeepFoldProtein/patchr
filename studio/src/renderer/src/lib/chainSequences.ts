@@ -6,6 +6,7 @@
 
 import type { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import {
+  Structure,
   StructureElement,
   StructureProperties,
   Unit
@@ -163,6 +164,44 @@ export function getChainSequences(
 
   result.sort((a, b) => a.authChainId.localeCompare(b.authChainId));
   return result;
+}
+
+/**
+ * Build a StructureElement.Loci for a set of author residues spanning one or
+ * more chains, given `keysByChain` (authChainId -> set of "authSeqId|insCode").
+ * Used by the erase transparency overlay. Returns an empty loci when nothing
+ * matches (so Mol*'s transparency helper skips it cleanly).
+ */
+export function buildResidueLociByKeys(
+  structure: Structure,
+  keysByChain: Map<string, Set<string>>
+): StructureElement.Loci {
+  if (keysByChain.size === 0) return StructureElement.Loci(structure, []);
+
+  const elements: StructureElement.Loci["elements"][number][] = [];
+  for (const unit of structure.units) {
+    if (!Unit.isAtomic(unit)) continue;
+    const loc = StructureElement.Location.create(structure, unit);
+    const indices: StructureElement.UnitIndex[] = [];
+
+    for (let i = 0; i < unit.elements.length; i++) {
+      loc.element = unit.elements[i];
+      const chainId = StructureProperties.chain.auth_asym_id(loc);
+      const set = keysByChain.get(chainId);
+      if (!set) continue;
+      const authSeqId = StructureProperties.residue.auth_seq_id(loc);
+      const insCode = StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
+      if (set.has(`${authSeqId}|${insCode}`)) {
+        indices.push(i as StructureElement.UnitIndex);
+      }
+    }
+
+    if (indices.length > 0) {
+      elements.push({ unit, indices: OrderedSet.ofSortedArray(indices) });
+    }
+  }
+
+  return StructureElement.Loci(structure, elements);
 }
 
 /**
