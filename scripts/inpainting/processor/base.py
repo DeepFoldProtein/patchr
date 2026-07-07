@@ -1,5 +1,6 @@
 """StructureProcessor: main class that composes all Mixin capabilities."""
 import os
+import re
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -45,7 +46,7 @@ class StructureProcessor(
 ):
     """Orchestrates PDB structure processing for inpainting template generation."""
 
-    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml', use_absolute_path: bool = True):
+    def __init__(self, pdb_id: str, chain_ids: List[str], uniprot_mode: bool = False, cif_file_path: Optional[str] = None, interactive_sequence: bool = False, custom_sequences: Optional[Dict[str, str]] = None, cache_dir: Optional[Path] = None, include_solvent: bool = False, include_ligands: bool = True, assembly_id: Optional[Union[int, str]] = None, list_assemblies: bool = False, skip_terminal: bool = False, verbose: bool = False, output_format: str = 'yaml', use_absolute_path: bool = True, modifications: Optional[Dict[str, List[Dict]]] = None):
         # Check if pdb_id is a file path
         self.is_local_file = False
         self.cif_file_path = cif_file_path
@@ -53,6 +54,10 @@ class StructureProcessor(
         self.include_solvent = include_solvent
         self.include_ligands = include_ligands
         self.skip_terminal = skip_terminal
+        # User-requested PTMs: {chain: [{'resid': <AUTHOR resid int>, 'ccd': CCD}, ...]}.
+        # RESID is the author residue number (what the GUI/structure shows); it is
+        # mapped to the trimmed sequence position at apply time.
+        self.user_modifications: Dict[str, List[Dict]] = modifications or {}
         
         if cif_file_path:
             # Explicit file path provided
@@ -704,6 +709,36 @@ class StructureProcessor(
                     if comp_id not in STANDARD_AA_THREE_LETTER and comp_id not in STANDARD_NUCLEOTIDE_CODES and pos not in positions_added:
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)
+            # User-requested PTMs (--modification CHAIN:RESID:CCD). RESID is the
+            # AUTHOR residue number; map it to the trimmed sequence position via the
+            # renumbered atoms (label_seq_id = trimmed canonical position). A user PTM
+            # overrides any existing modification at that position (e.g. SER -> SEP).
+            _umods = (self.user_modifications.get(author_chain_id)
+                      or self.user_modifications.get(chain_id)
+                      or self.user_modifications.get(self._base_chain_id(chain_id)) or [])
+            if _umods and entity_type != 'protein':
+                fatal(f"--modification: chain {author_chain_id} is {str(entity_type).upper()}, "
+                      f"not protein. PTMs are only supported on protein chains.")
+            if _umods:
+                _auth2canon: Dict[int, int] = {}
+                for _a in renumbered_atoms:
+                    _lp = _a.get('label_seq_id')
+                    _am = re.match(r'^(-?\d+)', str(_a.get('auth_seq_id', '')).strip())
+                    if _am and str(_lp).isdigit():
+                        _auth2canon.setdefault(int(_am.group(1)), int(_lp))
+                for _um in _umods:
+                    _pos = _auth2canon.get(int(_um['resid']))
+                    if _pos is None or not (1 <= _pos <= seq_len_trimmed):
+                        warning(f"--modification: chain {author_chain_id} residue {_um['resid']} "
+                                f"not present in the modelled sequence — skipped")
+                        continue
+                    chain_modifications = [m for m in chain_modifications if m['position'] != _pos]
+                    chain_modifications.append({'position': _pos, 'ccd': str(_um['ccd']).upper(),
+                                                'parent': None, 'parent_one': None})
+                    info(f"--modification: chain {author_chain_id} residue {_um['resid']} "
+                         f"-> sequence position {_pos} -> {str(_um['ccd']).upper()}")
+                positions_added = {m['position'] for m in chain_modifications}
+
             chain_modifications.sort(key=lambda m: m['position'])
 
             # Enrich each modification with parent info (some sources omit it,

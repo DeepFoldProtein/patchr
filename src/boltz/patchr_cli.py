@@ -803,6 +803,13 @@ def _predict_protenix(
 @click.option("--interactive", is_flag=True, help="Prompt for sequence input.")
 @click.option("--format", "output_format", type=click.Choice(["yaml", "protenix-json"]), default="yaml", help="Output format.")
 @click.option("--relative-paths", is_flag=True, help="Write CIF/metadata paths relative to output dir (default: absolute).")
+@click.option(
+    "-m", "--modification", "modification", multiple=True,
+    help="Add a PTM/modification: CHAIN:RESID:CCD where RESID is the AUTHOR "
+         "residue number and CCD is the modified-residue code (e.g. -m A:12:SEP "
+         "for phospho-Ser at author residue 12 of chain A). Protein chains only. "
+         "Repeatable.",
+)
 def template(
     pdb_id: Optional[str],
     chain_ids: Optional[str],
@@ -819,6 +826,7 @@ def template(
     interactive: bool,
     output_format: str,
     relative_paths: bool,
+    modification: tuple,
 ) -> None:
     """Generate inpainting template from a PDB structure.
 
@@ -851,6 +859,29 @@ def template(
                     custom_sequences[chain] = seq.strip()
         else:
             custom_sequences["_default_"] = sequence.strip()
+
+    # Parse PTM/modifications:  CHAIN:RESID:CCD  (RESID = author residue number).
+    # Protein chains only; StructureProcessor rejects non-protein targets.
+    modifications = {}
+    for spec in modification:
+        parts = [p.strip() for p in spec.split(":")]
+        if len(parts) != 3 or not all(parts):
+            click.echo(
+                f"Error: invalid --modification '{spec}'. Expected CHAIN:RESID:CCD (e.g. A:12:SEP).",
+                err=True,
+            )
+            sys.exit(1)
+        ch, rid, ccd = parts
+        ch = re.sub(r"\s*\[(?:DNA|RNA|PROTEIN)\]\s*", "", ch.upper()).strip()
+        try:
+            rid = int(rid)
+        except ValueError:
+            click.echo(
+                f"Error: --modification RESID must be an integer (author residue number): '{spec}'.",
+                err=True,
+            )
+            sys.exit(1)
+        modifications.setdefault(ch, []).append({"resid": rid, "ccd": ccd.upper()})
 
     # Resolve input source
     assembly_id = assembly
@@ -896,6 +927,7 @@ def template(
         verbose=verbose,
         output_format=output_format,
         use_absolute_path=not relative_paths,
+        modifications=modifications,
     )
     processor.process(Path(out_dir))
 

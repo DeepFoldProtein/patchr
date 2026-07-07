@@ -129,6 +129,13 @@ click.rich_click.OPTION_GROUPS = {
     default="yaml",
     help="Output format.",
 )
+@click.option(
+    "-m", "--modification", "modification",
+    multiple=True,
+    help="Add a PTM/modification: CHAIN:RESID:CCD where RESID is the AUTHOR "
+         "residue number and CCD is the modified-residue code (e.g. -m A:12:SEP "
+         "for phospho-Ser at author residue 12 of chain A). Repeatable.",
+)
 def main(
     pdb_id,
     chain_ids,
@@ -145,6 +152,7 @@ def main(
     skip_terminal,
     verbose,
     output_format,
+    modification,
 ) -> None:
     """Generate YAML and template CIF files for inpainting."""
 
@@ -166,6 +174,26 @@ def main(
                     )
         else:
             custom_sequences['_default_'] = sequence.strip()
+
+    # Parse PTM/modifications:  CHAIN:RESID:CCD  (RESID = author residue number)
+    modifications = {}
+    for spec in modification:
+        parts = [p.strip() for p in spec.split(':')]
+        if len(parts) != 3 or not all(parts):
+            raise click.BadParameter(
+                f"Invalid format: {spec}. Expected CHAIN:RESID:CCD (e.g. A:12:SEP).",
+                param_hint="'--modification'",
+            )
+        ch, rid, ccd = parts
+        ch = re.sub(r'\s*\[(?:DNA|RNA|PROTEIN)\]\s*', '', ch.upper()).strip()
+        try:
+            rid = int(rid)
+        except ValueError:
+            raise click.BadParameter(
+                f"RESID must be an integer (author residue number): {spec}.",
+                param_hint="'--modification'",
+            )
+        modifications.setdefault(ch, []).append({'resid': rid, 'ccd': ccd.upper()})
 
     # Resolve input source
     # Sentinel "none" means: do not select any biological assembly,
@@ -211,6 +239,7 @@ def main(
         skip_terminal=skip_terminal,
         verbose=verbose,
         output_format=output_format,
+        modifications=modifications,
     )
     processor.process(Path(out_dir))
 
