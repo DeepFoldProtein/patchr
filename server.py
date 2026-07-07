@@ -160,8 +160,10 @@ class TemplateGenerateRequest(BaseModel):
     )
     modifications: Optional[List[str]] = Field(
         None,
-        description="PTM/modifications as 'CHAIN:RESID:CCD' where RESID is the AUTHOR "
-                    "residue number and CCD is the modified-residue code (e.g. 'A:12:SEP'). "
+        description="PTM/modifications as 'CHAIN:SEQID:CCD' where CHAIN is the author "
+                    "chain id, SEQID is the 1-based ENTITY (canonical) sequence "
+                    "position (the seq_id a structure viewer shows, same numbering "
+                    "boltz uses), and CCD is the modified-residue code (e.g. 'A:12:SEP'). "
                     "Protein chains only.",
     )
 
@@ -717,9 +719,10 @@ async def run_template_generation(
         if skip_terminal:
             cmd.append("--skip-terminal")
 
-        # PTM/modifications: each entry is "CHAIN:RESID:CCD" where RESID is the
-        # AUTHOR residue number (what the studio/PDB viewer shows). Protein chains
-        # only — the template script exits non-zero if a target chain isn't protein.
+        # PTM/modifications: each entry is "CHAIN:SEQID:CCD" — CHAIN is the author
+        # chain id, SEQID the 1-based entity/canonical sequence position (what the
+        # studio sends, same numbering boltz uses). Protein chains only — the
+        # template script exits non-zero if a target chain isn't protein.
         if modifications:
             for spec in modifications:
                 spec = str(spec).strip()
@@ -1253,7 +1256,7 @@ async def upload_structure(
     chain_ids: str = Form(..., description="Chain IDs (e.g., 'A' or 'A,B')"),
     custom_sequences: Optional[str] = Form(None, description="Custom sequences in format 'A:SEQ1,B:SEQ2'"),
     skip_terminal: bool = Form(False, description="Skip N/C-terminal missing residues (only inpaint internal gaps)"),
-    modifications: Optional[List[str]] = Form(None, description="PTM/modifications as 'CHAIN:RESID:CCD' (RESID = AUTHOR residue number, e.g. 'A:12:SEP'). Protein chains only. Repeatable, or comma-separated."),
+    modifications: Optional[List[str]] = Form(None, description="PTM/modifications as 'CHAIN:SEQID:CCD' (CHAIN = author chain id, SEQID = 1-based entity/canonical sequence position, e.g. 'A:12:SEP'). Protein chains only. Repeatable, or comma-separated."),
 ):
     """Upload a structure file (CIF or PDB) and generate inpainting template."""
     print(f"[API] POST /api/v1/template/upload filename={cif_file.filename} chain_ids={chain_ids}")
@@ -1419,10 +1422,11 @@ async def stream_job_progress(job_id: str):
     """Stream real-time progress updates for a job using Server-Sent Events (SSE)."""
     import json as _json
 
-    if job_id not in jobs_db:
+    if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     async def event_generator():
+        _refresh_job(job_id)
         if jobs_db[job_id]["status"] not in [JobStatus.RUNNING_PREDICTION, JobStatus.GENERATING_TEMPLATE]:
             status_data = {
                 "status": jobs_db[job_id]["status"],
@@ -1448,7 +1452,7 @@ async def stream_job_progress(job_id: str):
         except asyncio.CancelledError:
             pass
         finally:
-            if job_id in jobs_db:
+            if _refresh_job(job_id):
                 final_status = {
                     "status": jobs_db[job_id]["status"],
                     "progress": jobs_db[job_id].get("progress", ""),
@@ -1493,7 +1497,10 @@ async def download_file(job_id: str, file_type: str):
 
     file_type: 'cif', 'yaml', or 'prediction' (zip archive).
     """
-    if job_id not in jobs_db:
+    # _refresh_job (not a bare jobs_db check): on a multi-replica deployment the
+    # replica serving this request may not own the job, so pull the on-disk record
+    # written by the owning replica — otherwise a completed job 404s here.
+    if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     job = jobs_db[job_id]
@@ -1589,7 +1596,7 @@ async def download_file(job_id: str, file_type: str):
 @app.delete("/api/v1/jobs/{job_id}")
 async def delete_job(job_id: str):
     """Delete a job and all associated files."""
-    if job_id not in jobs_db:
+    if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     job_dir = WORK_DIR / job_id
@@ -1643,7 +1650,7 @@ def _resolve_cif_from_request(
 
     # Option 3: Job ID from a completed prediction
     if job_id:
-        if job_id not in jobs_db:
+        if not _refresh_job(job_id):
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         job = jobs_db[job_id]
         if job.get("status") != JobStatus.COMPLETED:
@@ -1738,7 +1745,7 @@ async def sim_ready_endpoint(
 @app.get("/api/v1/jobs/{job_id}/sim-result")
 async def get_sim_result(job_id: str):
     """Get simulation preparation result details."""
-    if job_id not in jobs_db:
+    if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     job = jobs_db[job_id]
