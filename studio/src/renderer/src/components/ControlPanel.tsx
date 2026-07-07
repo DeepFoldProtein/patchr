@@ -12,12 +12,17 @@ import {
   uniprotReferenceAtom
 } from "../store/repair-atoms";
 import { eraseResiduesFromCif } from "../lib/cifErase";
+import { countStructureTokens } from "../lib/tokenCount";
 import {
   apiUrlAtom,
   apiConnectionStatusAtom,
-  panelModeAtom
+  panelModeAtom,
+  DEFAULT_API_URL,
+  DEFAULT_SERVER_TOKEN_LIMIT
 } from "../store/api-atoms";
 import type { PanelMode } from "../store/api-atoms";
+import { missingRegionsDetectedAtom } from "../store/repair-atoms";
+import { pluginAtom } from "../store/mol-viewer-atoms";
 import { useCurrentProject } from "../store/project-store";
 import { bus } from "../lib/event-bus";
 import { logger } from "../lib/logger";
@@ -1389,6 +1394,20 @@ function ContextInpaintSection({
 
   const apiUrl = useAtomValue(apiUrlAtom);
   const connectionStatus = useAtomValue(apiConnectionStatusAtom);
+  const plugin = useAtomValue(pluginAtom);
+  const missingRegions = useAtomValue(missingRegionsDetectedAtom);
+
+  // Estimated model tokens for the loaded structure (protein = per-residue,
+  // nucleic/ligand = per-atom). Recompute when a structure loads.
+  const tokenCount = React.useMemo(
+    () => countStructureTokens(plugin),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plugin, missingRegions]
+  );
+  const usingDefaultServer = apiUrl === DEFAULT_API_URL;
+  const overTokenLimit =
+    tokenCount.total > DEFAULT_SERVER_TOKEN_LIMIT && usingDefaultServer;
+
   const [jobId, setJobId] = React.useState<string | null>(null);
   const [jobStatus, setJobStatus] = React.useState<string>("idle");
   const [progress, setProgress] = React.useState(0);
@@ -1449,6 +1468,18 @@ function ContextInpaintSection({
     // Check if connection is tested and connected
     if (connectionStatus !== "connected") {
       setError("Please test connection first before starting inpainting.");
+      return;
+    }
+
+    // The hosted default server (a 3090) tops out around DEFAULT_SERVER_TOKEN_LIMIT
+    // tokens. Block bigger structures and tell the user to run their own server.
+    if (overTokenLimit) {
+      setError(
+        `This structure is ~${tokenCount.total} tokens, above the default ` +
+          `server's ~${DEFAULT_SERVER_TOKEN_LIMIT}-token limit (protein counts ` +
+          `per residue; DNA/RNA/ligands per atom). Start your own inference ` +
+          `server and set its URL in the Project tab, then try again.`
+      );
       return;
     }
 
@@ -1877,12 +1908,45 @@ function ContextInpaintSection({
         </Alert>
       )}
 
+      {/* Token estimate + over-limit warning */}
+      {tokenCount.total > 0 && (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-xs",
+            overTokenLimit
+              ? "border-red-400/40 bg-red-500/5 text-red-600 dark:text-red-400"
+              : "border-border bg-muted/20 text-muted-foreground"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span>
+              Estimated tokens:{" "}
+              <span className="font-mono font-semibold">
+                {tokenCount.total}
+              </span>
+              {usingDefaultServer && ` / ${DEFAULT_SERVER_TOKEN_LIMIT}`}
+            </span>
+            <span className="opacity-70">
+              {tokenCount.proteinResidues} res + {tokenCount.atomTokens} atoms
+            </span>
+          </div>
+          {overTokenLimit && (
+            <p className="mt-1">
+              Above the default server's ~{DEFAULT_SERVER_TOKEN_LIMIT}-token
+              limit (3090). Start your own inference server and set its URL in
+              the Project tab.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="space-y-2">
         <button
           onClick={handleStartInpainting}
           disabled={
             connectionStatus !== "connected" ||
+            overTokenLimit ||
             (jobStatus !== "idle" &&
               jobStatus !== "failed" &&
               jobStatus !== "completed") ||
