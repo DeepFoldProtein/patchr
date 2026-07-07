@@ -34,6 +34,7 @@ import {
   type ResidueCell
 } from "../lib/chainSequences";
 import { parsePolySeqScheme } from "../lib/polySeq";
+import { parseStructureHeader } from "../lib/structureHeader";
 import { cn } from "../lib/utils";
 import { logger } from "../lib/logger";
 
@@ -94,6 +95,11 @@ export function SequenceEditorPanel(): React.ReactElement {
     () => parsePolySeqScheme(structureContent),
     [structureContent]
   );
+  // PDB id parsed from the loaded structure, used to prefill the UniProt search.
+  const detectedPdbId = useMemo(
+    () => parseStructureHeader(structureContent)?.pdbId ?? "",
+    [structureContent]
+  );
 
   const [chains, setChains] = useState<ChainSequence[]>([]);
   const [activeChainId, setActiveChainId] = useState<string | null>(null);
@@ -122,6 +128,15 @@ export function SequenceEditorPanel(): React.ReactElement {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin, missingRegions]);
+
+  // Prefill the UniProt search with the loaded structure's PDB id (updates when
+  // a different structure loads; user edits in between are preserved).
+  useEffect(() => {
+    if (detectedPdbId) {
+      setPdbId(detectedPdbId);
+      setUniprotStatus("idle");
+    }
+  }, [detectedPdbId]);
 
   const activeChain = useMemo(
     () => chains.find(c => c.authChainId === activeChainId) ?? null,
