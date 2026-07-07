@@ -53,6 +53,25 @@ interface DisplayCell {
   residue: ResidueCell | null;
   authLabel?: number; // author number for the tick marks
   mark?: "mutated" | "ptm"; // staged edit on this residue
+  terminal?: boolean; // to-inpaint cell at an N/C terminus (vs internal gap)
+}
+
+// Flag to-inpaint cells that sit before the first / after the last resolved
+// residue as terminal (internal gaps are always inpainted).
+function markTerminals(cells: DisplayCell[]): DisplayCell[] {
+  let first = -1;
+  let last = -1;
+  cells.forEach((c, i) => {
+    if (c.residue) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  });
+  return cells.map((c, i) =>
+    !c.residue && (first < 0 || i < first || i > last)
+      ? { ...c, terminal: true }
+      : c
+  );
 }
 
 // Parse a multi-chain FASTA (">Chain A\nSEQ" or ">A\nSEQ") into chain -> seq.
@@ -120,9 +139,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [stagedPtms, setStagedPtms] = useAtom(stagedPtmsAtom);
   const [uniprotReference, setUniprotReference] = useAtom(uniprotReferenceAtom);
   const setFastaInput = useSetAtom(fastaInputAtom);
-  const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
-    enableSequenceMappingAtom
-  );
+  const setEnableSequenceMapping = useSetAtom(enableSequenceMappingAtom);
   const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
   const structureContent = useStructureContent();
   const polySeq = useMemo(
@@ -300,7 +317,7 @@ export function SequenceEditorPanel(): React.ReactElement {
           mark: markOf(authNum)
         });
       }
-      return cells;
+      return markTerminals(cells);
     }
 
     // Default: resolved residues, with ghosted terminal-missing cells at ends.
@@ -333,7 +350,7 @@ export function SequenceEditorPanel(): React.ReactElement {
     termCode(cterm).forEach((code, i) =>
       cells.push({ key: `ct${i}`, code, residue: null })
     );
-    return cells;
+    return markTerminals(cells);
   }, [
     activeChain,
     effectiveTargets,
@@ -362,15 +379,6 @@ export function SequenceEditorPanel(): React.ReactElement {
     }
     return out;
   }, [range, displayCells]);
-
-  // N/C-terminal missing regions for the active chain (shown ghosted).
-  const chainMissing = useMemo(
-    () =>
-      activeChain
-        ? missingRegions.filter(r => r.chainId === activeChain.authChainId)
-        : [],
-    [missingRegions, activeChain]
-  );
 
   // Mirror the sequence selection into the 3D viewer (highlight + zoom).
   // Skip while dragging so a fast range-drag doesn't re-scan atoms on every
@@ -585,12 +593,9 @@ export function SequenceEditorPanel(): React.ReactElement {
     }
   };
 
-  const hasTerminals = chainMissing.some(
-    r => r.terminalType === "nterm" || r.terminalType === "cterm"
-  );
-  // Terminals are inpainted when the user opts in, or when a full sequence is
-  // provided (UniProt/mutation), since terminals then come from that sequence.
-  const terminalsIncluded = enableSequenceMapping || !skipTerminal;
+  // N/C-terminal missing residues are inpainted only when the user opts in
+  // (independent of whether a reference sequence is loaded).
+  const terminalsIncluded = !skipTerminal;
   // Whether the grid is showing a loaded UniProt reference (full) sequence.
   const showingReference = referenceByChain.has(activeChain?.authChainId ?? "");
 
@@ -652,6 +657,19 @@ export function SequenceEditorPanel(): React.ReactElement {
         )}
       </div>
 
+      {/* N/C-terminal inpainting toggle — applies to all chains */}
+      <label
+        className="flex items-center gap-2 text-xs"
+        title="When on, N/C-terminal missing residues are regenerated too (green); when off they stay ghosted and are skipped."
+      >
+        <input
+          type="checkbox"
+          checked={terminalsIncluded}
+          onChange={e => setSkipTerminal(!e.target.checked)}
+        />
+        Include N/C-terminal residues in inpainting
+      </label>
+
       {/* Chain selector */}
       <div className="flex flex-wrap gap-1">
         {chains.map(c => (
@@ -696,12 +714,14 @@ export function SequenceEditorPanel(): React.ReactElement {
                 : cell.mark === "ptm"
                   ? " (PTM)"
                   : "";
+            // Internal gaps are always inpainted; terminals only when opted in.
+            const willInpaint = !cell.terminal || terminalsIncluded;
             const title =
               res != null
                 ? `${res.resName} ${res.authSeqId}${res.insCode}${isErased ? " (erased)" : markSuffix}`
-                : terminalsIncluded
-                  ? "Missing — will be inpainted"
-                  : "Missing — skipped";
+                : `${cell.terminal ? "Terminal" : "Missing"} — ${
+                    willInpaint ? "will be inpainted" : "skipped"
+                  }`;
             return (
               <span
                 key={cell.key}
@@ -724,7 +744,7 @@ export function SequenceEditorPanel(): React.ReactElement {
                           : cell.mark === "mutated"
                             ? "cursor-pointer rounded-sm bg-amber-500/25 text-amber-700 dark:text-amber-300"
                             : "cursor-pointer hover:bg-accent"
-                    : terminalsIncluded
+                    : willInpaint
                       ? "text-green-500/70"
                       : "text-muted-foreground/30"
                 )}
@@ -745,29 +765,6 @@ export function SequenceEditorPanel(): React.ReactElement {
           Showing the loaded reference sequence — green residues are missing
           from the structure and will be inpainted.
         </p>
-      )}
-
-      {/* N/C-terminal inpainting toggle */}
-      {hasTerminals && (
-        <label
-          className={cn(
-            "flex items-center gap-2 text-xs",
-            enableSequenceMapping && "opacity-50"
-          )}
-          title={
-            enableSequenceMapping
-              ? "Terminals come from the loaded reference sequence"
-              : "Ghosted terminal residues are only regenerated when this is on"
-          }
-        >
-          <input
-            type="checkbox"
-            checked={terminalsIncluded}
-            disabled={enableSequenceMapping}
-            onChange={e => setSkipTerminal(!e.target.checked)}
-          />
-          Include N/C-terminal residues in inpainting
-        </label>
       )}
 
       {/* Selection summary + actions */}

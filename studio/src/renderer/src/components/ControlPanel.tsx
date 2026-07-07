@@ -1386,9 +1386,9 @@ function ContextInpaintSection({
   const [stagedPtms, setStagedPtms] = useAtom(stagedPtmsAtom);
   const setStagedMutations = useSetAtom(stagedMutationsAtom);
   const setUniprotReference = useSetAtom(uniprotReferenceAtom);
-  // When sequence mapping is on, the provided sequence drives terminal
-  // handling, so the skip-terminal flag is meaningless and we lock it off.
-  const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
+  // Skip-terminal is an independent choice (the Sequence editor's toggle), even
+  // when a reference sequence is provided.
+  const skipTerminalEffective = skipTerminal;
 
   const apiUrl = useAtomValue(apiUrlAtom);
   const connectionStatus = useAtomValue(apiConnectionStatusAtom);
