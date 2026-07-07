@@ -956,7 +956,7 @@ export function registerProjectIPC(): void {
 
           try {
             // Fetch FASTA from UniProt
-            const uniprotFastaUrl = `https://www.uniprot.org/uniprot/${uniprotId}.fasta`;
+            const uniprotFastaUrl = `https://rest.uniprot.org/uniprotkb/${uniprotId}.fasta`;
             const fastaResponse = await net.fetch(uniprotFastaUrl);
 
             if (!fastaResponse.ok) {
@@ -1021,7 +1021,7 @@ export function registerProjectIPC(): void {
         throw new Error(`Invalid UniProt accession: ${uniprotId}`);
       }
       const response = await net.fetch(
-        `https://www.uniprot.org/uniprot/${acc}.fasta`
+        `https://rest.uniprot.org/uniprotkb/${acc}.fasta`
       );
       if (!response.ok) {
         throw new Error(`UniProt fetch failed: ${response.statusText}`);
