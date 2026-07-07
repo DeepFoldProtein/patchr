@@ -39,6 +39,7 @@ import { parsePolySeqScheme } from "../lib/polySeq";
 import { parseUniProtRefs } from "../lib/structRef";
 import { cn } from "../lib/utils";
 import { logger } from "../lib/logger";
+import { Switch } from "./ui/switch";
 
 interface Selection {
   anchor: number;
@@ -658,17 +659,22 @@ export function SequenceEditorPanel(): React.ReactElement {
       </div>
 
       {/* N/C-terminal inpainting toggle — applies to all chains */}
-      <label
-        className="flex items-center gap-2 text-xs"
+      <div
+        className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-2.5 py-1.5"
         title="When on, N/C-terminal missing residues are regenerated too (green); when off they stay ghosted and are skipped."
       >
-        <input
-          type="checkbox"
+        <label
+          htmlFor="include-terminals"
+          className="cursor-pointer text-xs font-medium"
+        >
+          Include N/C-terminal residues
+        </label>
+        <Switch
+          id="include-terminals"
           checked={terminalsIncluded}
-          onChange={e => setSkipTerminal(!e.target.checked)}
+          onCheckedChange={checked => setSkipTerminal(!checked)}
         />
-        Include N/C-terminal residues in inpainting
-      </label>
+      </div>
 
       {/* Chain selector */}
       <div className="flex flex-wrap gap-1">
