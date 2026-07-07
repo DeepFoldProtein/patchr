@@ -224,3 +224,20 @@ docs/RELEASE_INFO.md
 inputs/
 outputs/
 slurm-*
+
+bulk_run/
+chunk_runs/
+
+# patchr deploy — secrets, model cache, runtime logs/state (never commit)
+deploy/.env
+deploy/CREDENTIALS.txt
+deploy/boltz_cache/
+deploy/*.log
+deploy/logs/
+deploy/state.env
+deploy/requirements.lock.bak
+deploy/.beszel.env
+deploy/coolify/.env
+deploy/coolify/.env.production
+deploy/coolify/installation-*.log
+deploy/results/
