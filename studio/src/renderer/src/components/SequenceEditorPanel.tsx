@@ -516,13 +516,27 @@ export function SequenceEditorPanel(): React.ReactElement {
     setStagedPtms(prev => prev.filter(p => p.id !== id));
   };
 
+  // Is a resolved cell currently marked erased? (Erased residues are locked
+  // until restored: no erase / mutate / PTM on them.)
+  const isErasedCell = (c: DisplayCell): boolean =>
+    c.resolved &&
+    (erasedKeys
+      .get(activeChain?.authChainId ?? "")
+      ?.has(`${c.authSeqId}|${c.insCode}`) ??
+      false);
+  const selectionHasErased = selectedCells.some(isErasedCell);
+
   // Mutation / PTM act on a single selected residue that has an author number —
   // resolved OR to-inpaint (they carry ids from poly_seq_scheme). Erase is
   // limited to resolved residues elsewhere.
   const mutableCell =
     singleCell && singleCell.authSeqId !== undefined ? singleCell : null;
 
-  const canMutate = !!activeChain && !activeChain.isNucleic && !!mutableCell;
+  const canMutate =
+    !!activeChain &&
+    !activeChain.isNucleic &&
+    !!mutableCell &&
+    !isErasedCell(mutableCell);
 
   const handleMutate = (target: string): void => {
     if (!activeChain || !mutableCell || mutableCell.authSeqId === undefined) {
@@ -568,7 +582,9 @@ export function SequenceEditorPanel(): React.ReactElement {
     !!activeChain &&
     !activeChain.isNucleic &&
     !!ptmChoices &&
-    ptmSeqId !== undefined;
+    ptmSeqId !== undefined &&
+    !!mutableCell &&
+    !isErasedCell(mutableCell);
 
   const handlePtm = (ccd: string): void => {
     if (
@@ -864,8 +880,12 @@ export function SequenceEditorPanel(): React.ReactElement {
         <div className="flex gap-2">
           <button
             onClick={handleErase}
-            disabled={selectedResidues.length === 0}
-            title="Erase resolved residues in the selection (missing residues can't be erased)"
+            disabled={selectedResidues.length === 0 || selectionHasErased}
+            title={
+              selectionHasErased
+                ? "Already erased — restore it first"
+                : "Erase resolved residues in the selection (missing residues can't be erased)"
+            }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
             <Eraser className="h-3 w-3" />
@@ -877,7 +897,9 @@ export function SequenceEditorPanel(): React.ReactElement {
             title={
               canMutate
                 ? "Substitute the selected residue and rebuild it via inpainting"
-                : "Select a single protein residue (requires mmCIF poly_seq_scheme)"
+                : mutableCell && isErasedCell(mutableCell)
+                  ? "Erased — restore it first"
+                  : "Select a single protein residue (requires mmCIF poly_seq_scheme)"
             }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
@@ -890,7 +912,9 @@ export function SequenceEditorPanel(): React.ReactElement {
             title={
               canPtm
                 ? "Add a post-translational modification to the selected residue"
-                : "Select a single Ser/Thr/Tyr/Lys residue"
+                : mutableCell && isErasedCell(mutableCell)
+                  ? "Erased — restore it first"
+                  : "Select a single Ser/Thr/Tyr/Lys residue"
             }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
