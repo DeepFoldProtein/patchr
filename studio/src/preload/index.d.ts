@@ -122,6 +122,11 @@ export interface UniProtAPI {
     results?: UniProtSearchResult[];
     error?: string;
   }>;
+  fetchById: (uniprotId: string) => Promise<{
+    success: boolean;
+    fasta?: string;
+    error?: string;
+  }>;
 }
 
 export interface BoltzAPI {

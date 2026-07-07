@@ -52,7 +52,9 @@ const api = {
   // UniProt search
   uniprot: {
     searchByPdb: (pdbId: string, chainIds: string[]) =>
-      ipcRenderer.invoke("uniprot:search-by-pdb", pdbId, chainIds)
+      ipcRenderer.invoke("uniprot:search-by-pdb", pdbId, chainIds),
+    fetchById: (uniprotId: string) =>
+      ipcRenderer.invoke("uniprot:fetch-by-id", uniprotId)
   },
   // Boltz API
   boltz: {

@@ -34,7 +34,7 @@ import {
   type ResidueCell
 } from "../lib/chainSequences";
 import { parsePolySeqScheme } from "../lib/polySeq";
-import { parseStructureHeader } from "../lib/structureHeader";
+import { parseUniProtByChain } from "../lib/structRef";
 import { cn } from "../lib/utils";
 import { logger } from "../lib/logger";
 
@@ -95,9 +95,10 @@ export function SequenceEditorPanel(): React.ReactElement {
     () => parsePolySeqScheme(structureContent),
     [structureContent]
   );
-  // PDB id parsed from the loaded structure, used to prefill the UniProt search.
-  const detectedPdbId = useMemo(
-    () => parseStructureHeader(structureContent)?.pdbId ?? "",
+  // UniProt accession per author chain, parsed from the CIF's _struct_ref, used
+  // to prefill the search with the active chain's UniProt id (offline).
+  const uniprotByChain = useMemo(
+    () => parseUniProtByChain(structureContent),
     [structureContent]
   );
 
@@ -108,7 +109,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const [mutateOpen, setMutateOpen] = useState(false);
   const [ptmOpen, setPtmOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [pdbId, setPdbId] = useState("");
+  const [uniprotId, setUniprotId] = useState("");
   const [uniprotStatus, setUniprotStatus] = useState<
     "idle" | "searching" | "success" | "error"
   >("idle");
@@ -129,14 +130,15 @@ export function SequenceEditorPanel(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin, missingRegions]);
 
-  // Prefill the UniProt search with the loaded structure's PDB id (updates when
-  // a different structure loads; user edits in between are preserved).
+  // Prefill the search with the active chain's UniProt accession (updates when
+  // the active chain or structure changes).
+  const detectedUniprotId = activeChainId
+    ? (uniprotByChain.get(activeChainId) ?? "")
+    : "";
   useEffect(() => {
-    if (detectedPdbId) {
-      setPdbId(detectedPdbId);
-      setUniprotStatus("idle");
-    }
-  }, [detectedPdbId]);
+    setUniprotId(detectedUniprotId);
+    setUniprotStatus("idle");
+  }, [detectedUniprotId]);
 
   const activeChain = useMemo(
     () => chains.find(c => c.authChainId === activeChainId) ?? null,
@@ -313,39 +315,34 @@ export function SequenceEditorPanel(): React.ReactElement {
     setPtmOpen(false);
   };
 
-  // Fetch full reference sequences from UniProt (by PDB id) to fill missing
-  // regions during inpainting. Protein chains are searched on UniProt; nucleic
+  // Load full reference sequences to fill missing regions during inpainting.
+  // Each protein chain is fetched by its UniProt accession (from the CIF, with
+  // the field value overriding the active chain in case it was edited); nucleic
   // chains fall back to their full poly_seq_scheme sequence.
   const handleUniprotSearch = async (): Promise<void> => {
-    if (!pdbId.trim() || chains.length === 0) return;
+    if (chains.length === 0) return;
     setUniprotStatus("searching");
     try {
-      const proteinChains = chains
-        .filter(c => !c.isNucleic)
-        .map(c => c.authChainId);
+      if (!window.api?.uniprot?.fetchById) {
+        throw new Error("UniProt API not available");
+      }
       const fastaLines: string[] = [];
 
-      if (proteinChains.length > 0) {
-        if (!window.api?.uniprot?.searchByPdb) {
-          throw new Error("UniProt API not available");
-        }
-        const result = await window.api.uniprot.searchByPdb(
-          pdbId.trim().toUpperCase(),
-          proteinChains
-        );
-        if (!result.success) {
-          throw new Error(result.error || "UniProt search failed");
-        }
-        for (const chainResult of result.results ?? []) {
-          if (chainResult.fasta) fastaLines.push(chainResult.fasta);
-        }
-      }
-
-      // Nucleic chains: use their full sequence from poly_seq_scheme if present.
       for (const c of chains) {
-        if (!c.isNucleic) continue;
-        const seq = polySeq.get(c.authChainId)?.oneLetter;
-        if (seq) fastaLines.push(`>Chain ${c.authChainId}\n${seq}`);
+        if (c.isNucleic) {
+          const seq = polySeq.get(c.authChainId)?.oneLetter;
+          if (seq) fastaLines.push(`>Chain ${c.authChainId}\n${seq}`);
+          continue;
+        }
+        const acc =
+          c.authChainId === activeChainId
+            ? uniprotId.trim()
+            : (uniprotByChain.get(c.authChainId) ?? "");
+        if (!acc) continue;
+        const res = await window.api.uniprot.fetchById(acc);
+        if (res.success && res.fasta) {
+          fastaLines.push(`>Chain ${c.authChainId}\n${res.fasta}`);
+        }
       }
 
       if (fastaLines.length === 0) {
@@ -354,9 +351,9 @@ export function SequenceEditorPanel(): React.ReactElement {
       setFastaInput(fastaLines.join("\n"));
       setEnableSequenceMapping(true);
       setUniprotStatus("success");
-      setStaged(`UniProt sequences loaded (PDB ${pdbId.trim().toUpperCase()})`);
+      setStaged("UniProt reference sequences loaded");
     } catch (err) {
-      logger.error("[Sequence Editor] UniProt search failed:", err);
+      logger.error("[Sequence Editor] UniProt fetch failed:", err);
       setUniprotStatus("error");
     }
   };
@@ -408,22 +405,23 @@ export function SequenceEditorPanel(): React.ReactElement {
       {/* UniProt reference-sequence search */}
       <div className="flex items-center gap-2">
         <input
-          value={pdbId}
+          value={uniprotId}
           onChange={e => {
-            setPdbId(e.target.value);
+            setUniprotId(e.target.value);
             setUniprotStatus("idle");
           }}
-          placeholder="PDB ID (e.g. 1A22)"
-          className="h-7 w-28 rounded-md border border-border bg-transparent px-2 text-xs outline-none focus:border-blue-500"
+          placeholder="UniProt ID (e.g. P01241)"
+          title="UniProt accession for the active chain (auto-filled from the structure)"
+          className="h-7 w-32 rounded-md border border-border bg-transparent px-2 font-mono text-xs outline-none focus:border-blue-500"
         />
         <button
           onClick={handleUniprotSearch}
-          disabled={!pdbId.trim() || uniprotStatus === "searching"}
+          disabled={uniprotStatus === "searching"}
           title="Load full reference sequences from UniProt to fill missing regions"
           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
         >
           <Search className="h-3 w-3" />
-          {uniprotStatus === "searching" ? "Searching…" : "UniProt"}
+          {uniprotStatus === "searching" ? "Loading…" : "UniProt"}
         </button>
         {uniprotStatus === "success" && (
           <span className="text-xs text-green-600 dark:text-green-400">

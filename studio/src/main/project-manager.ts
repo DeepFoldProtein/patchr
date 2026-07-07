@@ -1013,6 +1013,34 @@ export function registerProjectIPC(): void {
     }
   );
 
+  // Fetch a UniProt sequence directly by accession (raw sequence, no header).
+  ipcMain.handle("uniprot:fetch-by-id", async (_event, uniprotId: string) => {
+    try {
+      const acc = uniprotId.trim().toUpperCase();
+      if (!/^[A-Z0-9]{6,10}$/.test(acc)) {
+        throw new Error(`Invalid UniProt accession: ${uniprotId}`);
+      }
+      const response = await net.fetch(
+        `https://www.uniprot.org/uniprot/${acc}.fasta`
+      );
+      if (!response.ok) {
+        throw new Error(`UniProt fetch failed: ${response.statusText}`);
+      }
+      const fastaText = await response.text();
+      const lines = fastaText.trim().split("\n");
+      if (lines.length < 2) {
+        throw new Error("No sequence in UniProt response");
+      }
+      const sequence = lines.slice(1).join("");
+      return { success: true, fasta: sequence };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  });
+
   // List saved simulation results from project simulations/ directory
   ipcMain.handle("project:list-simulations", async () => {
     try {
