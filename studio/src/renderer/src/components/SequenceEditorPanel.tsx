@@ -34,13 +34,42 @@ import {
   type ResidueCell
 } from "../lib/chainSequences";
 import { parsePolySeqScheme } from "../lib/polySeq";
-import { parseUniProtByChain } from "../lib/structRef";
+import { parseUniProtRefs } from "../lib/structRef";
 import { cn } from "../lib/utils";
 import { logger } from "../lib/logger";
 
 interface Selection {
   anchor: number;
   focus: number;
+}
+
+// A cell in the rendered sequence: either a resolved structure residue
+// (interactive) or a position that will be inpainted (residue === null).
+interface DisplayCell {
+  key: string;
+  code: string;
+  residue: ResidueCell | null;
+  authLabel?: number; // author number for the tick marks
+}
+
+// Parse a multi-chain FASTA (">Chain A\nSEQ" or ">A\nSEQ") into chain -> seq.
+function parseFastaByChain(fasta: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!fasta) return map;
+  let chain: string | null = null;
+  let seq: string[] = [];
+  for (const line of fasta.split("\n")) {
+    if (line.startsWith(">")) {
+      if (chain) map.set(chain, seq.join(""));
+      const m = line.match(/Chain[_\s]+(\S+)/i) || line.match(/^>(\S+)/);
+      chain = m ? m[1] : null;
+      seq = [];
+    } else if (chain) {
+      seq.push(line.trim());
+    }
+  }
+  if (chain) map.set(chain, seq.join(""));
+  return map;
 }
 
 // Standard amino acids offered as mutation targets.
@@ -84,7 +113,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   const missingRegions = useAtomValue(missingRegionsDetectedAtom);
   const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
   const erasedKeys = useAtomValue(erasedResidueKeysAtom);
-  const setFastaInput = useSetAtom(fastaInputAtom);
+  const [fastaInput, setFastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
     enableSequenceMappingAtom
   );
@@ -95,11 +124,17 @@ export function SequenceEditorPanel(): React.ReactElement {
     () => parsePolySeqScheme(structureContent),
     [structureContent]
   );
-  // UniProt accession per author chain, parsed from the CIF's _struct_ref, used
-  // to prefill the search with the active chain's UniProt id (offline).
-  const uniprotByChain = useMemo(
-    () => parseUniProtByChain(structureContent),
+  // UniProt reference (accession + structure alignment) per author chain, from
+  // the CIF's _struct_ref. Used to prefill the search and to align a loaded
+  // reference sequence back onto the structure for the full-sequence view.
+  const uniprotRefs = useMemo(
+    () => parseUniProtRefs(structureContent),
     [structureContent]
+  );
+  // Reference sequences currently loaded into the inpainting run, per chain.
+  const loadedTargets = useMemo(
+    () => parseFastaByChain(fastaInput),
+    [fastaInput]
   );
 
   const [chains, setChains] = useState<ChainSequence[]>([]);
@@ -133,7 +168,7 @@ export function SequenceEditorPanel(): React.ReactElement {
   // Prefill the search with the active chain's UniProt accession (updates when
   // the active chain or structure changes).
   const detectedUniprotId = activeChainId
-    ? (uniprotByChain.get(activeChainId) ?? "")
+    ? (uniprotRefs.get(activeChainId)?.accession ?? "")
     : "";
   useEffect(() => {
     setUniprotId(detectedUniprotId);
@@ -145,6 +180,76 @@ export function SequenceEditorPanel(): React.ReactElement {
     [chains, activeChainId]
   );
 
+  // The sequence rendered in the grid. When a reference sequence is loaded for
+  // the active chain (UniProt/mutation) and we know its structure alignment,
+  // show the FULL reference with structure-resolved residues interactive and
+  // the rest marked to-inpaint. Otherwise show the resolved residues as-is.
+  const displayCells = useMemo<DisplayCell[]>(() => {
+    if (!activeChain) return [];
+    const resolvedByAuth = new Map<number, ResidueCell>();
+    for (const r of activeChain.residues) {
+      if (r.insCode === "") resolvedByAuth.set(r.authSeqId, r);
+    }
+
+    const ref = uniprotRefs.get(activeChain.authChainId);
+    const target = loadedTargets.get(activeChain.authChainId);
+    const aligned = ref && ref.dbEnd >= ref.dbBeg;
+
+    if (enableSequenceMapping && target && aligned) {
+      const cells: DisplayCell[] = [];
+      for (let p = 1; p <= target.length; p++) {
+        let residue: ResidueCell | null = null;
+        let authLabel: number | undefined;
+        if (p >= ref.dbBeg && p <= ref.dbEnd) {
+          const authNum = ref.authBeg + (p - ref.dbBeg);
+          authLabel = authNum;
+          residue = resolvedByAuth.get(authNum) ?? null;
+        }
+        cells.push({ key: `u${p}`, code: target[p - 1], residue, authLabel });
+      }
+      return cells;
+    }
+
+    // Default: resolved residues, with ghosted terminal-missing cells at ends.
+    const termCode = (
+      region: (typeof missingRegions)[number] | undefined
+    ): string[] => {
+      if (!region) return [];
+      if (region.sequenceKnown && region.sequence) {
+        return region.sequence.split("");
+      }
+      return Array.from({ length: region.regionLength ?? 0 }, () => "·");
+    };
+    const chainRegions = missingRegions.filter(
+      r => r.chainId === activeChain.authChainId
+    );
+    const nterm = chainRegions.find(r => r.terminalType === "nterm");
+    const cterm = chainRegions.find(r => r.terminalType === "cterm");
+
+    const cells: DisplayCell[] = [];
+    termCode(nterm).forEach((code, i) =>
+      cells.push({ key: `nt${i}`, code, residue: null })
+    );
+    for (const r of activeChain.residues) {
+      cells.push({
+        key: `${r.authSeqId}|${r.insCode}`,
+        code: r.code,
+        residue: r,
+        authLabel: r.insCode === "" ? r.authSeqId : undefined
+      });
+    }
+    termCode(cterm).forEach((code, i) =>
+      cells.push({ key: `ct${i}`, code, residue: null })
+    );
+    return cells;
+  }, [
+    activeChain,
+    uniprotRefs,
+    loadedTargets,
+    enableSequenceMapping,
+    missingRegions
+  ]);
+
   const range = useMemo(() => {
     if (!selection) return null;
     const lo = Math.min(selection.anchor, selection.focus);
@@ -152,13 +257,16 @@ export function SequenceEditorPanel(): React.ReactElement {
     return { lo, hi };
   }, [selection]);
 
-  const selectedResidues = useMemo<ResidueCell[]>(
-    () =>
-      range && activeChain
-        ? activeChain.residues.slice(range.lo, range.hi + 1)
-        : [],
-    [range, activeChain]
-  );
+  // Selected structure residues (only resolved cells in range are actionable).
+  const selectedResidues = useMemo<ResidueCell[]>(() => {
+    if (!range) return [];
+    const out: ResidueCell[] = [];
+    for (let i = range.lo; i <= range.hi && i < displayCells.length; i++) {
+      const res = displayCells[i]?.residue;
+      if (res) out.push(res);
+    }
+    return out;
+  }, [range, displayCells]);
 
   // N/C-terminal missing regions for the active chain (shown ghosted).
   const chainMissing = useMemo(
@@ -337,7 +445,7 @@ export function SequenceEditorPanel(): React.ReactElement {
         const acc =
           c.authChainId === activeChainId
             ? uniprotId.trim()
-            : (uniprotByChain.get(c.authChainId) ?? "");
+            : (uniprotRefs.get(c.authChainId)?.accession ?? "");
         if (!acc) continue;
         const res = await window.api.uniprot.fetchById(acc);
         if (res.success && res.fasta) {
@@ -358,22 +466,18 @@ export function SequenceEditorPanel(): React.ReactElement {
     }
   };
 
-  const ntermRegion = chainMissing.find(r => r.terminalType === "nterm");
-  const ctermRegion = chainMissing.find(r => r.terminalType === "cterm");
-  const hasTerminals = !!ntermRegion || !!ctermRegion;
+  const hasTerminals = chainMissing.some(
+    r => r.terminalType === "nterm" || r.terminalType === "cterm"
+  );
   // Terminals are inpainted when the user opts in, or when a full sequence is
   // provided (UniProt/mutation), since terminals then come from that sequence.
   const terminalsIncluded = enableSequenceMapping || !skipTerminal;
-
-  const termChars = (
-    region: (typeof chainMissing)[number] | undefined
-  ): string[] => {
-    if (!region) return [];
-    if (region.sequenceKnown && region.sequence) {
-      return region.sequence.split("");
-    }
-    return Array.from({ length: region.regionLength ?? 0 }, () => "·");
-  };
+  // Whether the grid is showing a loaded reference (full) sequence.
+  const showingReference =
+    enableSequenceMapping &&
+    !!loadedTargets.get(activeChain?.authChainId ?? "") &&
+    (uniprotRefs.get(activeChain?.authChainId ?? "")?.dbEnd ?? 0) >=
+      (uniprotRefs.get(activeChain?.authChainId ?? "")?.dbBeg ?? 1);
 
   if (!activeChain) {
     return (
@@ -460,77 +564,63 @@ export function SequenceEditorPanel(): React.ReactElement {
       {/* Residue grid */}
       <div className="max-h-56 overflow-auto rounded-md border border-border p-2">
         <div className="select-none font-mono text-xs leading-6">
-          {termChars(ntermRegion).map((ch, idx) => (
-            <span
-              key={`nterm-${idx}`}
-              title={
-                terminalsIncluded
-                  ? "N-terminal missing — will be inpainted"
-                  : "N-terminal missing — skipped"
-              }
-              className={cn(
-                "inline-block w-[0.85rem] text-center",
-                terminalsIncluded
-                  ? "text-green-500/70"
-                  : "text-muted-foreground/30"
-              )}
-            >
-              {ch}
-            </span>
-          ))}
-          {activeChain.residues.map((r, i) => {
+          {displayCells.map((cell, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
+            const res = cell.residue;
             const isErased =
-              erasedKeys
+              res != null &&
+              (erasedKeys
                 .get(activeChain.authChainId)
-                ?.has(`${r.authSeqId}|${r.insCode}`) ?? false;
-            const showNumber = r.authSeqId % 10 === 0 && r.insCode === "";
+                ?.has(`${res.authSeqId}|${res.insCode}`) ??
+                false);
+            const showNumber =
+              cell.authLabel !== undefined && cell.authLabel % 10 === 0;
+            const title =
+              res != null
+                ? `${res.resName} ${res.authSeqId}${res.insCode}${isErased ? " (erased)" : ""}`
+                : terminalsIncluded
+                  ? "Missing — will be inpainted"
+                  : "Missing — skipped";
             return (
               <span
-                key={`${r.authSeqId}|${r.insCode}`}
-                onMouseDown={e => handleResidueMouseDown(i, e)}
-                onMouseEnter={() => handleResidueMouseEnter(i)}
-                title={`${r.resName} ${r.authSeqId}${r.insCode}${
-                  isErased ? " (erased)" : ""
-                }`}
+                key={cell.key}
+                onMouseDown={
+                  res ? e => handleResidueMouseDown(i, e) : undefined
+                }
+                onMouseEnter={
+                  res ? () => handleResidueMouseEnter(i) : undefined
+                }
+                title={title}
                 className={cn(
-                  "relative inline-block w-[0.85rem] cursor-pointer text-center",
-                  inRange
-                    ? "rounded-sm bg-blue-500 text-white"
-                    : isErased
-                      ? "text-red-400/60 line-through"
-                      : "hover:bg-accent"
+                  "relative inline-block w-[0.85rem] text-center",
+                  res
+                    ? inRange
+                      ? "cursor-pointer rounded-sm bg-blue-500 text-white"
+                      : isErased
+                        ? "cursor-pointer text-red-400/60 line-through"
+                        : "cursor-pointer hover:bg-accent"
+                    : terminalsIncluded
+                      ? "text-green-500/70"
+                      : "text-muted-foreground/30"
                 )}
               >
-                {r.code}
+                {cell.code}
                 {showNumber && (
                   <span className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 text-[0.6rem] text-blue-500">
-                    {r.authSeqId}
+                    {cell.authLabel}
                   </span>
                 )}
               </span>
             );
           })}
-          {termChars(ctermRegion).map((ch, idx) => (
-            <span
-              key={`cterm-${idx}`}
-              title={
-                terminalsIncluded
-                  ? "C-terminal missing — will be inpainted"
-                  : "C-terminal missing — skipped"
-              }
-              className={cn(
-                "inline-block w-[0.85rem] text-center",
-                terminalsIncluded
-                  ? "text-green-500/70"
-                  : "text-muted-foreground/30"
-              )}
-            >
-              {ch}
-            </span>
-          ))}
         </div>
       </div>
+      {showingReference && (
+        <p className="text-[0.7rem] text-muted-foreground">
+          Showing the loaded reference sequence — green residues are missing
+          from the structure and will be inpainted.
+        </p>
+      )}
 
       {/* N/C-terminal inpainting toggle */}
       {hasTerminals && (

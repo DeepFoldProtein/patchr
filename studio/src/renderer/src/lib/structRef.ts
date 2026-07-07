@@ -109,18 +109,35 @@ function readCategory(
   return Object.keys(single).length ? [single] : [];
 }
 
+export interface UniProtRef {
+  accession: string;
+  /** UniProt sequence position where the structure alignment begins. */
+  dbBeg: number;
+  /** UniProt sequence position where the structure alignment ends. */
+  dbEnd: number;
+  /** Author residue number aligned to dbBeg. */
+  authBeg: number;
+  /** Author residue number aligned to dbEnd. */
+  authEnd: number;
+}
+
+function toInt(v: string | undefined): number | undefined {
+  if (!v || v === "?" || v === ".") return undefined;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /**
- * Map author chain id -> UniProt accession, from _struct_ref (db_name UNP)
- * joined to _struct_ref_seq (ref_id -> pdbx_strand_id). Empty when absent.
+ * Map author chain id -> UniProt reference (accession + alignment offset),
+ * from _struct_ref (db_name UNP) joined to _struct_ref_seq. Empty when absent.
  */
-export function parseUniProtByChain(
+export function parseUniProtRefs(
   content: string | null | undefined
-): Map<string, string> {
-  const result = new Map<string, string>();
+): Map<string, UniProtRef> {
+  const result = new Map<string, UniProtRef>();
   if (!content) return result;
 
   const refs = readCategory(content, "struct_ref");
-  // ref id -> UniProt accession (only UNP database references)
   const refIdToAcc = new Map<string, string>();
   for (const r of refs) {
     const db = (r["db_name"] || "").toUpperCase();
@@ -132,15 +149,42 @@ export function parseUniProtByChain(
   if (refIdToAcc.size === 0) return result;
 
   const refSeq = readCategory(content, "struct_ref_seq");
-  if (refSeq.length === 0) {
-    // No seq mapping: if there's a single ref, best-effort map handled by caller.
-    return result;
-  }
   for (const rs of refSeq) {
-    const refId = rs["ref_id"];
     const chain = rs["pdbx_strand_id"];
-    const acc = refId ? refIdToAcc.get(refId) : undefined;
-    if (chain && acc && !result.has(chain)) result.set(chain, acc);
+    const acc = rs["ref_id"] ? refIdToAcc.get(rs["ref_id"]) : undefined;
+    if (!chain || !acc || result.has(chain)) continue;
+    const dbBeg = toInt(rs["db_align_beg"]);
+    const dbEnd = toInt(rs["db_align_end"]);
+    const authBeg = toInt(rs["pdbx_auth_seq_align_beg"]);
+    const authEnd = toInt(rs["pdbx_auth_seq_align_end"]);
+    if (
+      dbBeg === undefined ||
+      dbEnd === undefined ||
+      authBeg === undefined ||
+      authEnd === undefined
+    ) {
+      // Accession known but no usable alignment — still record accession.
+      result.set(chain, {
+        accession: acc,
+        dbBeg: 1,
+        dbEnd: 0,
+        authBeg: 1,
+        authEnd: 0
+      });
+      continue;
+    }
+    result.set(chain, { accession: acc, dbBeg, dbEnd, authBeg, authEnd });
   }
   return result;
+}
+
+/** Convenience: author chain id -> UniProt accession only. */
+export function parseUniProtByChain(
+  content: string | null | undefined
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [chain, ref] of parseUniProtRefs(content)) {
+    out.set(chain, ref.accession);
+  }
+  return out;
 }
