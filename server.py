@@ -197,6 +197,38 @@ jobs_db: Dict[str, Dict] = {}
 progress_streams: Dict[str, asyncio.Queue] = {}
 
 
+def _persist_job(job_id: str) -> None:
+    """Write the job record to its dir under WORK_DIR so that a *second* replica
+    (e.g. a per-GPU instance sharing WORK_DIR behind a round-robin balancer) can
+    serve status/poll for a job it did not itself submit. Atomic, best-effort."""
+    rec = jobs_db.get(job_id)
+    if rec is None:
+        return
+    try:
+        import json as _json
+        d = WORK_DIR / job_id
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / "_status.json.tmp"
+        tmp.write_text(_json.dumps(rec, default=str))
+        tmp.replace(d / "_status.json")
+    except Exception:
+        pass
+
+
+def _refresh_job(job_id: str) -> bool:
+    """Make ``jobs_db[job_id]`` reflect the on-disk record. The instance that owns
+    the job persists on every update, so re-reading the file lets any instance
+    return current status for jobs submitted elsewhere. Returns True if known."""
+    try:
+        f = WORK_DIR / job_id / "_status.json"
+        if f.is_file():
+            import json as _json
+            jobs_db[job_id] = _json.loads(f.read_text())
+    except Exception:
+        pass
+    return job_id in jobs_db
+
+
 # ── Progress tracker (Boltz) ────────────────────────────────────────────────
 
 class ProgressTracker(Callback):
@@ -541,6 +573,7 @@ def update_job_status(
         jobs_db[job_id]["error"] = error
     for key, value in kwargs.items():
         jobs_db[job_id][key] = value
+    _persist_job(job_id)
 
 
 # ── Template generation ─────────────────────────────────────────────────────
@@ -1083,6 +1116,7 @@ async def generate_template(
         "uniprot": request.uniprot,
     }
     jobs_db[job_id] = job_record
+    _persist_job(job_id)
 
     job_dir = WORK_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -1164,6 +1198,7 @@ async def upload_structure(
         "uploaded_file": str(cif_path.name),
     }
     jobs_db[job_id] = job_record
+    _persist_job(job_id)
 
     background_tasks.add_task(
         run_template_generation,
@@ -1195,7 +1230,7 @@ async def run_prediction(
         f"sampling={request.sampling_steps} samples={request.diffusion_samples}"
     )
 
-    if request.job_id not in jobs_db:
+    if not _refresh_job(request.job_id):
         raise HTTPException(status_code=404, detail=f"Job {request.job_id} not found")
 
     job = jobs_db[request.job_id]
@@ -1247,7 +1282,7 @@ async def run_prediction(
 @app.get("/api/v1/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
     """Get the status of a job."""
-    if job_id not in jobs_db:
+    if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return JobStatusResponse(**jobs_db[job_id])
 
