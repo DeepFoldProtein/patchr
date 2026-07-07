@@ -993,12 +993,9 @@ function RepairConsole(): React.ReactElement {
         <MissingRegionReviewSection />
       </Section>
 
-      {/* Sequence 섹션 — 잔기 편집(Erase/Mutate/PTM) + UniProt 참조 서열 */}
-      <Section
-        title="Sequence"
-        expanded={expandedSections.has("sequence")}
-        onToggle={() => toggleSection("sequence")}
-      >
+      {/* Sequence 섹션 — 잔기 편집(Erase/Mutate/PTM) + UniProt 참조 서열.
+          Always expanded (core workflow surface). */}
+      <Section title="Sequence" expanded onToggle={() => {}}>
         <SequenceEditorPanel />
       </Section>
 

@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
-  RefreshCw,
+  RotateCcw,
   Eraser,
   FlaskConical,
   Atom,
@@ -176,6 +176,15 @@ export function SequenceEditorPanel(): React.ReactElement {
     );
     setSelection(null);
   }, [plugin]);
+
+  // Reset all staged edits back to the original structure sequence.
+  const handleReset = (): void => {
+    setErasedRegions([]);
+    setStagedMutations([]);
+    setStagedPtms([]);
+    setUniprotReference("");
+    refresh();
+  };
 
   useEffect(() => {
     refresh();
@@ -618,12 +627,12 @@ export function SequenceEditorPanel(): React.ReactElement {
           Select residues (drag for a range) to erase, mutate, or add a PTM.
         </p>
         <button
-          onClick={refresh}
-          title="Reload sequences from the current structure"
+          onClick={handleReset}
+          title="Discard all staged edits and reload the original sequence"
           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
         >
-          <RefreshCw className="h-3 w-3" />
-          Refresh
+          <RotateCcw className="h-3 w-3" />
+          Reset
         </button>
       </div>
 
