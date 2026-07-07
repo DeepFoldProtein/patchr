@@ -158,6 +158,12 @@ class TemplateGenerateRequest(BaseModel):
         False,
         description="Skip N/C-terminal missing residues (only inpaint internal gaps)",
     )
+    modifications: Optional[List[str]] = Field(
+        None,
+        description="PTM/modifications as 'CHAIN:RESID:CCD' where RESID is the AUTHOR "
+                    "residue number and CCD is the modified-residue code (e.g. 'A:12:SEP'). "
+                    "Protein chains only.",
+    )
 
 
 class PredictionRequest(BaseModel):
@@ -332,6 +338,101 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Request logging / failure recording ──────────────────────────────────────
+# Lightweight per-request record (method, path, status, latency, error/traceback)
+# so the status page and the /stats and /failures endpoints show real success/
+# failure history with reasons. Each replica appends to its own JSONL under the
+# shared WORK_DIR; the query endpoints aggregate across all replicas.
+import time as _time
+import socket as _socket
+import traceback as _tb
+from collections import deque as _deque
+from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
+from starlette.responses import Response as _RawResponse
+
+_REQ_DIR = WORK_DIR / "_requests"
+_REPLICA = _socket.gethostname()
+_recent_requests: _deque = _deque(maxlen=3000)
+_SKIP_LOG_PATHS = {"/api/v1/stats", "/api/v1/failures", "/api/v1/health", "/favicon.ico"}
+
+
+def _record_request(rec: dict) -> None:
+    _recent_requests.append(rec)
+    try:
+        import json as _json
+        _REQ_DIR.mkdir(parents=True, exist_ok=True)
+        f = _REQ_DIR / f"{_REPLICA}.jsonl"
+        if f.exists() and f.stat().st_size > 5_000_000:  # bound the file (~5 MB)
+            tail = f.read_text(errors="replace").splitlines()[-15000:]
+            f.write_text("\n".join(tail) + "\n")
+        with open(f, "a") as fh:
+            fh.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+class RequestLogMiddleware(_BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        start = _time.time()
+        path = request.url.path
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "method": request.method, "path": path, "replica": _REPLICA,
+        }
+        try:
+            response = await call_next(request)
+        except Exception as exc:  # unhandled → 500, capture traceback
+            rec.update(status=500, ms=round((_time.time() - start) * 1000, 1),
+                       error=f"{type(exc).__name__}: {exc}",
+                       traceback=_tb.format_exc()[-2000:])
+            if path not in _SKIP_LOG_PATHS:
+                _record_request(rec)
+            raise
+        rec["status"] = response.status_code
+        rec["ms"] = round((_time.time() - start) * 1000, 1)
+        if response.status_code >= 400:
+            # Buffer the (small) error body to capture the reason, then rebuild
+            # the response.  Success/streaming responses are passed through as-is.
+            import json as _json
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk
+            try:
+                rec["error"] = _json.loads(body).get("detail") if body else ""
+            except Exception:
+                rec["error"] = body.decode(errors="replace")[:500]
+            headers = dict(response.headers)
+            headers.pop("content-length", None)
+            response = _RawResponse(content=body, status_code=response.status_code,
+                                    headers=headers, media_type=response.media_type)
+        if path not in _SKIP_LOG_PATHS:
+            _record_request(rec)
+        return response
+
+
+app.add_middleware(RequestLogMiddleware)
+
+
+def _read_request_records(limit_lines: int = 20000) -> list:
+    """Aggregate recent request records across all replicas' JSONL files."""
+    import json as _json
+    recs: list = []
+    try:
+        for f in _REQ_DIR.glob("*.jsonl"):
+            try:
+                lines = f.read_text(errors="replace").splitlines()[-limit_lines:]
+            except Exception:
+                continue
+            for ln in lines:
+                try:
+                    recs.append(_json.loads(ln))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    recs.sort(key=lambda r: r.get("ts", ""))
+    return recs
 
 
 # ── Model preloading ────────────────────────────────────────────────────────
@@ -586,6 +687,7 @@ async def run_template_generation(
     custom_sequences: Optional[Dict[str, str]],
     cif_file_path: Optional[Path] = None,
     skip_terminal: bool = False,
+    modifications: Optional[List[str]] = None,
 ):
     """Background task to generate inpainting template."""
     try:
@@ -614,6 +716,15 @@ async def run_template_generation(
 
         if skip_terminal:
             cmd.append("--skip-terminal")
+
+        # PTM/modifications: each entry is "CHAIN:RESID:CCD" where RESID is the
+        # AUTHOR residue number (what the studio/PDB viewer shows). Protein chains
+        # only — the template script exits non-zero if a target chain isn't protein.
+        if modifications:
+            for spec in modifications:
+                spec = str(spec).strip()
+                if spec:
+                    cmd.extend(["--modification", spec])
 
         cmd.extend(["-o", str(output_dir)])
 
@@ -1129,6 +1240,7 @@ async def generate_template(
         uniprot=request.uniprot,
         custom_sequences=request.custom_sequences,
         skip_terminal=request.skip_terminal,
+        modifications=request.modifications,
     )
 
     return JobStatusResponse(**job_record)
@@ -1141,6 +1253,7 @@ async def upload_structure(
     chain_ids: str = Form(..., description="Chain IDs (e.g., 'A' or 'A,B')"),
     custom_sequences: Optional[str] = Form(None, description="Custom sequences in format 'A:SEQ1,B:SEQ2'"),
     skip_terminal: bool = Form(False, description="Skip N/C-terminal missing residues (only inpaint internal gaps)"),
+    modifications: Optional[List[str]] = Form(None, description="PTM/modifications as 'CHAIN:RESID:CCD' (RESID = AUTHOR residue number, e.g. 'A:12:SEP'). Protein chains only. Repeatable, or comma-separated."),
 ):
     """Upload a structure file (CIF or PDB) and generate inpainting template."""
     print(f"[API] POST /api/v1/template/upload filename={cif_file.filename} chain_ids={chain_ids}")
@@ -1187,6 +1300,19 @@ async def upload_structure(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid custom_sequences format: {str(e)}")
 
+    # PTM/modifications: accept repeated form fields and/or comma-separated values.
+    # Each token is "CHAIN:RESID:CCD" (RESID = author residue number).
+    mod_list = None
+    if modifications:
+        mod_list = []
+        for entry in modifications:
+            for spec in str(entry).split(","):
+                spec = spec.strip()
+                if spec:
+                    mod_list.append(spec)
+        if not mod_list:
+            mod_list = None
+
     pdb_id = cif_path.stem.upper()
     job_record = {
         "job_id": job_id,
@@ -1209,6 +1335,7 @@ async def upload_structure(
         custom_sequences=custom_seq_dict,
         cif_file_path=cif_path,
         skip_terminal=skip_terminal,
+        modifications=mod_list,
     )
 
     return JobStatusResponse(**job_record)
@@ -1646,6 +1773,47 @@ async def health_check():
     if _model_loading and _model_loading_stage:
         resp["loading_stage"] = _model_loading_stage
     return resp
+
+
+@app.get("/api/v1/stats")
+async def request_stats(window_min: int = 0):
+    """Aggregate request success/failure stats across all replicas.
+
+    ``window_min`` limits to the last N minutes (0 = all recorded)."""
+    recs = _read_request_records()
+    if window_min > 0:
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(minutes=window_min)).isoformat(timespec="seconds")
+        recs = [r for r in recs if r.get("ts", "") >= cutoff]
+    total = len(recs)
+    by_status: Dict[str, int] = {}
+    for r in recs:
+        s = str(r.get("status", "?"))
+        by_status[s] = by_status.get(s, 0) + 1
+    ok = sum(v for k, v in by_status.items() if k[:1] in ("2", "3"))
+    lat = sorted(r["ms"] for r in recs if isinstance(r.get("ms"), (int, float)))
+
+    def _pct(p: float):
+        return lat[min(int(len(lat) * p), len(lat) - 1)] if lat else 0
+
+    return {
+        "total": total,
+        "success": ok,
+        "failed": total - ok,
+        "success_rate": round(ok / total, 4) if total else 1.0,
+        "by_status": dict(sorted(by_status.items())),
+        "latency_ms": {"p50": _pct(0.5), "p95": _pct(0.95), "max": lat[-1] if lat else 0},
+        "window_min": window_min or "all",
+    }
+
+
+@app.get("/api/v1/failures")
+async def request_failures(limit: int = 50):
+    """Most recent failed requests (HTTP >= 400) with their reason, across all
+    replicas — path, status, error message and (for 500s) a traceback tail."""
+    fails = [r for r in _read_request_records() if int(r.get("status", 0)) >= 400]
+    fails = fails[-limit:][::-1]
+    return {"count": len(fails), "failures": fails}
 
 
 # ── CLI entrypoint ──────────────────────────────────────────────────────────
