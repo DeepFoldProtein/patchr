@@ -60,10 +60,21 @@ function monToOne(mon: string): string {
   return AA_3_TO_1[m] ?? NUC_1[m] ?? "X";
 }
 
+// One position of the full polymer sequence (present or missing coordinates).
+export interface PolySeqPosition {
+  code: string; // one-letter
+  resName: string; // three-letter mon_id
+  authSeqId?: number; // author residue number (pdb_seq_num); absent if unknown
+  insCode: string;
+  seqId: number; // entity seq_id (_entity_poly_seq.num)
+}
+
 export interface ChainPolySeq {
   authChainId: string;
   monIds: string[]; // three-letter component ids, ordered by seq_id
   oneLetter: string;
+  /** Full ordered sequence, including residues missing from the structure. */
+  positions: PolySeqPosition[];
   /** "authSeqNum|insCode" -> 0-based index into monIds/oneLetter. */
   keyToIndex: Map<string, number>;
   /** "authSeqNum|insCode" -> entity seq_id (1-based, _entity_poly_seq.num). */
@@ -156,8 +167,10 @@ export function parsePolySeqScheme(
 
   const strandCol = cols["pdb_strand_id"] ?? cols["asym_id"];
   const monCol = cols["mon_id"];
+  // Prefer pdb_seq_num: it carries the author number even for residues missing
+  // from the structure (auth_seq_num is "?" for those).
   const authNumCol =
-    cols["auth_seq_num"] ?? cols["pdb_seq_num"] ?? cols["ndb_seq_num"];
+    cols["pdb_seq_num"] ?? cols["auth_seq_num"] ?? cols["ndb_seq_num"];
   const insCol = cols["pdb_ins_code"];
   const seqIdCol = cols["seq_id"];
   if (strandCol === undefined || monCol === undefined) return result;
@@ -173,6 +186,7 @@ export function parsePolySeqScheme(
         authChainId: chain,
         monIds: [],
         oneLetter: "",
+        positions: [],
         keyToIndex: new Map(),
         keyToSeqId: new Map()
       };
@@ -182,16 +196,27 @@ export function parsePolySeqScheme(
     const index = entry.monIds.length;
     entry.monIds.push(mon);
 
-    if (authNumCol !== undefined) {
-      const authNum = row[authNumCol];
-      const ins = insCol !== undefined ? normalizeIns(row[insCol]) : "";
-      if (authNum && authNum !== "?" && authNum !== ".") {
-        const key = `${authNum}|${ins}`;
-        entry.keyToIndex.set(key, index);
-        const seqIdRaw = seqIdCol !== undefined ? row[seqIdCol] : undefined;
-        const seqId = seqIdRaw ? parseInt(seqIdRaw, 10) : index + 1;
-        entry.keyToSeqId.set(key, Number.isFinite(seqId) ? seqId : index + 1);
-      }
+    const ins = insCol !== undefined ? normalizeIns(row[insCol]) : "";
+    const authRaw = authNumCol !== undefined ? row[authNumCol] : undefined;
+    const authSeqId =
+      authRaw && authRaw !== "?" && authRaw !== "."
+        ? parseInt(authRaw, 10)
+        : undefined;
+    const seqIdRaw = seqIdCol !== undefined ? row[seqIdCol] : undefined;
+    const seqId = seqIdRaw ? parseInt(seqIdRaw, 10) : index + 1;
+
+    entry.positions.push({
+      code: monToOne(mon),
+      resName: mon,
+      authSeqId: Number.isFinite(authSeqId) ? authSeqId : undefined,
+      insCode: ins,
+      seqId: Number.isFinite(seqId) ? seqId : index + 1
+    });
+
+    if (authSeqId !== undefined && Number.isFinite(authSeqId)) {
+      const key = `${authSeqId}|${ins}`;
+      entry.keyToIndex.set(key, index);
+      entry.keyToSeqId.set(key, Number.isFinite(seqId) ? seqId : index + 1);
     }
   }
 

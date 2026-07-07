@@ -46,12 +46,19 @@ interface Selection {
   focus: number;
 }
 
-// A cell in the rendered sequence: either a resolved structure residue
-// (interactive) or a position that will be inpainted (residue === null).
+// A cell in the rendered full sequence. Missing (to-inpaint) positions have
+// resolved === false and residue === null but still carry author/entity ids so
+// they can be mutated / PTM'd (they just can't be erased).
 interface DisplayCell {
   key: string;
-  code: string;
-  residue: ResidueCell | null;
+  code: string; // display letter (mutation applied)
+  origCode: string; // letter before any staged mutation
+  resName?: string; // 3-letter id (for tooltips / PTM eligibility)
+  authSeqId?: number;
+  insCode: string;
+  seqId?: number; // entity seq_id (for PTM / mutation targeting)
+  resolved: boolean; // has coordinates in the structure
+  residue: ResidueCell | null; // resolved residue, for 3D selection
   authLabel?: number; // author number for the tick marks
   mark?: "mutated" | "ptm"; // staged edit on this residue
   terminal?: boolean; // to-inpaint cell at an N/C terminus (vs internal gap)
@@ -63,13 +70,13 @@ function markTerminals(cells: DisplayCell[]): DisplayCell[] {
   let first = -1;
   let last = -1;
   cells.forEach((c, i) => {
-    if (c.residue) {
+    if (c.resolved) {
       if (first < 0) first = i;
       last = i;
     }
   });
   return cells.map((c, i) =>
-    !c.residue && (first < 0 || i < first || i > last)
+    !c.resolved && (first < 0 || i < first || i > last)
       ? { ...c, terminal: true }
       : c
   );
@@ -255,121 +262,126 @@ export function SequenceEditorPanel(): React.ReactElement {
     setEnableSequenceMapping(fasta.length > 0);
   }, [effectiveTargets, setFastaInput, setEnableSequenceMapping]);
 
-  // Fast lookups for grid marking (keyed by chain|authSeqId|insCode).
-  const mutationKeys = useMemo(() => {
-    const s = new Set<string>();
-    for (const m of stagedMutations) {
-      s.add(`${m.chainId}|${m.authSeqId}|${m.insCode}`);
-    }
-    return s;
-  }, [stagedMutations]);
-  const ptmKeys = useMemo(() => {
-    const s = new Set<string>();
-    for (const p of stagedPtms)
-      s.add(`${p.chainId}|${p.authSeqId}|${p.insCode}`);
-    return s;
-  }, [stagedPtms]);
-
-  // The sequence rendered in the grid. With an effective target (reference
-  // and/or mutations) the full sequence is shown aligned to the structure;
-  // resolved residues stay interactive, the rest are to-inpaint. Staged
-  // mutations/PTMs are marked on their residues.
+  // The full sequence rendered in the grid: every polymer position (from the
+  // UniProt reference if loaded, else poly_seq_scheme), with residues that are
+  // missing from the structure marked to-inpaint (green). Missing positions can
+  // still be mutated / PTM'd (they carry author/entity ids); only resolved
+  // residues can be erased.
   const displayCells = useMemo<DisplayCell[]>(() => {
     if (!activeChain) return [];
     const chainId = activeChain.authChainId;
-    const resolvedByAuth = new Map<number, ResidueCell>();
+
+    const resolvedByKey = new Map<string, ResidueCell>();
     for (const r of activeChain.residues) {
-      if (r.insCode === "") resolvedByAuth.set(r.authSeqId, r);
+      resolvedByKey.set(`${r.authSeqId}|${r.insCode}`, r);
     }
-    const markOf = (authNum?: number): DisplayCell["mark"] => {
-      if (authNum === undefined) return undefined;
-      const key = `${chainId}|${authNum}|`;
-      if (ptmKeys.has(key)) return "ptm";
-      if (mutationKeys.has(key)) return "mutated";
-      return undefined;
+
+    const mutByRes = new Map<string, string>(); // resKey -> target one-letter
+    for (const m of stagedMutations) {
+      if (m.chainId === chainId)
+        mutByRes.set(`${m.authSeqId}|${m.insCode}`, m.to);
+    }
+    const ptmRes = new Set<string>();
+    for (const p of stagedPtms) {
+      if (p.chainId === chainId) ptmRes.add(`${p.authSeqId}|${p.insCode}`);
+    }
+
+    const makeCell = (opts: {
+      key: string;
+      origCode: string;
+      resName?: string;
+      authSeqId?: number;
+      insCode: string;
+      seqId?: number;
+    }): DisplayCell => {
+      const { key, origCode, resName, authSeqId, insCode, seqId } = opts;
+      const resKey = authSeqId !== undefined ? `${authSeqId}|${insCode}` : "";
+      const residue = resKey ? (resolvedByKey.get(resKey) ?? null) : null;
+      const mut = resKey ? mutByRes.get(resKey) : undefined;
+      const mark: DisplayCell["mark"] =
+        resKey && ptmRes.has(resKey)
+          ? "ptm"
+          : mut !== undefined
+            ? "mutated"
+            : undefined;
+      return {
+        key,
+        code: mut ?? origCode,
+        origCode,
+        resName,
+        authSeqId,
+        insCode,
+        seqId,
+        resolved: residue != null,
+        residue,
+        authLabel: insCode === "" ? authSeqId : undefined,
+        mark
+      };
     };
 
-    const target = effectiveTargets.get(chainId);
+    const chainPolySeq = polySeq.get(chainId);
     const ref = uniprotRefs.get(chainId);
-    const fromUniProt = referenceByChain.has(chainId);
+    const reference = referenceByChain.get(chainId);
 
-    if (target && (!fromUniProt || (ref && ref.dbEnd >= ref.dbBeg))) {
-      // position (0-based) -> author number
-      let posToAuth: (p0: number) => number | undefined;
-      if (fromUniProt && ref) {
-        posToAuth = p0 => {
-          const p = p0 + 1;
-          return p >= ref.dbBeg && p <= ref.dbEnd
+    // 1) UniProt reference loaded: render the full reference aligned to authors.
+    if (reference && ref && ref.dbEnd >= ref.dbBeg) {
+      const authToSeqId = chainPolySeq?.keyToSeqId;
+      const cells: DisplayCell[] = [];
+      for (let p0 = 0; p0 < reference.length; p0++) {
+        const p = p0 + 1;
+        const authSeqId =
+          p >= ref.dbBeg && p <= ref.dbEnd
             ? ref.authBeg + (p - ref.dbBeg)
             : undefined;
-        };
-      } else {
-        const idxToAuth = new Map<number, number>();
-        const ps = polySeq.get(chainId);
-        if (ps) {
-          for (const [k, idx] of ps.keyToIndex) {
-            const auth = parseInt(k.split("|")[0], 10);
-            if (Number.isFinite(auth)) idxToAuth.set(idx, auth);
-          }
-        }
-        posToAuth = p0 => idxToAuth.get(p0);
-      }
-      const cells: DisplayCell[] = [];
-      for (let p0 = 0; p0 < target.length; p0++) {
-        const authNum = posToAuth(p0);
-        const residue =
-          authNum !== undefined ? (resolvedByAuth.get(authNum) ?? null) : null;
-        cells.push({
-          key: `t${p0}`,
-          code: target[p0],
-          residue,
-          authLabel: authNum,
-          mark: markOf(authNum)
-        });
+        cells.push(
+          makeCell({
+            key: `u${p0}`,
+            origCode: reference[p0],
+            authSeqId,
+            insCode: "",
+            seqId:
+              authSeqId !== undefined
+                ? authToSeqId?.get(`${authSeqId}|`)
+                : undefined
+          })
+        );
       }
       return markTerminals(cells);
     }
 
-    // Default: resolved residues, with ghosted terminal-missing cells at ends.
-    const termCode = (
-      region: (typeof missingRegions)[number] | undefined
-    ): string[] => {
-      if (!region) return [];
-      if (region.sequenceKnown && region.sequence) {
-        return region.sequence.split("");
-      }
-      return Array.from({ length: region.regionLength ?? 0 }, () => "·");
-    };
-    const chainRegions = missingRegions.filter(r => r.chainId === chainId);
-    const nterm = chainRegions.find(r => r.terminalType === "nterm");
-    const cterm = chainRegions.find(r => r.terminalType === "cterm");
-
-    const cells: DisplayCell[] = [];
-    termCode(nterm).forEach((code, i) =>
-      cells.push({ key: `nt${i}`, code, residue: null })
-    );
-    for (const r of activeChain.residues) {
-      cells.push({
-        key: `${r.authSeqId}|${r.insCode}`,
-        code: r.code,
-        residue: r,
-        authLabel: r.insCode === "" ? r.authSeqId : undefined,
-        mark: r.insCode === "" ? markOf(r.authSeqId) : undefined
-      });
+    // 2) No reference but poly_seq_scheme present: full SEQRES with gaps green.
+    if (chainPolySeq && chainPolySeq.positions.length > 0) {
+      const cells = chainPolySeq.positions.map((pos, i) =>
+        makeCell({
+          key: `p${i}`,
+          origCode: pos.code,
+          resName: pos.resName,
+          authSeqId: pos.authSeqId,
+          insCode: pos.insCode,
+          seqId: pos.seqId
+        })
+      );
+      return markTerminals(cells);
     }
-    termCode(cterm).forEach((code, i) =>
-      cells.push({ key: `ct${i}`, code, residue: null })
+
+    // 3) Fallback (no poly_seq_scheme): resolved residues only.
+    const cells = activeChain.residues.map(r =>
+      makeCell({
+        key: `${r.authSeqId}|${r.insCode}`,
+        origCode: r.code,
+        resName: r.resName,
+        authSeqId: r.authSeqId,
+        insCode: r.insCode
+      })
     );
     return markTerminals(cells);
   }, [
     activeChain,
-    effectiveTargets,
+    polySeq,
     uniprotRefs,
     referenceByChain,
-    polySeq,
-    missingRegions,
-    mutationKeys,
-    ptmKeys
+    stagedMutations,
+    stagedPtms
   ]);
 
   const range = useMemo(() => {
@@ -379,16 +391,20 @@ export function SequenceEditorPanel(): React.ReactElement {
     return { lo, hi };
   }, [selection]);
 
-  // Selected structure residues (only resolved cells in range are actionable).
-  const selectedResidues = useMemo<ResidueCell[]>(() => {
-    if (!range) return [];
-    const out: ResidueCell[] = [];
-    for (let i = range.lo; i <= range.hi && i < displayCells.length; i++) {
-      const res = displayCells[i]?.residue;
-      if (res) out.push(res);
-    }
-    return out;
-  }, [range, displayCells]);
+  // Cells in the current selection range.
+  const selectedCells = useMemo<DisplayCell[]>(
+    () => (range ? displayCells.slice(range.lo, range.hi + 1) : []),
+    [range, displayCells]
+  );
+  // Resolved residues within the selection (for the 3D highlight).
+  const selectedResidues = useMemo<ResidueCell[]>(
+    () =>
+      selectedCells
+        .map(c => c.residue)
+        .filter((r): r is ResidueCell => r != null),
+    [selectedCells]
+  );
+  const singleCell = selectedCells.length === 1 ? selectedCells[0] : null;
 
   // Mirror the sequence selection into the 3D viewer (highlight + zoom).
   // Skip while dragging so a fast range-drag doesn't re-scan atoms on every
@@ -427,17 +443,53 @@ export function SequenceEditorPanel(): React.ReactElement {
     return () => window.removeEventListener("mouseup", stop);
   }, [dragging]);
 
+  // Erase / mutate / PTM are mutually exclusive per residue. Drop a residue
+  // from any erased region (used when a mutation/PTM is staged on it).
+  const unEraseResidue = (
+    chainId: string,
+    authSeqId: number,
+    insCode: string
+  ): void => {
+    setErasedRegions(prev =>
+      prev
+        .map(region =>
+          region.chainId === chainId
+            ? {
+                ...region,
+                residues: region.residues.filter(
+                  res =>
+                    !(res.authSeqId === authSeqId && res.insCode === insCode)
+                )
+              }
+            : region
+        )
+        .filter(region => region.residues.length > 0)
+    );
+  };
+
   const handleErase = (): void => {
     if (!activeChain || selectedResidues.length === 0) return;
-    const first = selectedResidues[0];
-    const last = selectedResidues[selectedResidues.length - 1];
-    const label = `${activeChain.authChainId} ${first.authSeqId}${first.insCode}–${last.authSeqId}${last.insCode} (${selectedResidues.length})`;
+    const chainId = activeChain.authChainId;
+    // Keep any residue that already carries a mutation / PTM (those edits win).
+    const edited = new Set<string>();
+    for (const m of stagedMutations)
+      if (m.chainId === chainId) edited.add(`${m.authSeqId}|${m.insCode}`);
+    for (const p of stagedPtms)
+      if (p.chainId === chainId) edited.add(`${p.authSeqId}|${p.insCode}`);
+    const residues = selectedResidues.filter(
+      r => !edited.has(`${r.authSeqId}|${r.insCode}`)
+    );
+    if (residues.length === 0) return;
+
+    const first = residues[0];
+    const last = residues[residues.length - 1];
+    const label = `${chainId} ${first.authSeqId}${first.insCode}–${last.authSeqId}${last.insCode} (${residues.length})`;
     setErasedRegions(prev => [
       ...prev,
       {
         id: crypto.randomUUID(),
-        chainId: activeChain.authChainId,
-        residues: selectedResidues.map(r => ({
+        chainId,
+        residues: residues.map(r => ({
           authSeqId: r.authSeqId,
           insCode: r.insCode
         })),
@@ -464,73 +516,53 @@ export function SequenceEditorPanel(): React.ReactElement {
     setStagedPtms(prev => prev.filter(p => p.id !== id));
   };
 
-  // Mutation is available when exactly one protein residue is selected and its
-  // position is resolvable in the CIF's poly_seq_scheme (full, gap-aware seq).
-  const singleResidue =
-    selectedResidues.length === 1 ? selectedResidues[0] : null;
-  const chainPoly = activeChain
-    ? polySeq.get(activeChain.authChainId)
-    : undefined;
-  const mutationIndex =
-    singleResidue && chainPoly
-      ? chainPoly.keyToIndex.get(
-          `${singleResidue.authSeqId}|${singleResidue.insCode}`
-        )
-      : undefined;
-  const canMutate =
-    !!activeChain &&
-    !activeChain.isNucleic &&
-    !!chainPoly &&
-    mutationIndex !== undefined;
+  // Mutation / PTM act on a single selected residue that has an author number —
+  // resolved OR to-inpaint (they carry ids from poly_seq_scheme). Erase is
+  // limited to resolved residues elsewhere.
+  const mutableCell =
+    singleCell && singleCell.authSeqId !== undefined ? singleCell : null;
+
+  const canMutate = !!activeChain && !activeChain.isNucleic && !!mutableCell;
 
   const handleMutate = (target: string): void => {
-    if (
-      !activeChain ||
-      !chainPoly ||
-      mutationIndex === undefined ||
-      !singleResidue
-    ) {
+    if (!activeChain || !mutableCell || mutableCell.authSeqId === undefined) {
       return;
     }
-    const original = chainPoly.oneLetter[mutationIndex];
-    if (original === target) {
+    const { authSeqId, insCode, origCode } = mutableCell;
+    if (origCode === target) {
       setMutateOpen(false);
       return;
     }
-    const key = `${singleResidue.authSeqId}|${singleResidue.insCode}`;
-    // Stage the substitution; the effective target sequence (with all staged
-    // mutations applied) drives the custom-sequence upload path.
+    const chainId = activeChain.authChainId;
+    const key = `${authSeqId}|${insCode}`;
     setStagedMutations(prev => [
       ...prev.filter(
-        m =>
-          !(
-            m.chainId === activeChain.authChainId &&
-            `${m.authSeqId}|${m.insCode}` === key
-          )
+        m => !(m.chainId === chainId && `${m.authSeqId}|${m.insCode}` === key)
       ),
       {
         id: crypto.randomUUID(),
-        chainId: activeChain.authChainId,
-        authSeqId: singleResidue.authSeqId,
-        insCode: singleResidue.insCode,
-        from: original,
+        chainId,
+        authSeqId,
+        insCode,
+        from: origCode,
         to: target,
-        label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`
+        label: `${chainId}/${authSeqId}${insCode} ${origCode}→${target}`
       }
     ]);
+    // Mutual exclusivity: drop any erase / PTM on this residue.
+    unEraseResidue(chainId, authSeqId, insCode);
+    setStagedPtms(prev =>
+      prev.filter(
+        p => !(p.chainId === chainId && `${p.authSeqId}|${p.insCode}` === key)
+      )
+    );
     setMutateOpen(false);
   };
 
-  // PTM options for the selected residue (by its one-letter code), plus the
-  // entity seq_id the backend needs to target the modification.
-  const ptmSeqId =
-    singleResidue && chainPoly
-      ? chainPoly.keyToSeqId.get(
-          `${singleResidue.authSeqId}|${singleResidue.insCode}`
-        )
-      : undefined;
-  const ptmChoices = singleResidue
-    ? PTM_OPTIONS[singleResidue.code]
+  // PTM options for the selected residue (by its one-letter code) + entity id.
+  const ptmSeqId = mutableCell?.seqId;
+  const ptmChoices = mutableCell
+    ? PTM_OPTIONS[mutableCell.origCode]
     : undefined;
   const canPtm =
     !!activeChain &&
@@ -539,26 +571,38 @@ export function SequenceEditorPanel(): React.ReactElement {
     ptmSeqId !== undefined;
 
   const handlePtm = (ccd: string): void => {
-    if (!activeChain || !singleResidue || ptmSeqId === undefined) return;
-    const key = `${singleResidue.authSeqId}|${singleResidue.insCode}`;
+    if (
+      !activeChain ||
+      !mutableCell ||
+      ptmSeqId === undefined ||
+      mutableCell.authSeqId === undefined
+    ) {
+      return;
+    }
+    const { authSeqId, insCode } = mutableCell;
+    const chainId = activeChain.authChainId;
+    const key = `${authSeqId}|${insCode}`;
     setStagedPtms(prev => [
       ...prev.filter(
-        p =>
-          !(
-            p.chainId === activeChain.authChainId &&
-            `${p.authSeqId}|${p.insCode}` === key
-          )
+        p => !(p.chainId === chainId && `${p.authSeqId}|${p.insCode}` === key)
       ),
       {
         id: crypto.randomUUID(),
-        chainId: activeChain.authChainId,
+        chainId,
         seqId: ptmSeqId,
-        authSeqId: singleResidue.authSeqId,
-        insCode: singleResidue.insCode,
+        authSeqId,
+        insCode,
         ccd,
-        label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} → ${ccd}`
+        label: `${chainId}/${authSeqId}${insCode} → ${ccd}`
       }
     ]);
+    // Mutual exclusivity: drop any erase / mutation on this residue.
+    unEraseResidue(chainId, authSeqId, insCode);
+    setStagedMutations(prev =>
+      prev.filter(
+        m => !(m.chainId === chainId && `${m.authSeqId}|${m.insCode}` === key)
+      )
+    );
     setPtmOpen(false);
   };
 
@@ -714,54 +758,59 @@ export function SequenceEditorPanel(): React.ReactElement {
         <div className="select-none font-mono text-xs leading-6">
           {displayCells.map((cell, i) => {
             const inRange = range ? i >= range.lo && i <= range.hi : false;
-            const res = cell.residue;
+            const selectable = cell.authSeqId !== undefined;
             const isErased =
-              res != null &&
+              cell.resolved &&
               (erasedKeys
                 .get(activeChain.authChainId)
-                ?.has(`${res.authSeqId}|${res.insCode}`) ??
+                ?.has(`${cell.authSeqId}|${cell.insCode}`) ??
                 false);
             const showNumber =
               cell.authLabel !== undefined && cell.authLabel % 10 === 0;
-            const markSuffix =
-              cell.mark === "mutated"
-                ? " (mutated)"
-                : cell.mark === "ptm"
-                  ? " (PTM)"
-                  : "";
             // Internal gaps are always inpainted; terminals only when opted in.
             const willInpaint = !cell.terminal || terminalsIncluded;
+            const label = cell.resName ?? cell.origCode;
+            const status = isErased
+              ? " (erased)"
+              : cell.mark === "mutated"
+                ? ` → ${cell.code} (mutated)`
+                : cell.mark === "ptm"
+                  ? " (PTM)"
+                  : cell.resolved
+                    ? ""
+                    : willInpaint
+                      ? " — will be inpainted"
+                      : " — skipped";
             const title =
-              res != null
-                ? `${res.resName} ${res.authSeqId}${res.insCode}${isErased ? " (erased)" : markSuffix}`
-                : `${cell.terminal ? "Terminal" : "Missing"} — ${
-                    willInpaint ? "will be inpainted" : "skipped"
-                  }`;
+              cell.authSeqId !== undefined
+                ? `${label} ${cell.authSeqId}${cell.insCode}${status}`
+                : `${label}${status}`;
             return (
               <span
                 key={cell.key}
                 onMouseDown={
-                  res ? e => handleResidueMouseDown(i, e) : undefined
+                  selectable ? e => handleResidueMouseDown(i, e) : undefined
                 }
                 onMouseEnter={
-                  res ? () => handleResidueMouseEnter(i) : undefined
+                  selectable ? () => handleResidueMouseEnter(i) : undefined
                 }
                 title={title}
                 className={cn(
                   "relative inline-block w-[0.85rem] text-center",
-                  res
-                    ? inRange
-                      ? "cursor-pointer rounded-sm bg-blue-500 text-white"
-                      : isErased
-                        ? "cursor-pointer text-red-400/60 line-through"
-                        : cell.mark === "ptm"
-                          ? "cursor-pointer rounded-sm bg-purple-500/25 text-purple-600 dark:text-purple-300"
-                          : cell.mark === "mutated"
-                            ? "cursor-pointer rounded-sm bg-amber-500/25 text-amber-700 dark:text-amber-300"
-                            : "cursor-pointer hover:bg-accent"
-                    : willInpaint
-                      ? "text-green-500/70"
-                      : "text-muted-foreground/30"
+                  selectable && "cursor-pointer",
+                  inRange
+                    ? "rounded-sm bg-blue-500 text-white"
+                    : cell.mark === "ptm"
+                      ? "rounded-sm bg-purple-500/25 text-purple-600 dark:text-purple-300"
+                      : cell.mark === "mutated"
+                        ? "rounded-sm bg-amber-500/25 text-amber-700 dark:text-amber-300"
+                        : isErased
+                          ? "text-red-400/60 line-through"
+                          : cell.resolved
+                            ? "hover:bg-accent"
+                            : willInpaint
+                              ? "text-green-500/70"
+                              : "text-muted-foreground/30"
                 )}
               >
                 {cell.code}
@@ -784,29 +833,39 @@ export function SequenceEditorPanel(): React.ReactElement {
 
       {/* Selection summary + actions */}
       <div>
-        {range && selectedResidues.length > 0 ? (
-          <div className="mb-2 text-xs">
-            <span className="font-semibold">Selected:</span> Chain{" "}
-            <span className="font-mono">{activeChain.authChainId}</span> ·{" "}
-            <span className="font-mono">
-              {selectedResidues[0].authSeqId}
-              {selectedResidues[0].insCode}–
-              {selectedResidues[selectedResidues.length - 1].authSeqId}
-              {selectedResidues[selectedResidues.length - 1].insCode}
-            </span>{" "}
-            ({selectedResidues.length} residue
-            {selectedResidues.length > 1 ? "s" : ""})
-          </div>
-        ) : (
-          <div className="mb-2 text-xs text-muted-foreground">
-            Click a residue to select; shift-click to extend the range.
-          </div>
-        )}
+        {(() => {
+          const numbered = selectedCells.filter(c => c.authSeqId !== undefined);
+          if (!numbered.length) {
+            return (
+              <div className="mb-2 text-xs text-muted-foreground">
+                Click a residue to select; shift-click or drag to extend.
+              </div>
+            );
+          }
+          const first = numbered[0];
+          const last = numbered[numbered.length - 1];
+          return (
+            <div className="mb-2 text-xs">
+              <span className="font-semibold">Selected:</span> Chain{" "}
+              <span className="font-mono">{activeChain.authChainId}</span> ·{" "}
+              <span className="font-mono">
+                {first.authSeqId}
+                {first.insCode}–{last.authSeqId}
+                {last.insCode}
+              </span>{" "}
+              ({numbered.length} residue{numbered.length > 1 ? "s" : ""}
+              {selectedResidues.length < numbered.length
+                ? `, ${selectedResidues.length} resolved`
+                : ""}
+              )
+            </div>
+          );
+        })()}
         <div className="flex gap-2">
           <button
             onClick={handleErase}
             disabled={selectedResidues.length === 0}
-            title="Mark the selected residues for erasure (shown ghosted; restore anytime)"
+            title="Erase resolved residues in the selection (missing residues can't be erased)"
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
             <Eraser className="h-3 w-3" />
@@ -840,25 +899,22 @@ export function SequenceEditorPanel(): React.ReactElement {
           </button>
         </div>
 
-        {/* Contextual hint for why Mutate/PTM may be unavailable */}
-        {singleResidue && !chainPoly && (
+        {/* Contextual hint for why PTM may be unavailable */}
+        {mutableCell && !activeChain.isNucleic && !canPtm && (
           <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
-            Mutate / PTM need an mmCIF with poly_seq_scheme (load the full CIF).
-          </p>
-        )}
-        {singleResidue && chainPoly && !activeChain.isNucleic && !canPtm && (
-          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
-            PTM applies to Ser/Thr/Tyr/Lys — {singleResidue.resName} has none.
+            PTM applies to Ser/Thr/Tyr/Lys —{" "}
+            {mutableCell.resName ?? mutableCell.origCode} has none.
           </p>
         )}
 
-        {ptmOpen && canPtm && singleResidue && ptmChoices && (
+        {ptmOpen && canPtm && mutableCell && ptmChoices && (
           <div className="mt-2 rounded-md border border-border p-2">
             <div className="mb-1.5 text-xs text-muted-foreground">
               Modify{" "}
               <span className="font-mono">
-                {singleResidue.resName} {singleResidue.authSeqId}
-                {singleResidue.insCode}
+                {mutableCell.resName ?? mutableCell.origCode}{" "}
+                {mutableCell.authSeqId}
+                {mutableCell.insCode}
               </span>
               :
             </div>
@@ -876,20 +932,20 @@ export function SequenceEditorPanel(): React.ReactElement {
           </div>
         )}
 
-        {mutateOpen && canMutate && singleResidue && (
+        {mutateOpen && canMutate && mutableCell && (
           <div className="mt-2 rounded-md border border-border p-2">
             <div className="mb-1.5 text-xs text-muted-foreground">
               Mutate{" "}
               <span className="font-mono">
-                {singleResidue.resName} {singleResidue.authSeqId}
-                {singleResidue.insCode}
+                {mutableCell.resName ?? mutableCell.origCode}{" "}
+                {mutableCell.authSeqId}
+                {mutableCell.insCode}
               </span>{" "}
               to:
             </div>
             <div className="grid grid-cols-10 gap-1">
               {AA_TARGETS.map(aa => {
-                const isCurrent =
-                  chainPoly?.oneLetter[mutationIndex ?? -1] === aa;
+                const isCurrent = mutableCell.origCode === aa;
                 return (
                   <button
                     key={aa}
