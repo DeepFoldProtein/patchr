@@ -21,7 +21,9 @@ import {
   missingRegionsDetectedAtom,
   erasedRegionsAtom,
   erasedResidueKeysAtom,
-  pendingPtmAtom,
+  stagedMutationsAtom,
+  stagedPtmsAtom,
+  uniprotReferenceAtom,
   fastaInputAtom,
   enableSequenceMappingAtom,
   skipTerminalAtom
@@ -50,6 +52,7 @@ interface DisplayCell {
   code: string;
   residue: ResidueCell | null;
   authLabel?: number; // author number for the tick marks
+  mark?: "mutated" | "ptm"; // staged edit on this residue
 }
 
 // Parse a multi-chain FASTA (">Chain A\nSEQ" or ">A\nSEQ") into chain -> seq.
@@ -113,12 +116,14 @@ export function SequenceEditorPanel(): React.ReactElement {
   const missingRegions = useAtomValue(missingRegionsDetectedAtom);
   const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
   const erasedKeys = useAtomValue(erasedResidueKeysAtom);
-  const [fastaInput, setFastaInput] = useAtom(fastaInputAtom);
+  const [stagedMutations, setStagedMutations] = useAtom(stagedMutationsAtom);
+  const [stagedPtms, setStagedPtms] = useAtom(stagedPtmsAtom);
+  const [uniprotReference, setUniprotReference] = useAtom(uniprotReferenceAtom);
+  const setFastaInput = useSetAtom(fastaInputAtom);
   const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
     enableSequenceMappingAtom
   );
   const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
-  const setPendingPtm = useSetAtom(pendingPtmAtom);
   const structureContent = useStructureContent();
   const polySeq = useMemo(
     () => parsePolySeqScheme(structureContent),
@@ -131,16 +136,10 @@ export function SequenceEditorPanel(): React.ReactElement {
     () => parseUniProtRefs(structureContent),
     [structureContent]
   );
-  // Reference sequences currently loaded into the inpainting run, per chain.
-  const loadedTargets = useMemo(
-    () => parseFastaByChain(fastaInput),
-    [fastaInput]
-  );
 
   const [chains, setChains] = useState<ChainSequence[]>([]);
   const [activeChainId, setActiveChainId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [staged, setStaged] = useState<string | null>(null);
   const [mutateOpen, setMutateOpen] = useState(false);
   const [ptmOpen, setPtmOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -180,32 +179,126 @@ export function SequenceEditorPanel(): React.ReactElement {
     [chains, activeChainId]
   );
 
-  // The sequence rendered in the grid. When a reference sequence is loaded for
-  // the active chain (UniProt/mutation) and we know its structure alignment,
-  // show the FULL reference with structure-resolved residues interactive and
-  // the rest marked to-inpaint. Otherwise show the resolved residues as-is.
+  // Reference sequences loaded from UniProt, per chain.
+  const referenceByChain = useMemo(
+    () => parseFastaByChain(uniprotReference),
+    [uniprotReference]
+  );
+
+  // Effective target per chain = loaded reference (UniProt) if present, else
+  // poly_seq_scheme when the chain has staged mutations; mutations applied.
+  const effectiveTargets = useMemo<Map<string, string>>(() => {
+    const out = new Map<string, string>();
+    for (const c of chains) {
+      const chainId = c.authChainId;
+      const muts = stagedMutations.filter(m => m.chainId === chainId);
+      const fromUniProt = referenceByChain.has(chainId);
+      const baseStr =
+        referenceByChain.get(chainId) ??
+        (muts.length ? polySeq.get(chainId)?.oneLetter : undefined);
+      if (!baseStr) continue;
+      if (muts.length === 0) {
+        out.set(chainId, baseStr);
+        continue;
+      }
+      const arr = baseStr.split("");
+      const ref = uniprotRefs.get(chainId);
+      for (const m of muts) {
+        let idx: number | undefined;
+        if (fromUniProt && ref && m.authSeqId >= ref.authBeg) {
+          idx = ref.dbBeg + (m.authSeqId - ref.authBeg) - 1;
+        } else {
+          idx = polySeq
+            .get(chainId)
+            ?.keyToIndex.get(`${m.authSeqId}|${m.insCode}`);
+        }
+        if (idx !== undefined && idx >= 0 && idx < arr.length) arr[idx] = m.to;
+      }
+      out.set(chainId, arr.join(""));
+    }
+    return out;
+  }, [chains, referenceByChain, stagedMutations, polySeq, uniprotRefs]);
+
+  // Drive the inpainting run's custom-sequence path from the effective targets.
+  useEffect(() => {
+    const fasta = Array.from(effectiveTargets.entries())
+      .map(([chainId, seq]) => `>Chain ${chainId}\n${seq}`)
+      .join("\n");
+    setFastaInput(fasta);
+    setEnableSequenceMapping(fasta.length > 0);
+  }, [effectiveTargets, setFastaInput, setEnableSequenceMapping]);
+
+  // Fast lookups for grid marking (keyed by chain|authSeqId|insCode).
+  const mutationKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of stagedMutations) {
+      s.add(`${m.chainId}|${m.authSeqId}|${m.insCode}`);
+    }
+    return s;
+  }, [stagedMutations]);
+  const ptmKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of stagedPtms)
+      s.add(`${p.chainId}|${p.authSeqId}|${p.insCode}`);
+    return s;
+  }, [stagedPtms]);
+
+  // The sequence rendered in the grid. With an effective target (reference
+  // and/or mutations) the full sequence is shown aligned to the structure;
+  // resolved residues stay interactive, the rest are to-inpaint. Staged
+  // mutations/PTMs are marked on their residues.
   const displayCells = useMemo<DisplayCell[]>(() => {
     if (!activeChain) return [];
+    const chainId = activeChain.authChainId;
     const resolvedByAuth = new Map<number, ResidueCell>();
     for (const r of activeChain.residues) {
       if (r.insCode === "") resolvedByAuth.set(r.authSeqId, r);
     }
+    const markOf = (authNum?: number): DisplayCell["mark"] => {
+      if (authNum === undefined) return undefined;
+      const key = `${chainId}|${authNum}|`;
+      if (ptmKeys.has(key)) return "ptm";
+      if (mutationKeys.has(key)) return "mutated";
+      return undefined;
+    };
 
-    const ref = uniprotRefs.get(activeChain.authChainId);
-    const target = loadedTargets.get(activeChain.authChainId);
-    const aligned = ref && ref.dbEnd >= ref.dbBeg;
+    const target = effectiveTargets.get(chainId);
+    const ref = uniprotRefs.get(chainId);
+    const fromUniProt = referenceByChain.has(chainId);
 
-    if (enableSequenceMapping && target && aligned) {
-      const cells: DisplayCell[] = [];
-      for (let p = 1; p <= target.length; p++) {
-        let residue: ResidueCell | null = null;
-        let authLabel: number | undefined;
-        if (p >= ref.dbBeg && p <= ref.dbEnd) {
-          const authNum = ref.authBeg + (p - ref.dbBeg);
-          authLabel = authNum;
-          residue = resolvedByAuth.get(authNum) ?? null;
+    if (target && (!fromUniProt || (ref && ref.dbEnd >= ref.dbBeg))) {
+      // position (0-based) -> author number
+      let posToAuth: (p0: number) => number | undefined;
+      if (fromUniProt && ref) {
+        posToAuth = p0 => {
+          const p = p0 + 1;
+          return p >= ref.dbBeg && p <= ref.dbEnd
+            ? ref.authBeg + (p - ref.dbBeg)
+            : undefined;
+        };
+      } else {
+        const idxToAuth = new Map<number, number>();
+        const ps = polySeq.get(chainId);
+        if (ps) {
+          for (const [k, idx] of ps.keyToIndex) {
+            const auth = parseInt(k.split("|")[0], 10);
+            if (Number.isFinite(auth)) idxToAuth.set(idx, auth);
+          }
         }
-        cells.push({ key: `u${p}`, code: target[p - 1], residue, authLabel });
+        posToAuth = p0 => idxToAuth.get(p0);
+      }
+      const cells: DisplayCell[] = [];
+      for (let p0 = 0; p0 < target.length; p0++) {
+        const authNum = posToAuth(p0);
+        const residue =
+          authNum !== undefined ? (resolvedByAuth.get(authNum) ?? null) : null;
+        cells.push({
+          key: `t${p0}`,
+          code: target[p0],
+          residue,
+          authLabel: authNum,
+          mark: markOf(authNum)
+        });
       }
       return cells;
     }
@@ -220,9 +313,7 @@ export function SequenceEditorPanel(): React.ReactElement {
       }
       return Array.from({ length: region.regionLength ?? 0 }, () => "·");
     };
-    const chainRegions = missingRegions.filter(
-      r => r.chainId === activeChain.authChainId
-    );
+    const chainRegions = missingRegions.filter(r => r.chainId === chainId);
     const nterm = chainRegions.find(r => r.terminalType === "nterm");
     const cterm = chainRegions.find(r => r.terminalType === "cterm");
 
@@ -235,7 +326,8 @@ export function SequenceEditorPanel(): React.ReactElement {
         key: `${r.authSeqId}|${r.insCode}`,
         code: r.code,
         residue: r,
-        authLabel: r.insCode === "" ? r.authSeqId : undefined
+        authLabel: r.insCode === "" ? r.authSeqId : undefined,
+        mark: r.insCode === "" ? markOf(r.authSeqId) : undefined
       });
     }
     termCode(cterm).forEach((code, i) =>
@@ -244,10 +336,13 @@ export function SequenceEditorPanel(): React.ReactElement {
     return cells;
   }, [
     activeChain,
+    effectiveTargets,
     uniprotRefs,
-    loadedTargets,
-    enableSequenceMapping,
-    missingRegions
+    referenceByChain,
+    polySeq,
+    missingRegions,
+    mutationKeys,
+    ptmKeys
   ]);
 
   const range = useMemo(() => {
@@ -343,6 +438,14 @@ export function SequenceEditorPanel(): React.ReactElement {
     setErasedRegions([]);
   };
 
+  const handleRestoreMutation = (id: string): void => {
+    setStagedMutations(prev => prev.filter(m => m.id !== id));
+  };
+
+  const handleRestorePtm = (id: string): void => {
+    setStagedPtms(prev => prev.filter(p => p.id !== id));
+  };
+
   // Mutation is available when exactly one protein residue is selected and its
   // position is resolvable in the CIF's poly_seq_scheme (full, gap-aware seq).
   const singleResidue =
@@ -376,16 +479,27 @@ export function SequenceEditorPanel(): React.ReactElement {
       setMutateOpen(false);
       return;
     }
-    const seq = chainPoly.oneLetter.split("");
-    seq[mutationIndex] = target;
-    const mutatedSeq = seq.join("");
-    // Feed the mutated full sequence through the existing custom-sequence
-    // (sequence-mapping) upload path; the backend strips the mismatched residue
-    // and regenerates it as the target identity.
-    setFastaInput(`>${activeChain.authChainId}\n${mutatedSeq}`);
-    setEnableSequenceMapping(true);
-    const label = `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`;
-    setStaged(`Mutation ${label}`);
+    const key = `${singleResidue.authSeqId}|${singleResidue.insCode}`;
+    // Stage the substitution; the effective target sequence (with all staged
+    // mutations applied) drives the custom-sequence upload path.
+    setStagedMutations(prev => [
+      ...prev.filter(
+        m =>
+          !(
+            m.chainId === activeChain.authChainId &&
+            `${m.authSeqId}|${m.insCode}` === key
+          )
+      ),
+      {
+        id: crypto.randomUUID(),
+        chainId: activeChain.authChainId,
+        authSeqId: singleResidue.authSeqId,
+        insCode: singleResidue.insCode,
+        from: original,
+        to: target,
+        label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${original}→${target}`
+      }
+    ]);
     setMutateOpen(false);
   };
 
@@ -406,20 +520,27 @@ export function SequenceEditorPanel(): React.ReactElement {
     !!ptmChoices &&
     ptmSeqId !== undefined;
 
-  const handlePtm = (ccd: string, ptmLabel: string): void => {
+  const handlePtm = (ccd: string): void => {
     if (!activeChain || !singleResidue || ptmSeqId === undefined) return;
-    setPendingPtm({
-      chainId: activeChain.authChainId,
-      seqId: ptmSeqId,
-      ccd,
-      label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} ${ptmLabel}`
-    });
-    // PTM is its own staged action — clear any prior sequence-mapping edit.
-    setEnableSequenceMapping(false);
-    setFastaInput("");
-    setStaged(
-      `PTM ${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} → ${ccd}`
-    );
+    const key = `${singleResidue.authSeqId}|${singleResidue.insCode}`;
+    setStagedPtms(prev => [
+      ...prev.filter(
+        p =>
+          !(
+            p.chainId === activeChain.authChainId &&
+            `${p.authSeqId}|${p.insCode}` === key
+          )
+      ),
+      {
+        id: crypto.randomUUID(),
+        chainId: activeChain.authChainId,
+        seqId: ptmSeqId,
+        authSeqId: singleResidue.authSeqId,
+        insCode: singleResidue.insCode,
+        ccd,
+        label: `${activeChain.authChainId}/${singleResidue.authSeqId}${singleResidue.insCode} → ${ccd}`
+      }
+    ]);
     setPtmOpen(false);
   };
 
@@ -456,10 +577,8 @@ export function SequenceEditorPanel(): React.ReactElement {
       if (fastaLines.length === 0) {
         throw new Error("No sequences returned");
       }
-      setFastaInput(fastaLines.join("\n"));
-      setEnableSequenceMapping(true);
+      setUniprotReference(fastaLines.join("\n"));
       setUniprotStatus("success");
-      setStaged("UniProt reference sequences loaded");
     } catch (err) {
       logger.error("[Sequence Editor] UniProt fetch failed:", err);
       setUniprotStatus("error");
@@ -472,12 +591,8 @@ export function SequenceEditorPanel(): React.ReactElement {
   // Terminals are inpainted when the user opts in, or when a full sequence is
   // provided (UniProt/mutation), since terminals then come from that sequence.
   const terminalsIncluded = enableSequenceMapping || !skipTerminal;
-  // Whether the grid is showing a loaded reference (full) sequence.
-  const showingReference =
-    enableSequenceMapping &&
-    !!loadedTargets.get(activeChain?.authChainId ?? "") &&
-    (uniprotRefs.get(activeChain?.authChainId ?? "")?.dbEnd ?? 0) >=
-      (uniprotRefs.get(activeChain?.authChainId ?? "")?.dbBeg ?? 1);
+  // Whether the grid is showing a loaded UniProt reference (full) sequence.
+  const showingReference = referenceByChain.has(activeChain?.authChainId ?? "");
 
   if (!activeChain) {
     return (
@@ -575,9 +690,15 @@ export function SequenceEditorPanel(): React.ReactElement {
                 false);
             const showNumber =
               cell.authLabel !== undefined && cell.authLabel % 10 === 0;
+            const markSuffix =
+              cell.mark === "mutated"
+                ? " (mutated)"
+                : cell.mark === "ptm"
+                  ? " (PTM)"
+                  : "";
             const title =
               res != null
-                ? `${res.resName} ${res.authSeqId}${res.insCode}${isErased ? " (erased)" : ""}`
+                ? `${res.resName} ${res.authSeqId}${res.insCode}${isErased ? " (erased)" : markSuffix}`
                 : terminalsIncluded
                   ? "Missing — will be inpainted"
                   : "Missing — skipped";
@@ -598,7 +719,11 @@ export function SequenceEditorPanel(): React.ReactElement {
                       ? "cursor-pointer rounded-sm bg-blue-500 text-white"
                       : isErased
                         ? "cursor-pointer text-red-400/60 line-through"
-                        : "cursor-pointer hover:bg-accent"
+                        : cell.mark === "ptm"
+                          ? "cursor-pointer rounded-sm bg-purple-500/25 text-purple-600 dark:text-purple-300"
+                          : cell.mark === "mutated"
+                            ? "cursor-pointer rounded-sm bg-amber-500/25 text-amber-700 dark:text-amber-300"
+                            : "cursor-pointer hover:bg-accent"
                     : terminalsIncluded
                       ? "text-green-500/70"
                       : "text-muted-foreground/30"
@@ -729,7 +854,7 @@ export function SequenceEditorPanel(): React.ReactElement {
               {ptmChoices.map(choice => (
                 <button
                   key={choice.ccd}
-                  onClick={() => handlePtm(choice.ccd, choice.label)}
+                  onClick={() => handlePtm(choice.ccd)}
                   className="rounded bg-muted px-2 py-1 text-left text-xs transition-colors hover:bg-blue-500 hover:text-white"
                 >
                   {choice.label}
@@ -773,14 +898,6 @@ export function SequenceEditorPanel(): React.ReactElement {
             </div>
           </div>
         )}
-
-        {staged && (
-          <div className="mt-2 rounded-md bg-blue-500/10 px-2 py-1.5 text-xs text-blue-600 dark:text-blue-400">
-            Staged <span className="font-mono">{staged}</span>. Press{" "}
-            <span className="font-semibold">Start Inference</span> below to
-            regenerate.
-          </div>
-        )}
       </div>
 
       {/* Erased regions — ghosted in 3D, restorable, regenerated on run */}
@@ -822,6 +939,80 @@ export function SequenceEditorPanel(): React.ReactElement {
             Erased residues are regenerated when you press{" "}
             <span className="font-semibold">Start Inference</span>.
           </p>
+        </div>
+      )}
+
+      {/* Staged mutations — marked amber in the grid, restorable */}
+      {stagedMutations.length > 0 && (
+        <div className="rounded-md border border-amber-400/30 bg-amber-500/5 p-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+              Mutations ({stagedMutations.length})
+            </span>
+            <button
+              onClick={() => setStagedMutations([])}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear all
+            </button>
+          </div>
+          <ul className="space-y-1">
+            {stagedMutations.map(m => (
+              <li
+                key={m.id}
+                className="flex items-center justify-between gap-2 text-xs"
+              >
+                <span className="truncate font-mono text-muted-foreground">
+                  {m.label}
+                </span>
+                <button
+                  onClick={() => handleRestoreMutation(m.id)}
+                  title="Restore this residue"
+                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Staged PTMs — marked purple in the grid, restorable */}
+      {stagedPtms.length > 0 && (
+        <div className="rounded-md border border-purple-400/30 bg-purple-500/5 p-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
+              PTMs ({stagedPtms.length})
+            </span>
+            <button
+              onClick={() => setStagedPtms([])}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear all
+            </button>
+          </div>
+          <ul className="space-y-1">
+            {stagedPtms.map(p => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-2 text-xs"
+              >
+                <span className="truncate font-mono text-muted-foreground">
+                  {p.label}
+                </span>
+                <button
+                  onClick={() => handleRestorePtm(p.id)}
+                  title="Restore this residue"
+                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

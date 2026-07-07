@@ -1,5 +1,5 @@
 import React from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { MissingRegionReviewSection } from "./repair/GapReviewSection";
 import { ProjectManager } from "./ProjectManager";
 import {
@@ -7,7 +7,9 @@ import {
   enableSequenceMappingAtom,
   skipTerminalAtom,
   erasedRegionsAtom,
-  pendingPtmAtom
+  stagedPtmsAtom,
+  stagedMutationsAtom,
+  uniprotReferenceAtom
 } from "../store/repair-atoms";
 import { eraseResiduesFromCif } from "../lib/cifErase";
 import {
@@ -1381,7 +1383,9 @@ function ContextInpaintSection({
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
   const skipTerminal = useAtomValue(skipTerminalAtom);
   const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
-  const [pendingPtm, setPendingPtm] = useAtom(pendingPtmAtom);
+  const [stagedPtms, setStagedPtms] = useAtom(stagedPtmsAtom);
+  const setStagedMutations = useSetAtom(stagedMutationsAtom);
+  const setUniprotReference = useSetAtom(uniprotReferenceAtom);
   // When sequence mapping is on, the provided sequence drives terminal
   // handling, so the skip-terminal flag is meaningless and we lock it off.
   const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
@@ -1523,13 +1527,13 @@ function ContextInpaintSection({
         );
       }
 
-      // 2c. Apply a staged "add PTM" edit: forwarded to the backend as a
-      // modifications field so Boltz models the modified residue.
-      let modificationsStr = "";
-      if (pendingPtm) {
-        modificationsStr = `${pendingPtm.chainId}:${pendingPtm.seqId}:${pendingPtm.ccd}`;
-        logger.log(`[PTM] Requesting modification ${modificationsStr}`);
-        setPendingPtm(null);
+      // 2c. Apply staged PTMs: forwarded to the backend as a modifications
+      // field so Boltz models each modified residue.
+      const modificationsStr = stagedPtms
+        .map(p => `${p.chainId}:${p.seqId}:${p.ccd}`)
+        .join(",");
+      if (modificationsStr) {
+        logger.log(`[PTM] Requesting modifications ${modificationsStr}`);
       }
 
       // 3. Upload template
@@ -1574,9 +1578,12 @@ function ContextInpaintSection({
       setJobId(newJobId);
       setJobStatus("template_generating");
 
-      // The erased residues are now baked into the submitted job; clear the
-      // marks (and their 3D ghosting) so a later run starts clean.
+      // The staged edits are now baked into the submitted job; clear them (and
+      // their 3D ghosting / grid marks) so a later run starts clean.
       if (erasedRegions.length > 0) setErasedRegions([]);
+      setStagedPtms([]);
+      setStagedMutations([]);
+      setUniprotReference("");
 
       // Store request info for error logging
       const requestInfo = {

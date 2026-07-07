@@ -51,16 +51,36 @@ export const erasedResidueKeysAtom = atom(get => {
   return byChain;
 });
 
-// Staged "add PTM" request from the Sequence editor. The next inpainting run
-// forwards it to the backend as a `modifications` field so Boltz models the
-// modified residue (e.g. SEP) at that entity position.
-export interface PendingPtm {
+// Staged residue substitutions from the Sequence editor. Each is shown in the
+// grid and restorable; on run they are applied to the chain's target sequence
+// (custom-sequence path) so the backend rebuilds them as the new identity.
+export interface StagedMutation {
+  id: string;
+  chainId: string; // author chain id
+  authSeqId: number;
+  insCode: string;
+  from: string; // original one-letter code
+  to: string; // target one-letter code
+  label: string;
+}
+export const stagedMutationsAtom = atom<StagedMutation[]>([]);
+
+// Staged PTMs. On run they are forwarded to the backend as `modifications` so
+// Boltz models the modified residue (e.g. SEP) at that entity position.
+export interface StagedPtm {
+  id: string;
   chainId: string; // author chain id
   seqId: number; // entity seq_id (_entity_poly_seq.num)
+  authSeqId: number;
+  insCode: string;
   ccd: string; // component id, e.g. SEP / TPO / PTR / MLY
-  label: string; // human-readable summary
+  label: string;
 }
-export const pendingPtmAtom = atom<PendingPtm | null>(null);
+export const stagedPtmsAtom = atom<StagedPtm[]>([]);
+
+// Raw reference FASTA loaded from UniProt (per chain). The effective target
+// sequences (reference + staged mutations) are derived from this in the editor.
+export const uniprotReferenceAtom = atom<string>("");
 
 // Skip N/C-terminal missing residues (only inpaint internal gaps). Defaults to
 // true: terminals are shown ghosted and left out of inpainting unless the user
@@ -88,7 +108,9 @@ export const resetRepairStateAtom = atom(null, (_get, set) => {
   set(repairContextsAtom, new Map());
   set(repairResultsAtom, []);
   set(erasedRegionsAtom, []);
-  set(pendingPtmAtom, null);
+  set(stagedMutationsAtom, []);
+  set(stagedPtmsAtom, []);
+  set(uniprotReferenceAtom, "");
   set(apiConnectionStatusAtom, "idle");
   logger.log("[Repair Atoms] Reset all repair state");
 });
