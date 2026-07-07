@@ -353,14 +353,13 @@ export function useSequenceViewer(
                   false
                 );
 
-                // Zoom to the residue
-                const bounds = Loci.getBoundingSphere(targetLoci);
-                if (bounds) {
-                  plugin.canvas3d?.camera.focus(bounds.center, 8, 500);
-                }
+                // NOTE: do NOT move the camera here. The Sequence editor panel
+                // owns sequence-selection focus; auto-zooming from this
+                // selection-change handler fought that and focused the wrong
+                // chain/residue in multi-chain structures.
 
                 logger.log(
-                  `[Sequence Viewer] ✓ Converted selection to auth_seq_id=${authSeqId} and zoomed`
+                  `[Sequence Viewer] ✓ Converted selection to auth_seq_id=${authSeqId}`
                 );
               }
             } finally {
