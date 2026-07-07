@@ -167,13 +167,21 @@ export function parsePolySeqScheme(
 
   const strandCol = cols["pdb_strand_id"] ?? cols["asym_id"];
   const monCol = cols["mon_id"];
-  // Prefer pdb_seq_num: it carries the author number even for residues missing
+  // Per row, prefer auth_seq_num (the value Mol* exposes as auth_seq_id, so
+  // resolved residues match) and fall back to pdb_seq_num for residues missing
   // from the structure (auth_seq_num is "?" for those).
-  const authNumCol =
-    cols["pdb_seq_num"] ?? cols["auth_seq_num"] ?? cols["ndb_seq_num"];
+  const authCol = cols["auth_seq_num"];
+  const pdbNumCol = cols["pdb_seq_num"];
+  const ndbNumCol = cols["ndb_seq_num"];
   const insCol = cols["pdb_ins_code"];
   const seqIdCol = cols["seq_id"];
   if (strandCol === undefined || monCol === undefined) return result;
+
+  const numOf = (v: string | undefined): number | undefined => {
+    if (!v || v === "?" || v === ".") return undefined;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
 
   for (const row of rows) {
     const chain = row[strandCol];
@@ -197,11 +205,10 @@ export function parsePolySeqScheme(
     entry.monIds.push(mon);
 
     const ins = insCol !== undefined ? normalizeIns(row[insCol]) : "";
-    const authRaw = authNumCol !== undefined ? row[authNumCol] : undefined;
     const authSeqId =
-      authRaw && authRaw !== "?" && authRaw !== "."
-        ? parseInt(authRaw, 10)
-        : undefined;
+      numOf(authCol !== undefined ? row[authCol] : undefined) ??
+      numOf(pdbNumCol !== undefined ? row[pdbNumCol] : undefined) ??
+      numOf(ndbNumCol !== undefined ? row[ndbNumCol] : undefined);
     const seqIdRaw = seqIdCol !== undefined ? row[seqIdCol] : undefined;
     const seqId = seqIdRaw ? parseInt(seqIdRaw, 10) : index + 1;
 
