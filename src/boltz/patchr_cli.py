@@ -805,10 +805,11 @@ def _predict_protenix(
 @click.option("--relative-paths", is_flag=True, help="Write CIF/metadata paths relative to output dir (default: absolute).")
 @click.option(
     "-m", "--modification", "modification", multiple=True,
-    help="Add a PTM/modification: CHAIN:RESID:CCD where RESID is the AUTHOR "
-         "residue number and CCD is the modified-residue code (e.g. -m A:12:SEP "
-         "for phospho-Ser at author residue 12 of chain A). Protein chains only. "
-         "Repeatable.",
+    help="Add a PTM/modification: CHAIN:SEQID:CCD where SEQID is the 1-based "
+         "ENTITY (canonical) sequence position — the seq_id shown in a structure "
+         "viewer, same numbering boltz uses — and CCD is the modified-residue code "
+         "(e.g. -m A:12:SEP for phospho-Ser at sequence position 12 of chain A). "
+         "CHAIN is the author chain id. Protein chains only. Repeatable.",
 )
 def template(
     pdb_id: Optional[str],
@@ -860,14 +861,14 @@ def template(
         else:
             custom_sequences["_default_"] = sequence.strip()
 
-    # Parse PTM/modifications:  CHAIN:RESID:CCD  (RESID = author residue number).
-    # Protein chains only; StructureProcessor rejects non-protein targets.
+    # Parse PTM/modifications:  CHAIN:SEQID:CCD  (SEQID = entity/canonical seq position;
+    # CHAIN = author chain id). Protein chains only; StructureProcessor rejects others.
     modifications = {}
     for spec in modification:
         parts = [p.strip() for p in spec.split(":")]
         if len(parts) != 3 or not all(parts):
             click.echo(
-                f"Error: invalid --modification '{spec}'. Expected CHAIN:RESID:CCD (e.g. A:12:SEP).",
+                f"Error: invalid --modification '{spec}'. Expected CHAIN:SEQID:CCD (e.g. A:12:SEP).",
                 err=True,
             )
             sys.exit(1)
@@ -877,7 +878,7 @@ def template(
             rid = int(rid)
         except ValueError:
             click.echo(
-                f"Error: --modification RESID must be an integer (author residue number): '{spec}'.",
+                f"Error: --modification SEQID must be an integer (entity sequence position): '{spec}'.",
                 err=True,
             )
             sys.exit(1)

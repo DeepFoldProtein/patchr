@@ -1,6 +1,5 @@
 """StructureProcessor: main class that composes all Mixin capabilities."""
 import os
-import re
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -54,9 +53,10 @@ class StructureProcessor(
         self.include_solvent = include_solvent
         self.include_ligands = include_ligands
         self.skip_terminal = skip_terminal
-        # User-requested PTMs: {chain: [{'resid': <AUTHOR resid int>, 'ccd': CCD}, ...]}.
-        # RESID is the author residue number (what the GUI/structure shows); it is
-        # mapped to the trimmed sequence position at apply time.
+        # User-requested PTMs: {chain: [{'resid': <entity seq_id int>, 'ccd': CCD}, ...]}.
+        # 'resid' is the 1-based ENTITY (canonical) sequence position — the same seq_id
+        # the studio sends and the same numbering boltz uses for modifications.position.
+        # Keyed by AUTHOR chain id on input; chain_mapping remaps to internal label ids.
         self.user_modifications: Dict[str, List[Dict]] = modifications or {}
         
         if cif_file_path:
@@ -709,33 +709,41 @@ class StructureProcessor(
                     if comp_id not in STANDARD_AA_THREE_LETTER and comp_id not in STANDARD_NUCLEOTIDE_CODES and pos not in positions_added:
                         chain_modifications.append({'position': pos, 'ccd': comp_id, 'parent': None, 'parent_one': None})
                         positions_added.add(pos)
-            # User-requested PTMs (--modification CHAIN:RESID:CCD). RESID is the
-            # AUTHOR residue number; map it to the trimmed sequence position via the
-            # renumbered atoms (label_seq_id = trimmed canonical position). A user PTM
-            # overrides any existing modification at that position (e.g. SER -> SEP).
+            # User-requested PTMs (--modification CHAIN:SEQID:CCD). SEQID is the
+            # 1-based ENTITY (canonical) sequence position — the same numbering boltz
+            # uses for `modifications.position` and the entity seq_id the studio sends.
+            # It is shifted by trim_offset when --skip-terminal drops N-terminal
+            # residues, exactly like the entity_poly modifications above.
+            #
+            # CHAIN is resolved in the AUTHOR namespace: user_modifications is keyed by
+            # the author chain id (what the viewer shows), so we match on the author id
+            # of the chain being processed (author_chain_id), NOT the internal
+            # label_asym_id. This is critical because label ids can collide with a
+            # different chain's author id — e.g. 1DE9 label 'A' is a DNA chain while the
+            # protein is author 'A' / label 'G'; matching by label would send the PTM to
+            # the DNA chain and wrongly reject. Matching by author id works in both the
+            # assembly path (all chains processed) and the normalize path. Synthetic
+            # symmetry copies (e.g. label 'G-2') fall back to their base chain's author.
+            _base_author = self.author_chain_ids.get(self._base_chain_id(chain_id))
             _umods = (self.user_modifications.get(author_chain_id)
-                      or self.user_modifications.get(chain_id)
-                      or self.user_modifications.get(self._base_chain_id(chain_id)) or [])
+                      or (self.user_modifications.get(_base_author) if _base_author else None)
+                      or [])
             if _umods and entity_type != 'protein':
                 fatal(f"--modification: chain {author_chain_id} is {str(entity_type).upper()}, "
                       f"not protein. PTMs are only supported on protein chains.")
             if _umods:
-                _auth2canon: Dict[int, int] = {}
-                for _a in renumbered_atoms:
-                    _lp = _a.get('label_seq_id')
-                    _am = re.match(r'^(-?\d+)', str(_a.get('auth_seq_id', '')).strip())
-                    if _am and str(_lp).isdigit():
-                        _auth2canon.setdefault(int(_am.group(1)), int(_lp))
                 for _um in _umods:
-                    _pos = _auth2canon.get(int(_um['resid']))
-                    if _pos is None or not (1 <= _pos <= seq_len_trimmed):
-                        warning(f"--modification: chain {author_chain_id} residue {_um['resid']} "
-                                f"not present in the modelled sequence — skipped")
+                    _seqid = int(_um['resid'])
+                    _pos = _seqid - trim_offset
+                    if not (1 <= _pos <= seq_len_trimmed):
+                        warning(f"--modification: chain {author_chain_id} seq_id {_seqid} "
+                                f"is outside the modelled sequence (1..{seq_len_trimmed}"
+                                f"{f', trimmed by {trim_offset}' if trim_offset else ''}) — skipped")
                         continue
                     chain_modifications = [m for m in chain_modifications if m['position'] != _pos]
                     chain_modifications.append({'position': _pos, 'ccd': str(_um['ccd']).upper(),
                                                 'parent': None, 'parent_one': None})
-                    info(f"--modification: chain {author_chain_id} residue {_um['resid']} "
+                    info(f"--modification: chain {author_chain_id} seq_id {_seqid} "
                          f"-> sequence position {_pos} -> {str(_um['ccd']).upper()}")
                 positions_added = {m['position'] for m in chain_modifications}
 

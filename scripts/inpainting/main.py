@@ -132,9 +132,11 @@ click.rich_click.OPTION_GROUPS = {
 @click.option(
     "-m", "--modification", "modification",
     multiple=True,
-    help="Add a PTM/modification: CHAIN:RESID:CCD where RESID is the AUTHOR "
-         "residue number and CCD is the modified-residue code (e.g. -m A:12:SEP "
-         "for phospho-Ser at author residue 12 of chain A). Repeatable.",
+    help="Add a PTM/modification: CHAIN:SEQID:CCD where SEQID is the 1-based "
+         "ENTITY (canonical) sequence position — the seq_id shown in a structure "
+         "viewer, same numbering boltz uses — and CCD is the modified-residue code "
+         "(e.g. -m A:12:SEP for phospho-Ser at sequence position 12 of chain A). "
+         "CHAIN is the author chain id. Protein chains only. Repeatable.",
 )
 def main(
     pdb_id,
@@ -175,13 +177,13 @@ def main(
         else:
             custom_sequences['_default_'] = sequence.strip()
 
-    # Parse PTM/modifications:  CHAIN:RESID:CCD  (RESID = author residue number)
+    # Parse PTM/modifications:  CHAIN:SEQID:CCD  (SEQID = entity/canonical seq position)
     modifications = {}
     for spec in modification:
         parts = [p.strip() for p in spec.split(':')]
         if len(parts) != 3 or not all(parts):
             raise click.BadParameter(
-                f"Invalid format: {spec}. Expected CHAIN:RESID:CCD (e.g. A:12:SEP).",
+                f"Invalid format: {spec}. Expected CHAIN:SEQID:CCD (e.g. A:12:SEP).",
                 param_hint="'--modification'",
             )
         ch, rid, ccd = parts
@@ -190,7 +192,7 @@ def main(
             rid = int(rid)
         except ValueError:
             raise click.BadParameter(
-                f"RESID must be an integer (author residue number): {spec}.",
+                f"SEQID must be an integer (entity sequence position): {spec}.",
                 param_hint="'--modification'",
             )
         modifications.setdefault(ch, []).append({'resid': rid, 'ccd': ccd.upper()})
