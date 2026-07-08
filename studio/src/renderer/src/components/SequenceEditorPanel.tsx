@@ -137,6 +137,83 @@ const PTM_OPTIONS: Record<string, { label: string; ccd: string }[]> = {
   ]
 };
 
+// One staged-edit group (Erased / Mutations / PTMs) rendered as a clean row-list
+// with a small color dot, rather than a tinted card. Colors match the 3D legend.
+function StagedEditGroup({
+  dotColor,
+  title,
+  count,
+  onClearAll,
+  clearTitle,
+  footer,
+  children
+}: {
+  dotColor: string;
+  title: string;
+  count: number;
+  onClearAll: () => void;
+  clearTitle?: string;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className="px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: dotColor }}
+          />
+          <span className="text-xs font-medium">{title}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        </div>
+        <button
+          onClick={onClearAll}
+          title={clearTitle}
+          className="text-[0.7rem] text-muted-foreground/70 transition-colors hover:text-foreground"
+        >
+          Clear all
+        </button>
+      </div>
+      <div className="space-y-px">{children}</div>
+      {footer}
+    </div>
+  );
+}
+
+function StagedEditRow({
+  label,
+  strikethrough,
+  onRestore
+}: {
+  label: string;
+  strikethrough?: boolean;
+  onRestore: () => void;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
+      <span
+        className={cn(
+          "truncate font-mono text-xs text-muted-foreground",
+          strikethrough && "line-through decoration-muted-foreground/50"
+        )}
+      >
+        {label}
+      </span>
+      <button
+        onClick={onRestore}
+        title="Restore"
+        aria-label="Restore"
+        className="shrink-0 rounded p-1 text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <Undo2 className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 export function SequenceEditorPanel(): React.ReactElement {
   const plugin = useAtomValue(pluginAtom);
   // Re-detection of missing regions is a reliable "structure is ready" signal.
@@ -1017,119 +1094,73 @@ export function SequenceEditorPanel(): React.ReactElement {
         )}
       </div>
 
-      {/* Erased regions — ghosted in 3D, restorable, regenerated on run */}
-      {erasedRegions.length > 0 && (
-        <div className="rounded-md border border-red-400/30 bg-red-500/5 p-2">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-semibold text-red-500 dark:text-red-400">
-              Erased ({erasedRegions.length})
-            </span>
-            <button
-              onClick={handleClearErased}
-              title="Restore all erased residues"
-              className="text-xs text-muted-foreground hover:text-foreground"
+      {/* Staged edits — Erased / Mutations / PTMs in one quiet, divided list.
+          Color is carried by a small dot (matching the 3D legend), not a tint. */}
+      {(erasedRegions.length > 0 ||
+        stagedMutations.length > 0 ||
+        stagedPtms.length > 0) && (
+        <div className="divide-y divide-border/50 overflow-hidden rounded-md border border-border/70">
+          {erasedRegions.length > 0 && (
+            <StagedEditGroup
+              dotColor="#ef4444"
+              title="Erased"
+              count={erasedRegions.length}
+              onClearAll={handleClearErased}
+              clearTitle="Restore all erased residues"
+              footer={
+                <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+                  Regenerated when you press{" "}
+                  <span className="font-medium text-foreground">
+                    Start Inference
+                  </span>
+                  .
+                </p>
+              }
             >
-              Clear all
-            </button>
-          </div>
-          <ul className="space-y-1">
-            {erasedRegions.map(region => (
-              <li
-                key={region.id}
-                className="flex items-center justify-between gap-2 text-xs"
-              >
-                <span className="truncate font-mono text-muted-foreground line-through">
-                  {region.label}
-                </span>
-                <button
-                  onClick={() => handleRestore(region.id)}
-                  title="Restore this region"
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
-                >
-                  <Undo2 className="h-3 w-3" />
-                  Restore
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
-            Erased residues are regenerated when you press{" "}
-            <span className="font-semibold">Start Inference</span>.
-          </p>
-        </div>
-      )}
+              {erasedRegions.map(region => (
+                <StagedEditRow
+                  key={region.id}
+                  label={region.label}
+                  strikethrough
+                  onRestore={() => handleRestore(region.id)}
+                />
+              ))}
+            </StagedEditGroup>
+          )}
 
-      {/* Staged mutations — marked teal in the grid, restorable */}
-      {stagedMutations.length > 0 && (
-        <div className="rounded-md border border-teal-400/30 bg-teal-500/5 p-2">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-semibold text-teal-600 dark:text-teal-400">
-              Mutations ({stagedMutations.length})
-            </span>
-            <button
-              onClick={() => setStagedMutations([])}
-              className="text-xs text-muted-foreground hover:text-foreground"
+          {stagedMutations.length > 0 && (
+            <StagedEditGroup
+              dotColor="#14b8a6"
+              title="Mutations"
+              count={stagedMutations.length}
+              onClearAll={() => setStagedMutations([])}
             >
-              Clear all
-            </button>
-          </div>
-          <ul className="space-y-1">
-            {stagedMutations.map(m => (
-              <li
-                key={m.id}
-                className="flex items-center justify-between gap-2 text-xs"
-              >
-                <span className="truncate font-mono text-muted-foreground">
-                  {m.label}
-                </span>
-                <button
-                  onClick={() => handleRestoreMutation(m.id)}
-                  title="Restore this residue"
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
-                >
-                  <Undo2 className="h-3 w-3" />
-                  Restore
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+              {stagedMutations.map(m => (
+                <StagedEditRow
+                  key={m.id}
+                  label={m.label}
+                  onRestore={() => handleRestoreMutation(m.id)}
+                />
+              ))}
+            </StagedEditGroup>
+          )}
 
-      {/* Staged PTMs — marked purple in the grid, restorable */}
-      {stagedPtms.length > 0 && (
-        <div className="rounded-md border border-purple-400/30 bg-purple-500/5 p-2">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-              PTMs ({stagedPtms.length})
-            </span>
-            <button
-              onClick={() => setStagedPtms([])}
-              className="text-xs text-muted-foreground hover:text-foreground"
+          {stagedPtms.length > 0 && (
+            <StagedEditGroup
+              dotColor="#a855f7"
+              title="PTMs"
+              count={stagedPtms.length}
+              onClearAll={() => setStagedPtms([])}
             >
-              Clear all
-            </button>
-          </div>
-          <ul className="space-y-1">
-            {stagedPtms.map(p => (
-              <li
-                key={p.id}
-                className="flex items-center justify-between gap-2 text-xs"
-              >
-                <span className="truncate font-mono text-muted-foreground">
-                  {p.label}
-                </span>
-                <button
-                  onClick={() => handleRestorePtm(p.id)}
-                  title="Restore this residue"
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[0.7rem] hover:bg-accent"
-                >
-                  <Undo2 className="h-3 w-3" />
-                  Restore
-                </button>
-              </li>
-            ))}
-          </ul>
+              {stagedPtms.map(p => (
+                <StagedEditRow
+                  key={p.id}
+                  label={p.label}
+                  onRestore={() => handleRestorePtm(p.id)}
+                />
+              ))}
+            </StagedEditGroup>
+          )}
         </div>
       )}
     </div>
