@@ -20,7 +20,7 @@ from rich.console import Console
 
 _console = Console(highlight=False)
 
-LOGO = r"""[bold cyan]
+LOGO = r"""[bold rgb(64,126,238)]
 ██████╗  █████╗ ████████╗ ██████╗██╗  ██╗██████╗
 ██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ██║██╔══██╗
 ██████╔╝███████║   ██║   ██║     ███████║██████╔╝
@@ -35,6 +35,13 @@ click.rich_click.SHOW_ARGUMENTS = True
 click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
 click.rich_click.STYLE_ERRORS_SUGGESTION = "bold italic"
 click.rich_click.ERRORS_SUGGESTION = "Try the '--help' flag for more information."
+click.rich_click.STYLE_HEADER_TEXT = "bold rgb(64,126,238)"
+click.rich_click.STYLE_OPTION = "bold rgb(64,126,238)"
+click.rich_click.STYLE_COMMAND = "bold rgb(64,126,238)"
+click.rich_click.STYLE_SWITCH = "bold rgb(64,126,238)"
+click.rich_click.STYLE_OPTIONS_PANEL_BORDER = "rgb(64,126,238)"
+click.rich_click.STYLE_COMMANDS_PANEL_BORDER = "rgb(64,126,238)"
+click.rich_click.STYLE_USAGE = "bold rgb(64,126,238)"
 click.rich_click.COMMAND_GROUPS = {
     "patchr": [
         {
