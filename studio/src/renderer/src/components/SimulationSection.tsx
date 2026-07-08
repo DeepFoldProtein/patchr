@@ -1,5 +1,6 @@
 import React from "react";
 import { useAtom, useAtomValue } from "jotai";
+import { bus } from "../lib/event-bus";
 import { Button } from "./ui/button";
 import {
   Select,
@@ -314,6 +315,9 @@ export function SimulationSection({
           setSimProgress("Downloading files...");
           const dl = await downloadResults(jobId);
           setSimSavedDir(dl.simDir || null);
+          // Refresh the parent's "Saved Runs" history — the result is now on
+          // disk under simulations/, but the list only re-fetches on this event.
+          bus.emit("results:updated");
         } catch (dlErr) {
           console.warn("Auto-download failed:", dlErr);
         }
