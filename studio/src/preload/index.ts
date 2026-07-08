@@ -103,11 +103,16 @@ const api = {
   },
   // Auto-updater (electron-updater / GitHub Releases)
   updater: {
-    quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
+    getVersion: () => ipcRenderer.invoke("updater:version"),
     check: () => ipcRenderer.invoke("updater:check"),
+    download: () => ipcRenderer.invoke("updater:download"),
+    quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
     /** Subscribe to update lifecycle events. Returns an unsubscribe fn. */
     onEvent: (
-      callback: (type: string, payload?: { version?: string; percent?: number; message?: string }) => void
+      callback: (
+        type: string,
+        payload?: { version?: string; percent?: number; message?: string }
+      ) => void
     ) => {
       const names = [
         "checking",

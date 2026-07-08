@@ -1,22 +1,25 @@
-// Auto-update via electron-updater, backed by GitHub Releases (see the
+// Explicit update flow via electron-updater, backed by GitHub Releases (see the
 // `publish` block in electron-builder.yml → generates app-update.yml in the
-// packaged app). On startup a packaged build checks the repo's latest release,
-// downloads it in the background, and tells the renderer when it's ready so the
-// user can restart into the new version. In dev (unpackaged) this is a no-op
-// unless FORCE_UPDATE_CHECK=1 is set (uses dev-app-update.yml).
+// packaged app). Nothing is downloaded or installed silently: the app checks for
+// an update (on startup + when the user clicks "Check for updates"), and the
+// user explicitly triggers the Download and the Restart from the status bar.
+// In dev (unpackaged) checks are a no-op unless FORCE_UPDATE_CHECK=1 is set.
 import { app, ipcMain, type BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
 
 let initialized = false;
+const isActive = (): boolean =>
+  app.isPackaged || process.env.FORCE_UPDATE_CHECK === "1";
 
 export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   if (initialized) return;
   initialized = true;
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Explicit: don't download or install without the user asking.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   const send = (channel: string, payload?: unknown): void => {
     getWindow()?.webContents.send(channel, payload);
@@ -37,13 +40,14 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
     send("updater:error", { message: err?.message ?? String(err) })
   );
 
-  // Renderer-triggered: quit and install the downloaded update now.
-  ipcMain.handle("updater:quit-and-install", () => {
-    autoUpdater.quitAndInstall();
-  });
+  // Current app version — shown in the status bar.
+  ipcMain.handle("updater:version", () => app.getVersion());
 
-  // Renderer-triggered manual check (e.g. a "Check for updates" menu item).
+  // User clicked "Check for updates".
   ipcMain.handle("updater:check", async () => {
+    if (!isActive()) {
+      return { success: false, error: "Updates are disabled in dev mode." };
+    }
     try {
       const r = await autoUpdater.checkForUpdates();
       return { success: true, version: r?.updateInfo?.version };
@@ -55,12 +59,31 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
     }
   });
 
-  const forceDev = process.env.FORCE_UPDATE_CHECK === "1";
-  if (app.isPackaged || forceDev) {
-    if (forceDev) autoUpdater.forceDevUpdateConfig = true;
-    // Check shortly after startup so it never blocks window creation.
+  // User clicked "Download" — download the available update.
+  ipcMain.handle("updater:download", async () => {
+    try {
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : String(e)
+      };
+    }
+  });
+
+  // User clicked "Restart" — quit and install the downloaded update.
+  ipcMain.handle("updater:quit-and-install", () => {
+    autoUpdater.quitAndInstall();
+  });
+
+  if (isActive()) {
+    if (process.env.FORCE_UPDATE_CHECK === "1")
+      autoUpdater.forceDevUpdateConfig = true;
+    // A quiet check on startup so the status bar can proactively show
+    // "Update available" — but the download stays a deliberate click.
     setTimeout(() => {
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {
+      autoUpdater.checkForUpdates().catch(() => {
         /* offline / no release yet — ignore */
       });
     }, 3000);

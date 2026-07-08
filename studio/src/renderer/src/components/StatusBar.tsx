@@ -2,6 +2,7 @@ import React from "react";
 import { useAtomValue } from "jotai";
 import { apiConnectionStatusAtom } from "../store/api-atoms";
 import { useCurrentProject } from "../store/project-store";
+import { UpdateStatus } from "./UpdateStatus";
 
 export function StatusBar(): React.ReactElement {
   const connectionStatus = useAtomValue(apiConnectionStatusAtom);
@@ -65,6 +66,8 @@ export function StatusBar(): React.ReactElement {
           </span>
         </div>
       )}
+      <div className="h-4 w-px bg-neutral-300/60 dark:bg-neutral-700/60" />
+      <UpdateStatus />
     </div>
   );
 }

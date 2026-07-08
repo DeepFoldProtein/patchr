@@ -247,8 +247,10 @@ export interface UpdaterEventPayload {
 }
 
 export interface UpdaterAPI {
-  quitAndInstall: () => Promise<void>;
+  getVersion: () => Promise<string>;
   check: () => Promise<{ success: boolean; version?: string; error?: string }>;
+  download: () => Promise<{ success: boolean; error?: string }>;
+  quitAndInstall: () => Promise<void>;
   onEvent: (
     callback: (type: string, payload?: UpdaterEventPayload) => void
   ) => () => void;
