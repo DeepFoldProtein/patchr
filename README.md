@@ -57,6 +57,18 @@ Most experimental structures in the PDB have **missing regions** -- flexible loo
 - Works with **proteins, DNA, RNA**, and multi-chain complexes
 - 99.4% connectivity pass rate, from short loops to 600+ residue extensions
 
+<div align="center">
+
+## &#128506;&#65039; [PATCHR Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
+
+From **every PDB complex with an internal missing region** (excluding very large structures), PATCHR inpainted the full set of **66,417 multimeric structures** &mdash; all browsable and downloadable.
+
+### [Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
+
+</div>
+
+---
+
 **Benchmark** &mdash; 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. C&#945; and all-atom RMSD computed over inpainted residues only.
 
 | Method / Configuration | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
@@ -198,10 +210,6 @@ patchr serve --model boltz2 --device-id 0
 patchr serve --model protenix --port 8080
 patchr serve --model all
 ```
-
-## PATCHR Atlas
-
-Pre-computed completed structures for ~35,000 monomeric proteins (growing to ~160,000 complexes). [Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
 
 ## Performance
 
