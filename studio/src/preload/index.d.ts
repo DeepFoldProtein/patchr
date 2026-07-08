@@ -122,6 +122,11 @@ export interface UniProtAPI {
     results?: UniProtSearchResult[];
     error?: string;
   }>;
+  fetchById: (uniprotId: string) => Promise<{
+    success: boolean;
+    fasta?: string;
+    error?: string;
+  }>;
 }
 
 export interface BoltzAPI {
@@ -136,7 +141,8 @@ export interface BoltzAPI {
     cifFilename: string,
     chainIds: string[],
     customSequences: string,
-    skipTerminal?: boolean
+    skipTerminal?: boolean,
+    modifications?: string
   ) => Promise<{
     success: boolean;
     data?: { job_id: string; status: string };
@@ -151,6 +157,24 @@ export interface BoltzAPI {
       status: string;
       progress?: number;
       error?: string;
+    };
+    error?: string;
+  }>;
+  queueStatus: (
+    apiUrl: string,
+    jobId?: string
+  ) => Promise<{
+    success: boolean;
+    data?: {
+      running: number;
+      queued: number;
+      total: number;
+      job?: {
+        job_id: string;
+        state: string;
+        position: number | null;
+        ahead: number | null;
+      };
     };
     error?: string;
   }>;
@@ -216,6 +240,20 @@ export interface AppAPI {
   ) => Promise<{ success: boolean; content?: string; error?: string }>;
 }
 
+export interface UpdaterEventPayload {
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+
+export interface UpdaterAPI {
+  quitAndInstall: () => Promise<void>;
+  check: () => Promise<{ success: boolean; version?: string; error?: string }>;
+  onEvent: (
+    callback: (type: string, payload?: UpdaterEventPayload) => void
+  ) => () => void;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
@@ -224,6 +262,7 @@ declare global {
       uniprot: UniProtAPI;
       boltz: BoltzAPI;
       app: AppAPI;
+      updater: UpdaterAPI;
     };
   }
 }

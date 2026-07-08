@@ -11,6 +11,7 @@ import { useAutoYAMLGeneration } from "./mol-viewer/useAutoYAMLGeneration";
 import { useCanonicalMapping } from "./mol-viewer/useCanonicalMapping";
 import { useSuperpose } from "./mol-viewer/useSuperpose";
 import { useChainColors } from "./mol-viewer/useChainColors";
+import { useEraseVisuals } from "./mol-viewer/useEraseVisuals";
 import { AlertTriangle } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -21,6 +22,17 @@ export interface MolViewerPanelProps {
   projectId?: string;
   initialStructure?: ArrayBuffer | string;
 }
+
+// Colors used across the sequence editor and 3D result view, with what they
+// mean. Kept in sync with useSuperpose (result overpaint), createPtmPurpleLayers
+// (PTM) and SequenceEditorPanel (edit marks).
+const COLOR_LEGEND: Array<{ color: string; label: string }> = [
+  { color: "#ef4444", label: "Fully Inpainted" },
+  { color: "#f97316", label: "Partially Fixed" },
+  { color: "#eab308", label: "Boundary (Flexible Region)" },
+  { color: "#a855f7", label: "PTM" },
+  { color: "#14b8a6", label: "Mutation" }
+];
 
 function MolViewerPanelInner({
   initialStructure
@@ -57,6 +69,9 @@ function MolViewerPanelInner({
 
   // Apply chain colors (contrasting with inpainting colors)
   useChainColors(plugin, !loading && !!structureData);
+
+  // Ghost residues marked for erasure in the Sequence editor
+  useEraseVisuals(plugin);
 
   // Auto-generate YAML after missing region detection
   useAutoYAMLGeneration(!!currentProject);
@@ -112,6 +127,28 @@ function MolViewerPanelInner({
             <div className="text-center text-muted-foreground">
               <h2 className="mb-2 text-lg font-semibold">Mol* Viewer</h2>
               <p className="text-sm">Initializing molecular viewer...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Color legend — explains the result / edit colors (e.g. purple = PTM) */}
+        {plugin && !loading && (
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-md border border-black/10 bg-white/80 px-2.5 py-2 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-neutral-900/80">
+            <div className="mb-1 text-[0.6rem] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Colors
+            </div>
+            <div className="space-y-0.5">
+              {COLOR_LEGEND.map(item => (
+                <div key={item.label} className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="text-[0.65rem] leading-tight text-neutral-700 dark:text-neutral-200">
+                    {item.label}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}

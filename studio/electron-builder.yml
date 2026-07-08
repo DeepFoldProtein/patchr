@@ -2,6 +2,10 @@ appId: com.patchr.studio
 productName: Patchr Studio
 directories:
   buildResources: build
+publish:
+  provider: github
+  owner: DeepFoldProtein
+  repo: patchr
 icon: icon.png
 files:
   - "!**/.vscode/*"

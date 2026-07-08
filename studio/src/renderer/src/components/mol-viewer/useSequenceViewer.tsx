@@ -33,7 +33,10 @@ export function useSequenceViewer(
   const [missingRegions] = useAtom(missingRegionsDetectedAtom);
   const rootRef = useRef<Root | null>(null);
   const sequenceViewRef = useRef<SequenceView | null>(null);
-  const isConvertingRef = useRef<boolean>(false);
+  // NOTE: the global selection-change handler (label->auth conversion + re-zoom)
+  // was removed — it reacted to every selection change, including the Sequence
+  // editor panel's, and hijacked multi-chain (e.g. DNA) selection by converting
+  // to a different residue. The Sequence editor panel owns sequence selection.
 
   useEffect(() => {
     logger.log(
@@ -267,132 +270,6 @@ export function useSequenceViewer(
       logger.log(`[Sequence Viewer] Event listeners unregistered`);
     };
   }, [plugin, missingRegions]);
-
-  // Handle sequence viewer selection - always use author id for zoom
-  useEffect(() => {
-    if (!plugin) return;
-
-    const handleSelectionChange = async (): Promise<void> => {
-      try {
-        // Prevent infinite loop - if we're already converting, ignore this event
-        if (isConvertingRef.current) {
-          return;
-        }
-
-        // Get current selection
-        const selectionEntries = Array.from(
-          plugin.managers.structure.selection.entries.entries()
-        );
-
-        if (selectionEntries.length === 0) return;
-
-        // Get structure
-        const structures =
-          plugin.managers.structure.hierarchy.current.structures;
-        if (!structures || structures.length === 0) return;
-
-        const structure = structures[0].cell.obj?.data as Structure | undefined;
-        if (!structure) return;
-
-        // Find the first selected residue and convert from label_seq_id to auth_seq_id
-        for (const [, entry] of selectionEntries) {
-          const selection = entry.selection;
-          if (selection.elements.length === 0) continue;
-
-          // Get the first element to find the residue
-          const firstElement = selection.elements[0];
-          if (!firstElement) continue;
-
-          // Get the unit from the element
-          const unit = firstElement.unit;
-          if (!Unit.isAtomic(unit)) continue;
-
-          // Get the first atom index from the selected indices
-          const firstSelectedIndex = OrderedSet.getAt(firstElement.indices, 0);
-          if (firstSelectedIndex === undefined) continue;
-
-          // Create location and set unit and element
-          // Use the pattern from useGapDetection.ts
-          const loc = StructureElement.Location.create(structure);
-          loc.unit = unit;
-          // firstSelectedIndex is already a UnitIndex from the selection
-          loc.element = firstSelectedIndex as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-          // Get chain and residue IDs
-          const chainId = StructureProperties.chain.auth_asym_id(loc);
-          const labelSeqId = StructureProperties.residue.label_seq_id(loc);
-          const authSeqId = StructureProperties.residue.auth_seq_id(loc);
-          const insCode =
-            StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
-
-          // If label_seq_id and auth_seq_id are different, we need to convert
-          if (labelSeqId !== authSeqId) {
-            logger.log(
-              `[Sequence Viewer] Converting selection from label_seq_id=${labelSeqId} to auth_seq_id=${authSeqId}`
-            );
-
-            // Set converting flag to prevent infinite loop
-            isConvertingRef.current = true;
-
-            try {
-              // Find all residues with the same auth_seq_id in this chain
-              const targetLoci = findResidueLociByAuthSeqId(
-                structure,
-                chainId,
-                authSeqId,
-                insCode
-              );
-
-              if (targetLoci) {
-                // Clear current selection
-                await plugin.managers.structure.selection.clear();
-
-                // Select using auth_seq_id
-                plugin.managers.interactivity.lociSelects.selectOnly(
-                  { loci: targetLoci },
-                  false
-                );
-
-                // Zoom to the residue
-                const bounds = Loci.getBoundingSphere(targetLoci);
-                if (bounds) {
-                  plugin.canvas3d?.camera.focus(bounds.center, 8, 500);
-                }
-
-                logger.log(
-                  `[Sequence Viewer] ✓ Converted selection to auth_seq_id=${authSeqId} and zoomed`
-                );
-              }
-            } finally {
-              // Reset converting flag after a short delay to allow selection to settle
-              setTimeout(() => {
-                isConvertingRef.current = false;
-              }, 100);
-            }
-          }
-
-          // Only process the first selected residue
-          return;
-        }
-      } catch (error) {
-        logger.error(
-          "[Sequence Viewer] Error handling selection change:",
-          error
-        );
-        isConvertingRef.current = false;
-      }
-    };
-
-    // Subscribe to selection changes
-    const subscription =
-      plugin.managers.structure.selection.events.changed.subscribe(() => {
-        void handleSelectionChange();
-      });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [plugin]);
 }
 
 /**

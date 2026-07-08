@@ -1588,7 +1588,20 @@ class Boltz2(LightningModule):
                     print(f"    Partially fixed residues: {n_partial}")
                     if chain_data.get("partially_fixed_residues"):
                         for entry in chain_data["partially_fixed_residues"]:
-                            print(f"      Residue {entry['residue']}: {entry['fixed_atoms']}/{entry['total_atoms']} atoms fixed")
+                            # Entries may be a dict {"residue"/"position", "fixed_atoms", ...}
+                            # or a bare int residue index, depending on which writer
+                            # produced the metadata. Be defensive so logging never
+                            # aborts the prediction (see Protenix template_featurizer).
+                            if isinstance(entry, dict):
+                                res_id = entry.get("residue", entry.get("position"))
+                                fixed_atoms = entry.get("fixed_atoms")
+                                total_atoms = entry.get("total_atoms")
+                                if fixed_atoms is not None and total_atoms is not None:
+                                    print(f"      Residue {res_id}: {fixed_atoms}/{total_atoms} atoms fixed")
+                                else:
+                                    print(f"      Residue {res_id}")
+                            else:
+                                print(f"      Residue {entry}")
                     print(f"    Fully inpainted residues: {n_inpainted}")
                     if chain_data.get("fully_inpainted_residues"):
                         print(f"      Residues: {self._format_residue_ranges(chain_data['fully_inpainted_residues'])}")

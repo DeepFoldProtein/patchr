@@ -40,6 +40,60 @@ function validateApiUrl(apiUrl: string): URL {
 }
 
 /**
+ * Fetch a result file with bounded retry. The renderer fires the download the
+ * instant a job flips to "completed", which can race the server/CDN: the file
+ * endpoint may briefly 404 (not yet served) or a Cloudflare hop may return a
+ * transient 5xx. A single net.fetch would then fail permanently. We retry a few
+ * times with backoff and, on final failure, include the HTTP status code —
+ * `response.statusText` is always empty over HTTP/2, so it alone gives a
+ * useless "Download failed:" message.
+ */
+async function fetchResultWithRetry(
+  url: string,
+  attempts = 5
+): Promise<Response> {
+  let lastStatus = 0;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) {
+      // Backoff: 1s, 2s, 4s, 8s (capped).
+      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+    let response: Response;
+    try {
+      response = await net.fetch(url);
+    } catch (err) {
+      lastErr = err;
+      continue; // network error — retry
+    }
+    if (response.ok) return response;
+    lastStatus = response.status;
+    // 4xx that aren't a timing/CDN issue won't recover — fail fast.
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 404 &&
+      response.status !== 408 &&
+      response.status !== 425 &&
+      response.status !== 429
+    ) {
+      throw new Error(
+        `Download failed: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
+      );
+    }
+  }
+  if (lastStatus) {
+    throw new Error(
+      `Download failed after ${attempts} attempts: HTTP ${lastStatus}`
+    );
+  }
+  throw new Error(
+    `Download failed after ${attempts} attempts: ${lastErr instanceof Error ? lastErr.message : "network error"}`
+  );
+}
+
+/**
  * Sanitize a string for use in YAML values.
  * Escapes quotes and wraps in double quotes if needed.
  */
@@ -956,7 +1010,7 @@ export function registerProjectIPC(): void {
 
           try {
             // Fetch FASTA from UniProt
-            const uniprotFastaUrl = `https://www.uniprot.org/uniprot/${uniprotId}.fasta`;
+            const uniprotFastaUrl = `https://rest.uniprot.org/uniprotkb/${uniprotId}.fasta`;
             const fastaResponse = await net.fetch(uniprotFastaUrl);
 
             if (!fastaResponse.ok) {
@@ -1012,6 +1066,34 @@ export function registerProjectIPC(): void {
       }
     }
   );
+
+  // Fetch a UniProt sequence directly by accession (raw sequence, no header).
+  ipcMain.handle("uniprot:fetch-by-id", async (_event, uniprotId: string) => {
+    try {
+      const acc = uniprotId.trim().toUpperCase();
+      if (!/^[A-Z0-9]{6,10}$/.test(acc)) {
+        throw new Error(`Invalid UniProt accession: ${uniprotId}`);
+      }
+      const response = await net.fetch(
+        `https://rest.uniprot.org/uniprotkb/${acc}.fasta`
+      );
+      if (!response.ok) {
+        throw new Error(`UniProt fetch failed: ${response.statusText}`);
+      }
+      const fastaText = await response.text();
+      const lines = fastaText.trim().split("\n");
+      if (lines.length < 2) {
+        throw new Error("No sequence in UniProt response");
+      }
+      const sequence = lines.slice(1).join("");
+      return { success: true, fasta: sequence };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  });
 
   // List saved simulation results from project simulations/ directory
   ipcMain.handle("project:list-simulations", async () => {
@@ -1177,12 +1259,9 @@ export function registerProjectIPC(): void {
         validateApiUrl(apiUrl);
 
         // Download sim-ready zip from server
-        const response = await net.fetch(
+        const response = await fetchResultWithRetry(
           `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/files/sim_ready`
         );
-        if (!response.ok) {
-          throw new Error(`Download failed: ${response.statusText}`);
-        }
 
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
@@ -1345,7 +1424,8 @@ export function registerProjectIPC(): void {
       cifFilename: string,
       chainIds: string[],
       customSequences: string,
-      skipTerminal: boolean = false
+      skipTerminal: boolean = false,
+      modifications: string = ""
     ) => {
       try {
         validateApiUrl(apiUrl);
@@ -1373,6 +1453,15 @@ export function registerProjectIPC(): void {
             `--${boundary}\r\nContent-Disposition: form-data; name="skip_terminal"\r\n\r\n${skipTerminal ? "true" : "false"}\r\n`
           )
         );
+
+        // Add modifications field (PTMs), only when present
+        if (modifications) {
+          formDataParts.push(
+            Buffer.from(
+              `--${boundary}\r\nContent-Disposition: form-data; name="modifications"\r\n\r\n${modifications}\r\n`
+            )
+          );
+        }
 
         // Add cif_file field
         // cifContent is already a string from readStructureFile
@@ -1423,6 +1512,31 @@ export function registerProjectIPC(): void {
         );
         if (!response.ok) {
           throw new Error(`Status check failed: ${response.statusText}`);
+        }
+        const data = await response.json();
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error"
+        };
+      }
+    }
+  );
+
+  // System-wide GPU queue status (aggregated across replicas). Pass a jobId to
+  // also get that job's live position via ?job_id=.
+  ipcMain.handle(
+    "boltz:queue-status",
+    async (_event, apiUrl: string, jobId?: string) => {
+      try {
+        validateApiUrl(apiUrl);
+        const url = jobId
+          ? `${apiUrl}/api/v1/queue/status?job_id=${encodeURIComponent(jobId)}`
+          : `${apiUrl}/api/v1/queue/status`;
+        const response = await net.fetch(url);
+        if (!response.ok) {
+          throw new Error(`Queue status failed: ${response.statusText}`);
         }
         const data = await response.json();
         return { success: true, data };
@@ -1494,13 +1608,9 @@ export function registerProjectIPC(): void {
       try {
         // Download results from API
         validateApiUrl(apiUrl);
-        const response = await net.fetch(
+        const response = await fetchResultWithRetry(
           `${apiUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/files/prediction`
         );
-
-        if (!response.ok) {
-          throw new Error(`Download failed: ${response.statusText}`);
-        }
 
         // Get buffer from response
         const arrayBuffer = await response.arrayBuffer();

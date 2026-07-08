@@ -24,10 +24,69 @@ export const sequenceMappingsAtom = atom<SequenceMapping[]>([]);
 export const fastaInputAtom = atom<string>("");
 export const enableSequenceMappingAtom = atom<boolean>(false);
 
-// Skip N/C-terminal missing residues (only inpaint internal gaps).
-// Mutually exclusive with sequence mapping — when mapping is on, terminals
-// are derived from the provided sequence, so this flag is forced off.
-export const skipTerminalAtom = atom<boolean>(false);
+// Residues marked for erasure in the Sequence editor. Each region is shown
+// semi-transparent in the 3D viewer and can be individually restored; the next
+// inpainting run strips all of them from the uploaded CIF so the backend
+// re-detects them as missing regions and regenerates them.
+export interface EraseRegion {
+  id: string; // stable id for restore
+  chainId: string; // author chain id
+  residues: { authSeqId: number; insCode: string }[];
+  label: string; // human-readable summary, e.g. "A 45–52 (8)"
+}
+export const erasedRegionsAtom = atom<EraseRegion[]>([]);
+
+// Flattened set of erased residue keys per chain, for the 3D transparency
+// overlay and quick membership checks. Derived from erasedRegionsAtom.
+export const erasedResidueKeysAtom = atom(get => {
+  const byChain = new Map<string, Set<string>>();
+  for (const region of get(erasedRegionsAtom)) {
+    let set = byChain.get(region.chainId);
+    if (!set) {
+      set = new Set();
+      byChain.set(region.chainId, set);
+    }
+    for (const r of region.residues) set.add(`${r.authSeqId}|${r.insCode}`);
+  }
+  return byChain;
+});
+
+// Staged residue substitutions from the Sequence editor. Each is shown in the
+// grid and restorable; on run they are applied to the chain's target sequence
+// (custom-sequence path) so the backend rebuilds them as the new identity.
+export interface StagedMutation {
+  id: string;
+  chainId: string; // author chain id
+  authSeqId: number;
+  insCode: string;
+  from: string; // original one-letter code
+  to: string; // target one-letter code
+  label: string;
+}
+export const stagedMutationsAtom = atom<StagedMutation[]>([]);
+
+// Staged PTMs. On run they are forwarded to the backend as `modifications` so
+// Boltz models the modified residue (e.g. SEP) at that entity position.
+export interface StagedPtm {
+  id: string;
+  chainId: string; // author chain id
+  seqId: number; // entity seq_id (_entity_poly_seq.num)
+  authSeqId: number;
+  insCode: string;
+  ccd: string; // component id, e.g. SEP / TPO / PTR / MLY
+  label: string;
+}
+export const stagedPtmsAtom = atom<StagedPtm[]>([]);
+
+// Raw reference FASTA loaded from UniProt (per chain). The effective target
+// sequences (reference + staged mutations) are derived from this in the editor.
+export const uniprotReferenceAtom = atom<string>("");
+
+// Skip N/C-terminal missing residues (only inpaint internal gaps). Defaults to
+// true: terminals are shown ghosted and left out of inpainting unless the user
+// opts in (or a full sequence is provided via UniProt/mutation, which forces
+// terminals on since they come from that sequence).
+export const skipTerminalAtom = atom<boolean>(true);
 
 // Repair Context (Context & Inpaint 설정)
 export const repairContextsAtom = atom<Map<string, RepairContext>>(new Map());
@@ -48,6 +107,10 @@ export const resetRepairStateAtom = atom(null, (_get, set) => {
   set(skipTerminalAtom, false);
   set(repairContextsAtom, new Map());
   set(repairResultsAtom, []);
+  set(erasedRegionsAtom, []);
+  set(stagedMutationsAtom, []);
+  set(stagedPtmsAtom, []);
+  set(uniprotReferenceAtom, "");
   set(apiConnectionStatusAtom, "idle");
   logger.log("[Repair Atoms] Reset all repair state");
 });

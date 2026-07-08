@@ -36,7 +36,7 @@ export function MissingRegionReviewSection(): React.ReactElement {
       <div className="p-6 text-center">
         <CheckCircle className="mx-auto mb-2 h-8 w-8 text-green-500" />
         <h3 className="mb-1 text-sm font-semibold">
-          No Missing Regions Detected
+          No Missing or Incomplete Residues
         </h3>
         <p className="text-xs text-muted-foreground">
           Structure appears complete. All residues have coordinates.

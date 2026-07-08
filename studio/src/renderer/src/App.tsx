@@ -6,6 +6,7 @@ import { themeClassAtom, themeAtom } from "@/store/app-atoms";
 import { AppLayout } from "@/components/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { UpdateNotification } from "@/components/UpdateNotification";
 
 // Import Mol* CSS at build time. Only the dark skin is compiled here; light-mode
 // appearance is applied via `html:not(.dark)` overrides in assets/base.css.
@@ -50,6 +51,7 @@ function App(): React.JSX.Element {
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
             <AppContent />
+            <UpdateNotification />
           </TooltipProvider>
         </QueryClientProvider>
       </JotaiProvider>

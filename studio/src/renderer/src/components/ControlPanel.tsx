@@ -5,17 +5,23 @@ import { ProjectManager } from "./ProjectManager";
 import {
   fastaInputAtom,
   enableSequenceMappingAtom,
-  skipTerminalAtom
+  skipTerminalAtom,
+  erasedRegionsAtom,
+  stagedPtmsAtom
 } from "../store/repair-atoms";
+import { eraseResiduesFromCif } from "../lib/cifErase";
+import { countStructureTokens } from "../lib/tokenCount";
 import {
   apiUrlAtom,
   apiConnectionStatusAtom,
-  panelModeAtom
+  panelModeAtom,
+  DEFAULT_API_URL,
+  DEFAULT_SERVER_TOKEN_LIMIT
 } from "../store/api-atoms";
 import type { PanelMode } from "../store/api-atoms";
-import { useCurrentProject } from "../store/project-store";
+import { missingRegionsDetectedAtom } from "../store/repair-atoms";
 import { pluginAtom } from "../store/mol-viewer-atoms";
-import { getSequencePanelData } from "./mol-viewer/useGapDetection";
+import { useCurrentProject } from "../store/project-store";
 import { bus } from "../lib/event-bus";
 import { logger } from "../lib/logger";
 import {
@@ -33,7 +39,6 @@ import {
   ArrowUp,
   ArrowDown,
   FolderOpen,
-  CheckCircle,
   XCircle
 } from "lucide-react";
 import {
@@ -52,15 +57,10 @@ import {
   CollapsibleTrigger,
   CollapsibleContent
 } from "./ui/collapsible";
-import { Switch } from "./ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from "./ui/tooltip";
 import { SimulationSection, type SavedSimulation } from "./SimulationSection";
 import { ServerConnection } from "./ServerConnection";
 import { DisconnectedHint } from "./DisconnectedHint";
+import { SequenceEditorPanel } from "./SequenceEditorPanel";
 
 const TAB_ITEMS: { key: PanelMode; label: string }[] = [
   { key: "project", label: "Project" },
@@ -989,20 +989,17 @@ function RepairConsole(): React.ReactElement {
     <div className="flex-1 min-h-0 overflow-auto">
       {/* Missing Region Review 섹션 */}
       <Section
-        title="Missing Region Analysis"
+        title="Missing & Incomplete Residues"
         expanded={expandedSections.has("missing-region-review")}
         onToggle={() => toggleSection("missing-region-review")}
       >
         <MissingRegionReviewSection />
       </Section>
 
-      {/* Sequence Mapping 섹션 (Optional) */}
-      <Section
-        title="Sequence Mapping / Uniprot Search (Optional)"
-        expanded={expandedSections.has("sequence")}
-        onToggle={() => toggleSection("sequence")}
-      >
-        <SequenceMappingSection />
+      {/* Sequence 섹션 — 잔기 편집(Erase/Mutate/PTM) + UniProt 참조 서열.
+          Always expanded (core workflow surface). */}
+      <Section title="Sequence" expanded onToggle={() => {}}>
+        <SequenceEditorPanel />
       </Section>
 
       {/* Context & Inpaint 섹션 */}
@@ -1027,32 +1024,7 @@ function RepairConsole(): React.ReactElement {
           onToggle={() => toggleSection("results")}
         >
           <div className="space-y-3">
-            {/* Legend */}
-            <div className="flex items-center gap-4 text-xs border-b border-border pb-2">
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#eab308" }}
-                />
-                <span className="text-muted-foreground">
-                  LRD Boundary (Flexible Region)
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#f97316" }}
-                />
-                <span className="text-muted-foreground">Partially Fixed</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#ef4444" }}
-                />
-                <span className="text-muted-foreground">Fully Inpainted</span>
-              </div>
-            </div>
+            {/* Color legend moved to the 3D viewer (single source of truth). */}
             {/* Hide All Button */}
             <div className="flex justify-end">
               <Button
@@ -1376,443 +1348,6 @@ function Section({
   );
 }
 
-function SequenceMappingSection(): React.ReactElement {
-  const plugin = useAtomValue(pluginAtom);
-  const [fastaInput, setFastaInput] = useAtom(fastaInputAtom);
-  const [enableSequenceMapping, setEnableSequenceMapping] = useAtom(
-    enableSequenceMappingAtom
-  );
-  const [pdbId, setPdbId] = React.useState("");
-  const [searchStatus, setSearchStatus] = React.useState<
-    "idle" | "searching" | "success" | "error"
-  >("idle");
-  const [selectedChainsForSearch, setSelectedChainsForSearch] = React.useState<
-    Set<string>
-  >(new Set());
-
-  // Bump on structure-ready events so useMemo below re-reads chain data after
-  // a structure is loaded into the plugin (plugin reference alone doesn't change).
-  const [structureTick, setStructureTick] = React.useState(0);
-  React.useEffect(() => {
-    const bump = (): void => setStructureTick(t => t + 1);
-    bus.on("structure:representations-ready", bump);
-    bus.on("structure:loaded", bump);
-    return () => {
-      bus.off("structure:representations-ready", bump);
-      bus.off("structure:loaded", bump);
-    };
-  }, []);
-
-  // Get sequence data from structure using getSequencePanelData (includes polymerType)
-  const chainSequenceData = React.useMemo(() => {
-    if (!plugin)
-      return new Map<
-        string,
-        { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
-      >();
-
-    try {
-      const sequenceData = getSequencePanelData(plugin);
-      const result = new Map<
-        string,
-        { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
-      >();
-
-      for (const [chainId, data] of sequenceData.entries()) {
-        result.set(chainId, {
-          sequence: data.sequence,
-          polymerType: data.polymerType
-        });
-      }
-
-      return result;
-    } catch (error) {
-      logger.error("Failed to extract sequences:", error);
-      return new Map<
-        string,
-        { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
-      >();
-    }
-  }, [plugin, structureTick]);
-
-  // Simple chainId -> sequence map for backward compatibility
-  const chainSequences = React.useMemo(() => {
-    const sequences = new Map<string, string>();
-    for (const [chainId, data] of chainSequenceData.entries()) {
-      sequences.set(chainId, data.sequence);
-    }
-    return sequences;
-  }, [chainSequenceData]);
-
-  // All chains from the loaded structure
-  const availableChains = React.useMemo(
-    () => Array.from(chainSequenceData.keys()).sort(),
-    [chainSequenceData]
-  );
-
-  // Update selected chains when available chains change
-  React.useEffect(() => {
-    setSelectedChainsForSearch(new Set(availableChains));
-  }, [availableChains]);
-
-  // Auto-populate FASTA from structure chains
-  React.useEffect(() => {
-    if (availableChains.length === 0) {
-      setFastaInput("");
-      return;
-    }
-
-    // Build FASTA from available chains
-    const fastaLines: string[] = [];
-    for (const chainId of availableChains) {
-      const sequence = chainSequences.get(chainId) || "";
-      if (sequence) {
-        fastaLines.push(`>Chain ${chainId}`);
-        // Wrap sequence at 60 chars per line
-        for (let i = 0; i < sequence.length; i += 60) {
-          fastaLines.push(sequence.substring(i, i + 60));
-        }
-      } else {
-        fastaLines.push(`>Chain ${chainId}`);
-        fastaLines.push(""); // Empty sequence - user needs to fill
-      }
-    }
-    setFastaInput(fastaLines.join("\n"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableChains, chainSequences]);
-
-  const handleUniprotSearch = async (): Promise<void> => {
-    if (!pdbId.trim() || selectedChainsForSearch.size === 0) return;
-
-    setSearchStatus("searching");
-    try {
-      // Get fresh sequence data directly from plugin (useMemo might be stale)
-      const freshSequenceData = new Map<
-        string,
-        { sequence: string; polymerType: "protein" | "dna" | "rna" | "unknown" }
-      >();
-
-      logger.log("[UniProt Search] plugin available:", !!plugin);
-
-      if (plugin) {
-        try {
-          logger.log("[UniProt Search] Calling getSequencePanelData...");
-          const data = getSequencePanelData(plugin);
-          logger.log(
-            "[UniProt Search] getSequencePanelData returned:",
-            data.size,
-            "entries"
-          );
-          for (const [chainId, chainData] of data.entries()) {
-            freshSequenceData.set(chainId, {
-              sequence: chainData.sequence,
-              polymerType: chainData.polymerType
-            });
-          }
-        } catch (e) {
-          logger.error(
-            "[UniProt Search] Failed to get fresh sequence data:",
-            e
-          );
-        }
-      } else {
-        logger.warn("[UniProt Search] Plugin not available!");
-      }
-
-      // Separate protein chains from DNA/RNA chains (only for selected chains)
-      const proteinChains: string[] = [];
-      const nucleotideChains: string[] = [];
-      const chainsToSearch = Array.from(selectedChainsForSearch);
-
-      // Debug: Log all chain data
-      logger.log(
-        "[UniProt Search] freshSequenceData entries:",
-        Array.from(freshSequenceData.entries()).map(([id, data]) => ({
-          chainId: id,
-          polymerType: data.polymerType,
-          sequenceLength: data.sequence.length
-        }))
-      );
-
-      for (const chainId of chainsToSearch) {
-        const data = freshSequenceData.get(chainId);
-        logger.log(
-          `[UniProt Search] Chain "${chainId}": polymerType="${data?.polymerType || "not found"}", sequence="${data?.sequence?.substring(0, 20) || "none"}..."`
-        );
-        if (data?.polymerType === "dna" || data?.polymerType === "rna") {
-          nucleotideChains.push(chainId);
-        } else {
-          proteinChains.push(chainId);
-        }
-      }
-
-      logger.log(
-        "Searching UniProt for PDB ID:",
-        pdbId,
-        "protein chains:",
-        proteinChains,
-        "DNA/RNA chains (will use sequence panel):",
-        nucleotideChains
-      );
-
-      const fastaLines: string[] = [];
-
-      // For protein chains, search UniProt
-      if (proteinChains.length > 0) {
-        // Check if API is available
-        if (
-          !window.api ||
-          !window.api.uniprot ||
-          !window.api.uniprot.searchByPdb
-        ) {
-          throw new Error(
-            "UniProt API not available. Please restart the application."
-          );
-        }
-
-        // Call main process to handle API requests (avoids CORS issues)
-        const result = await window.api.uniprot.searchByPdb(
-          pdbId.toUpperCase(),
-          proteinChains
-        );
-
-        if (!result.success) {
-          throw new Error(result.error || "UniProt search failed");
-        }
-
-        if (result.results && result.results.length > 0) {
-          for (const chainResult of result.results) {
-            if (chainResult.fasta) {
-              fastaLines.push(chainResult.fasta);
-            } else if (chainResult.error) {
-              fastaLines.push(
-                `>Chain_${chainResult.chainId} [Error: ${chainResult.error}]`
-              );
-              fastaLines.push("");
-            } else {
-              fastaLines.push(
-                `>Chain_${chainResult.chainId} [No UniProt mapping found]`
-              );
-              fastaLines.push("");
-            }
-          }
-        }
-      }
-
-      // For DNA/RNA chains, get sequence directly from sequence panel
-      for (const chainId of nucleotideChains) {
-        const data = freshSequenceData.get(chainId);
-        const polymerLabel =
-          data?.polymerType === "dna"
-            ? "DNA"
-            : data?.polymerType === "rna"
-              ? "RNA"
-              : "nucleotide";
-
-        if (data?.sequence) {
-          fastaLines.push(`>Chain ${chainId} [${polymerLabel}]`);
-          // Wrap sequence at 60 chars per line
-          for (let i = 0; i < data.sequence.length; i += 60) {
-            fastaLines.push(data.sequence.substring(i, i + 60));
-          }
-        } else {
-          fastaLines.push(
-            `>Chain_${chainId} [${polymerLabel} - sequence not available]`
-          );
-          fastaLines.push("");
-        }
-      }
-
-      setFastaInput(fastaLines.join("\n"));
-      setSearchStatus("success");
-    } catch (error) {
-      logger.error("UniProt search failed:", error);
-      setSearchStatus("error");
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Enable Sequence Mapping Switch */}
-      <div className="flex items-center gap-2">
-        <Switch
-          id="enable-sequence-mapping"
-          checked={enableSequenceMapping}
-          onCheckedChange={setEnableSequenceMapping}
-        />
-        <label
-          htmlFor="enable-sequence-mapping"
-          className="text-xs font-medium cursor-pointer"
-        >
-          Enable Sequence Mapping
-        </label>
-      </div>
-
-      {enableSequenceMapping && (
-        <>
-          <p className="text-xs text-muted-foreground">
-            Provide sequence information for chains with missing regions.
-            Sequences are automatically loaded from the structure.
-          </p>
-
-          {/* Show chains with selection checkboxes */}
-          {availableChains.length > 0 ? (
-            <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
-                  Select chains for UniProt search:
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSelectedChainsForSearch(new Set(availableChains))
-                    }
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedChainsForSearch(new Set())}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {availableChains.map(chainId => {
-                  const data = chainSequenceData.get(chainId);
-                  const typeLabel =
-                    data?.polymerType === "dna"
-                      ? "DNA"
-                      : data?.polymerType === "rna"
-                        ? "RNA"
-                        : data?.polymerType === "protein"
-                          ? "Protein"
-                          : "";
-                  return (
-                    <label
-                      key={chainId}
-                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs cursor-pointer transition-colors ${
-                        selectedChainsForSearch.has(chainId)
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-background text-muted-foreground hover:border-primary/50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedChainsForSearch.has(chainId)}
-                        onChange={e => {
-                          const newSet = new Set(selectedChainsForSearch);
-                          if (e.target.checked) {
-                            newSet.add(chainId);
-                          } else {
-                            newSet.delete(chainId);
-                          }
-                          setSelectedChainsForSearch(newSet);
-                        }}
-                        className="h-3 w-3"
-                      />
-                      <span className="font-mono font-medium">
-                        Chain {chainId}
-                      </span>
-                      {typeLabel && (
-                        <span className="text-[10px] opacity-70">
-                          ({typeLabel})
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-border bg-muted/20 p-3">
-              <p className="text-xs text-muted-foreground">
-                No chains available. Load a structure first.
-              </p>
-            </div>
-          )}
-
-          {/* FASTA Input */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium">FASTA Sequence</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={pdbId}
-                  onChange={e => setPdbId(e.target.value.toUpperCase())}
-                  placeholder="PDB ID (e.g., 4J76)"
-                  maxLength={4}
-                  className="w-36 rounded-md border border-input bg-background px-2 py-1 text-xs uppercase"
-                />
-                <button
-                  onClick={handleUniprotSearch}
-                  disabled={
-                    selectedChainsForSearch.size === 0 ||
-                    !pdbId.trim() ||
-                    searchStatus === "searching"
-                  }
-                  className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {searchStatus === "searching"
-                    ? "..."
-                    : `Search UniProt (${selectedChainsForSearch.size})`}
-                </button>
-              </div>
-            </div>
-            <textarea
-              value={fastaInput}
-              onChange={e => setFastaInput(e.target.value)}
-              placeholder="Select chains to auto-load sequences..."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
-              rows={10}
-            />
-            <p className="text-xs text-muted-foreground">
-              Sequences are automatically loaded from structure. You can edit
-              manually or search UniProt by PDB ID.
-            </p>
-          </div>
-
-          {/* Search Status */}
-          {searchStatus === "success" && (
-            <Alert variant="success">
-              <CheckCircle className="h-3 w-3" />
-              <AlertDescription className="text-xs">
-                <p>Found UniProt entries for {pdbId}</p>
-                <p className="mt-1 text-muted-foreground">
-                  Sequences updated in FASTA field above
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-          {searchStatus === "error" && (
-            <Alert variant="destructive">
-              <XCircle className="h-3 w-3" />
-              <AlertDescription className="text-xs">
-                <p>Failed to find UniProt entries for {pdbId}</p>
-                <p className="mt-1 text-muted-foreground">
-                  You can manually edit the FASTA sequence above
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
-
-      {!enableSequenceMapping && (
-        <p className="text-xs text-muted-foreground">
-          Sequence mapping is disabled. The server will use sequences from the
-          structure file.
-        </p>
-      )}
-    </div>
-  );
-}
-
 function ContextInpaintSection({
   onJobCompleted
 }: {
@@ -1821,19 +1356,41 @@ function ContextInpaintSection({
   const currentProject = useCurrentProject();
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
-  const [skipTerminal, setSkipTerminal] = useAtom(skipTerminalAtom);
-  // When sequence mapping is on, the provided sequence drives terminal
-  // handling, so the skip-terminal flag is meaningless and we lock it off.
-  const skipTerminalEffective = enableSequenceMapping ? false : skipTerminal;
+  const skipTerminal = useAtomValue(skipTerminalAtom);
+  const [erasedRegions] = useAtom(erasedRegionsAtom);
+  const [stagedPtms] = useAtom(stagedPtmsAtom);
+  // Skip-terminal is an independent choice (the Sequence editor's toggle), even
+  // when a reference sequence is provided.
+  const skipTerminalEffective = skipTerminal;
 
   const apiUrl = useAtomValue(apiUrlAtom);
   const connectionStatus = useAtomValue(apiConnectionStatusAtom);
+  const plugin = useAtomValue(pluginAtom);
+  const missingRegions = useAtomValue(missingRegionsDetectedAtom);
+
+  // Estimated model tokens for the loaded structure (protein = per-residue,
+  // nucleic/ligand = per-atom). Recompute when a structure loads.
+  const tokenCount = React.useMemo(
+    () => countStructureTokens(plugin),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plugin, missingRegions]
+  );
+  const usingDefaultServer = apiUrl === DEFAULT_API_URL;
+  const overTokenLimit =
+    tokenCount.total > DEFAULT_SERVER_TOKEN_LIMIT && usingDefaultServer;
+
   const [jobId, setJobId] = React.useState<string | null>(null);
   const [jobStatus, setJobStatus] = React.useState<string>("idle");
   const [progress, setProgress] = React.useState(0);
   const [progressMessage, setProgressMessage] = React.useState<string | null>(
     null
   );
+  // GPU queue position while the job waits for a free GPU (whole-cluster).
+  const [queueInfo, setQueueInfo] = React.useState<{
+    position: number;
+    total: number;
+    running: number;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   // Always use ALL chains — server resolves automatically
@@ -1891,6 +1448,18 @@ function ContextInpaintSection({
       return;
     }
 
+    // The hosted default server (a 3090) tops out around DEFAULT_SERVER_TOKEN_LIMIT
+    // tokens. Block bigger structures and tell the user to run their own server.
+    if (overTokenLimit) {
+      setError(
+        `This structure is ~${tokenCount.total} tokens, above the default ` +
+          `server's ~${DEFAULT_SERVER_TOKEN_LIMIT}-token limit (protein counts ` +
+          `per residue; DNA/RNA/ligands per atom). Start your own inference ` +
+          `server and set its URL in the Project tab, then try again.`
+      );
+      return;
+    }
+
     // availableChains is always ["ALL"] — no need to check
 
     // Reset state if starting a new job after completion
@@ -1902,6 +1471,7 @@ function ContextInpaintSection({
     }
 
     setError(null);
+    setQueueInfo(null);
     setJobStatus("uploading");
 
     try {
@@ -1934,6 +1504,44 @@ function ContextInpaintSection({
         throw new Error("Failed to read structure file");
       }
 
+      // 2b. Apply erased regions marked in the Sequence editor: strip those
+      // residues so the backend re-detects them as missing and regenerates them.
+      let cifContent = cifContentResult.content;
+      if (erasedRegions.length > 0) {
+        let totalAtoms = 0;
+        let totalResidues = 0;
+        for (const region of erasedRegions) {
+          if (region.residues.length === 0) continue;
+          const erased = eraseResiduesFromCif(
+            cifContent,
+            region.chainId,
+            region.residues
+          );
+          if (erased.erasedAtoms === 0) {
+            throw new Error(
+              `Erase failed: no matching atoms found for ${region.label}. ` +
+                `The structure may not be mmCIF.`
+            );
+          }
+          cifContent = erased.content;
+          totalAtoms += erased.erasedAtoms;
+          totalResidues += erased.erasedResidues;
+        }
+        logger.log(
+          `[Erase] Removed ${totalResidues} residue(s) / ${totalAtoms} atom(s) ` +
+            `across ${erasedRegions.length} region(s) before upload`
+        );
+      }
+
+      // 2c. Apply staged PTMs: forwarded to the backend as a modifications
+      // field so Boltz models each modified residue.
+      const modificationsStr = stagedPtms
+        .map(p => `${p.chainId}:${p.seqId}:${p.ccd}`)
+        .join(",");
+      if (modificationsStr) {
+        logger.log(`[PTM] Requesting modifications ${modificationsStr}`);
+      }
+
       // 3. Upload template
       if (!window.api?.boltz?.uploadTemplate) {
         throw new Error("Boltz API not available");
@@ -1941,11 +1549,12 @@ function ContextInpaintSection({
 
       const uploadResult = await window.api.boltz.uploadTemplate(
         apiUrl,
-        cifContentResult.content,
+        cifContent,
         cifFile,
         availableChains,
         customSequencesStr,
-        skipTerminalEffective
+        skipTerminalEffective,
+        modificationsStr
       );
 
       if (!uploadResult.success || !uploadResult.data) {
@@ -1974,6 +1583,12 @@ function ContextInpaintSection({
       const newJobId = uploadResult.data.job_id;
       setJobId(newJobId);
       setJobStatus("template_generating");
+
+      // NOTE: staged edits (erase/mutate/PTM) are intentionally NOT cleared here.
+      // They stay visible (with their 3D ghosting) for the duration of the run so
+      // the user sees what's being regenerated, and — crucially — so a failed
+      // download can be retried without having to re-mark everything. They are
+      // cleared only once the job completes and the result is loaded (below).
 
       // Store request info for error logging
       const requestInfo = {
@@ -2119,6 +1734,33 @@ function ContextInpaintSection({
 
           const status = statusResult.data;
 
+          // While the job is queued (backend "pending"), surface its live
+          // whole-cluster GPU queue position instead of a fake progress bar.
+          if (status.status === "pending") {
+            setJobStatus("queued");
+            setProgress(0);
+            setProgressMessage(null);
+            try {
+              const q = await window.api.boltz.queueStatus?.(apiUrl, newJobId);
+              const jp = q?.success ? q.data?.job : undefined;
+              if (jp && jp.state === "queued" && jp.position) {
+                setQueueInfo({
+                  position: jp.position,
+                  total: q!.data!.total,
+                  running: q!.data!.running
+                });
+              } else {
+                setQueueInfo(null);
+              }
+            } catch {
+              setQueueInfo(null);
+            }
+            return; // don't fall through to progress parsing while queued
+          }
+          // No longer queued — clear queue info and show real progress.
+          setQueueInfo(null);
+          if (status.status === "running_prediction") setJobStatus("running");
+
           // Update progress display
           if (status.progress !== undefined) {
             let progressValue = 0;
@@ -2165,6 +1807,11 @@ function ContextInpaintSection({
 
               setJobStatus("completed");
               setError(null);
+
+              // NOTE: staged edits (erase/mutate/PTM) are intentionally NOT
+              // cleared on completion — the user keeps their marks + ghosting so
+              // they can compare, re-run, or tweak. They are cleared only via the
+              // explicit "Reset" button in the Sequence editor.
 
               // Results are automatically available in Results section
               // No need to store resultFiles here anymore
@@ -2221,23 +1868,48 @@ function ContextInpaintSection({
                 ? "Uploading structure..."
                 : jobStatus === "template_generating"
                   ? "Generating template..."
-                  : jobStatus === "running_prediction"
-                    ? "Starting prediction..."
-                    : jobStatus === "running"
-                      ? "Running prediction..."
-                      : jobStatus === "downloading"
-                        ? "Downloading results..."
-                        : jobStatus === "completed"
-                          ? "Completed"
-                          : jobStatus === "failed"
-                            ? "Failed"
-                            : jobStatus.replace("_", " ")}
+                  : jobStatus === "queued"
+                    ? "Waiting in queue..."
+                    : jobStatus === "running_prediction"
+                      ? "Starting prediction..."
+                      : jobStatus === "running"
+                        ? "Running prediction..."
+                        : jobStatus === "downloading"
+                          ? "Downloading results..."
+                          : jobStatus === "completed"
+                            ? "Completed"
+                            : jobStatus === "failed"
+                              ? "Failed"
+                              : jobStatus.replace("_", " ")}
             </span>
           </div>
           {jobId && (
             <div className="text-xs text-muted-foreground">Job ID: {jobId}</div>
           )}
-          {(progress > 0 || jobStatus === "running") && (
+          {jobStatus === "queued" && (
+            <div className="mt-2 rounded-md border border-blue-400/30 bg-blue-500/5 px-3 py-2">
+              {queueInfo ? (
+                <>
+                  <div className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    #{queueInfo.position} in queue
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {queueInfo.position <= 1
+                      ? "You're next — waiting for a free GPU."
+                      : `${queueInfo.position - 1} job${
+                          queueInfo.position - 1 === 1 ? "" : "s"
+                        } ahead of you.`}
+                    {` · ${queueInfo.running} running now.`}
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  Waiting for a free GPU…
+                </div>
+              )}
+            </div>
+          )}
+          {jobStatus !== "queued" && (progress > 0 || jobStatus === "running") && (
             <div className="mt-2">
               <Progress value={progress} className="h-2" />
               <div className="mt-1 text-xs text-muted-foreground">
@@ -2262,49 +1934,6 @@ function ContextInpaintSection({
         </div>
       )}
 
-      {/* Inpainting Options */}
-      <div className="rounded-md border border-border bg-muted/20 p-3">
-        <Tooltip delayDuration={150}>
-          <TooltipTrigger asChild>
-            <div className="flex items-center justify-between gap-3">
-              <div
-                className={
-                  enableSequenceMapping
-                    ? "opacity-50 cursor-not-allowed"
-                    : undefined
-                }
-              >
-                <label
-                  htmlFor="skip-terminal"
-                  className={`text-xs font-medium ${
-                    enableSequenceMapping
-                      ? "cursor-not-allowed"
-                      : "cursor-pointer"
-                  }`}
-                >
-                  Skip N/C-terminal residues
-                </label>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Only inpaint internal gaps; leave dangling termini untouched.
-                </p>
-              </div>
-              <Switch
-                id="skip-terminal"
-                checked={skipTerminalEffective}
-                disabled={enableSequenceMapping}
-                onCheckedChange={setSkipTerminal}
-              />
-            </div>
-          </TooltipTrigger>
-          {enableSequenceMapping && (
-            <TooltipContent side="top" className="max-w-xs text-xs">
-              Disabled while Sequence Mapping is on. Turn off sequence mapping
-              to skip terminal residues.
-            </TooltipContent>
-          )}
-        </Tooltip>
-      </div>
-
       {/* Error Display */}
       {error && (
         <Alert variant="destructive">
@@ -2313,12 +1942,53 @@ function ContextInpaintSection({
         </Alert>
       )}
 
+      {/* Token estimate + over-limit warning */}
+      {tokenCount.total > 0 && (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-xs",
+            overTokenLimit
+              ? "border-red-400/40 bg-red-500/5 text-red-600 dark:text-red-400"
+              : "border-border bg-muted/20 text-muted-foreground"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span>
+              Estimated tokens:{" "}
+              <span className="font-mono font-semibold">
+                {tokenCount.total}
+              </span>
+              {usingDefaultServer && ` / ${DEFAULT_SERVER_TOKEN_LIMIT}`}
+            </span>
+            <span className="opacity-70">
+              {tokenCount.proteinResidues} res + {tokenCount.atomTokens} atoms
+            </span>
+          </div>
+          {overTokenLimit && (
+            <p className="mt-1">
+              Above the default server's ~{DEFAULT_SERVER_TOKEN_LIMIT}-token
+              limit (3090).{" "}
+              <a
+                href="https://github.com/DeepFoldProtein/patchr"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline underline-offset-2 hover:opacity-80"
+              >
+                Start your own inference server
+              </a>{" "}
+              and set its URL in the Project tab.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="space-y-2">
         <button
           onClick={handleStartInpainting}
           disabled={
             connectionStatus !== "connected" ||
+            overTokenLimit ||
             (jobStatus !== "idle" &&
               jobStatus !== "failed" &&
               jobStatus !== "completed") ||

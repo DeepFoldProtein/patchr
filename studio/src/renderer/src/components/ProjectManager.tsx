@@ -185,6 +185,18 @@ export function ProjectManager(): React.ReactElement {
                       <dd>{structureHeader.classification}</dd>
                     </>
                   )}
+                  {structureHeader.molecules && (
+                    <>
+                      <dt className="font-semibold">Molecule:</dt>
+                      <dd>{structureHeader.molecules}</dd>
+                    </>
+                  )}
+                  {structureHeader.organism && (
+                    <>
+                      <dt className="font-semibold">Organism:</dt>
+                      <dd className="italic">{structureHeader.organism}</dd>
+                    </>
+                  )}
                   {structureHeader.experimentalMethod && (
                     <>
                       <dt className="font-semibold">Method:</dt>
@@ -197,11 +209,36 @@ export function ProjectManager(): React.ReactElement {
                       <dd>{structureHeader.resolution} Å</dd>
                     </>
                   )}
+                  {structureHeader.spaceGroup && (
+                    <>
+                      <dt className="font-semibold">Space group:</dt>
+                      <dd className="font-mono">
+                        {structureHeader.spaceGroup}
+                      </dd>
+                    </>
+                  )}
+                  {(structureHeader.rWork || structureHeader.rFree) && (
+                    <>
+                      <dt className="font-semibold">R-work / R-free:</dt>
+                      <dd className="font-mono">
+                        {structureHeader.rWork ?? "–"} /{" "}
+                        {structureHeader.rFree ?? "–"}
+                      </dd>
+                    </>
+                  )}
                   {structureHeader.depositionDate && (
                     <>
                       <dt className="font-semibold">Deposited:</dt>
                       <dd className="font-mono">
                         {structureHeader.depositionDate}
+                      </dd>
+                    </>
+                  )}
+                  {structureHeader.releaseDate && (
+                    <>
+                      <dt className="font-semibold">Released:</dt>
+                      <dd className="font-mono">
+                        {structureHeader.releaseDate}
                       </dd>
                     </>
                   )}
