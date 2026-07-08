@@ -130,7 +130,16 @@ async def _submit_gpu_job(job_id: str, fn: Callable, *, update_queued: bool = Tr
         )
     if update_queued:
         depth = _gpu_job_queue.qsize()
-        update_job_status(job_id, JobStatus.PENDING, progress=f"Queued (position {depth}/{_GPU_QUEUE_MAX})")
+        # queue_submitted_at is the ordering key used to compute a system-wide,
+        # cross-replica queue position (see _scan_gpu_queue / queue_status). It is
+        # the moment the job entered a GPU worker queue — distinct from created_at
+        # (job creation, often earlier, during template generation).
+        update_job_status(
+            job_id,
+            JobStatus.PENDING,
+            progress=f"Queued (position {depth}/{_GPU_QUEUE_MAX})",
+            queue_submitted_at=datetime.now().isoformat(),
+        )
     return future
 
 
@@ -235,6 +244,60 @@ def _refresh_job(job_id: str) -> bool:
     except Exception:
         pass
     return job_id in jobs_db
+
+
+def _scan_gpu_queue() -> tuple[int, list]:
+    """Aggregate GPU-queue state across ALL replicas from the file-backed job
+    records under WORK_DIR (each per-GPU instance persists _status.json there).
+
+    A single replica's in-memory ``_gpu_job_queue`` only sees its own jobs, so on
+    the round-robin LB deployment it cannot report the true system queue. Reading
+    the shared records makes any replica able to answer for the whole cluster.
+
+    Returns ``(running, queued)`` where ``running`` is the number of jobs executing
+    on a GPU right now (status running_prediction) and ``queued`` is a time-ordered
+    list of ``(queue_submitted_at, job_id)`` for jobs waiting for a GPU."""
+    import json as _json
+    running = 0
+    queued: list = []
+    try:
+        for d in WORK_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            f = d / "_status.json"
+            if not f.is_file():
+                continue
+            try:
+                rec = _json.loads(f.read_text())
+            except Exception:
+                continue
+            st = rec.get("status")
+            if st == JobStatus.RUNNING_PREDICTION:
+                running += 1
+            elif st == JobStatus.PENDING and rec.get("queue_submitted_at"):
+                queued.append((rec.get("queue_submitted_at") or "", rec.get("job_id") or d.name))
+    except Exception:
+        pass
+    queued.sort()
+    return running, queued
+
+
+def _job_queue_view(job_id: str, running: int, queued: list) -> dict:
+    """Build the per-job queue view (state + 1-based position) from a scan."""
+    order = [jid for _, jid in queued]
+    if job_id in order:
+        pos = order.index(job_id) + 1
+        return {"job_id": job_id, "state": "queued", "position": pos, "ahead": pos - 1}
+    _refresh_job(job_id)
+    st = jobs_db.get(job_id, {}).get("status")
+    if st == JobStatus.RUNNING_PREDICTION:
+        return {"job_id": job_id, "state": "running", "position": 0, "ahead": 0}
+    if st in (JobStatus.COMPLETED, JobStatus.FAILED):
+        return {"job_id": job_id, "state": st, "position": 0, "ahead": 0}
+    if st is not None:
+        # e.g. generating_template / freshly-pending (not yet on the GPU queue)
+        return {"job_id": job_id, "state": st, "position": None, "ahead": None}
+    return {"job_id": job_id, "state": "unknown", "position": None, "ahead": None}
 
 
 # ── Progress tracker (Boltz) ────────────────────────────────────────────────
@@ -1414,7 +1477,18 @@ async def get_job_status(job_id: str):
     """Get the status of a job."""
     if not _refresh_job(job_id):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-    return JobStatusResponse(**jobs_db[job_id])
+    rec = jobs_db[job_id]
+    # Live queue position: if the job is waiting on the GPU queue, recompute its
+    # system-wide position on each poll so `progress` counts down instead of showing
+    # the stale snapshot written at submit time. Only scans when actually queued.
+    if rec.get("status") == JobStatus.PENDING and rec.get("queue_submitted_at"):
+        running, queued = _scan_gpu_queue()
+        order = [jid for _, jid in queued]
+        if job_id in order:
+            pos = order.index(job_id) + 1
+            rec = dict(rec)
+            rec["progress"] = f"Queued (position {pos} of {len(order)}, {running} running)"
+    return JobStatusResponse(**rec)
 
 
 @app.get("/api/v1/jobs/{job_id}/progress")
@@ -1757,13 +1831,34 @@ async def get_sim_result(job_id: str):
 
 
 @app.get("/api/v1/queue/status")
-async def queue_status():
-    """Return current GPU job queue depth and capacity."""
-    return {
-        "queue_depth": _gpu_job_queue.qsize() if _gpu_job_queue else 0,
-        "queue_max": _GPU_QUEUE_MAX,
+async def queue_status(job_id: Optional[str] = None):
+    """Return the SYSTEM-WIDE GPU job queue, aggregated across all replicas.
+
+    Fields:
+      running   – jobs executing on a GPU right now (whole cluster)
+      queued    – jobs waiting for a GPU (whole cluster)
+      total     – running + queued
+      local_*   – this replica's own in-memory queue (debug/reference only)
+
+    Pass ``?job_id=<id>`` to also get that job's live queue position under ``job``:
+      state='queued' → position (1-based) and ahead (jobs in front);
+      state='running'/'completed'/'failed' → position 0;
+      state='generating_template' etc. → not on the GPU queue yet (position null).
+
+    Aggregation reads the file-backed job records shared by every replica, so any
+    replica behind the round-robin LB returns the same, whole-cluster answer."""
+    running, queued = _scan_gpu_queue()
+    resp = {
+        "running": running,
+        "queued": len(queued),
+        "total": running + len(queued),
+        "local_queue_depth": _gpu_job_queue.qsize() if _gpu_job_queue else 0,
+        "local_queue_max": _GPU_QUEUE_MAX,
         "worker_alive": _gpu_worker_task is not None and not _gpu_worker_task.done(),
     }
+    if job_id:
+        resp["job"] = _job_queue_view(job_id, running, queued)
+    return resp
 
 
 @app.get("/api/v1/health")
