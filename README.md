@@ -58,7 +58,7 @@ Most experimental structures in the PDB have **missing regions** -- flexible loo
 
 <div align="center">
 
-## &#128506;&#65039; [PATCHR Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
+## [PATCHR Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
 
 From **every PDB complex with an internal missing region** (excluding very large structures), PATCHR inpainted the full set of **66,417 multimeric structures** &mdash; all browsable and downloadable.
 
@@ -198,7 +198,15 @@ PATCHR uses diffusion-based generation conditioned on your experimental structur
 
 ## PATCHR-Studio
 
-A desktop app with a visual interface for the full workflow -- no command line needed. Download from the links above or the [releases page](https://github.com/DeepFoldProtein/patchr/releases).
+A desktop application providing a graphical interface to the full workflow, with no command line required. Download from the links above or the [releases page](https://github.com/DeepFoldProtein/patchr/releases).
+
+Beyond reconstructing missing regions, the interactive sequence editor supports residue-level edits applied directly on the structure and regenerated in a single inpainting run:
+
+- **Erase and regenerate** &mdash; remove resolved residues and re-inpaint them
+- **Mutation** &mdash; substitute a residue identity; the side chain is rebuilt by inpainting
+- **Post-translational modifications** &mdash; introduce modified residues (SEP, TPO, PTR, MLY, M3L)
+
+Staged edits are listed and individually reversible prior to execution, and outputs are versioned for comparison across runs. Prediction, GPU queue status, and simulation-ready export are integrated.
 
 **No GPU?** Run the server on [Google Colab](https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb) for free and connect from PATCHR-Studio.
 
