@@ -11,6 +11,7 @@ import { readFile } from "fs/promises";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/logo.png?asset";
 import { registerProjectIPC } from "./project-manager";
+import { initAutoUpdater } from "./updater";
 
 const WINDOW_WIDTH = 1536;
 const WINDOW_HEIGHT = 652;
@@ -194,6 +195,9 @@ app.whenReady().then(() => {
   registerProjectIPC();
 
   createWindow();
+
+  // Background auto-update (GitHub Releases). No-op in dev unless forced.
+  initAutoUpdater(() => mainWindow);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the

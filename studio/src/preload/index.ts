@@ -81,6 +81,8 @@ const api = {
       ),
     getJobStatus: (apiUrl: string, jobId: string) =>
       ipcRenderer.invoke("boltz:get-job-status", apiUrl, jobId),
+    queueStatus: (apiUrl: string, jobId?: string) =>
+      ipcRenderer.invoke("boltz:queue-status", apiUrl, jobId),
     runPrediction: (apiUrl: string, payload: unknown) =>
       ipcRenderer.invoke("boltz:run-prediction", apiUrl, payload),
     downloadAndSaveResults: (apiUrl: string, jobId: string) =>
@@ -98,6 +100,32 @@ const api = {
       ipcRenderer.invoke("app:set-theme", theme),
     readSample: (filename: string) =>
       ipcRenderer.invoke("app:read-sample", filename)
+  },
+  // Auto-updater (electron-updater / GitHub Releases)
+  updater: {
+    quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
+    check: () => ipcRenderer.invoke("updater:check"),
+    /** Subscribe to update lifecycle events. Returns an unsubscribe fn. */
+    onEvent: (
+      callback: (type: string, payload?: { version?: string; percent?: number; message?: string }) => void
+    ) => {
+      const names = [
+        "checking",
+        "available",
+        "not-available",
+        "progress",
+        "downloaded",
+        "error"
+      ];
+      const unsubs = names.map(name => {
+        const channel = `updater:${name}`;
+        const listener = (_e: unknown, payload: unknown): void =>
+          callback(name, payload as { version?: string });
+        ipcRenderer.on(channel, listener);
+        return () => ipcRenderer.removeListener(channel, listener);
+      });
+      return () => unsubs.forEach(u => u());
+    }
   }
 };
 

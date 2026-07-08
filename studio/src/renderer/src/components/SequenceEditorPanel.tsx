@@ -468,7 +468,9 @@ export function SequenceEditorPanel(): React.ReactElement {
   };
 
   const handleErase = (): void => {
-    if (!activeChain || selectedResidues.length === 0) return;
+    // Editing is protein-only — inpainting is not reliable for DNA/RNA/ligand.
+    if (!activeChain || !activeChain.isProtein || selectedResidues.length === 0)
+      return;
     const chainId = activeChain.authChainId;
     // Keep any residue that already carries a mutation / PTM (those edits win).
     const edited = new Set<string>();
@@ -532,11 +534,14 @@ export function SequenceEditorPanel(): React.ReactElement {
   const mutableCell =
     singleCell && singleCell.authSeqId !== undefined ? singleCell : null;
 
+  // Editing (erase / mutate / PTM) is only supported for protein chains. The
+  // inpainting method is not reliable for DNA / RNA / ligand, so those chains
+  // are view-only. Use the explicit protein classification so ligand/ion
+  // pseudo-chains (neither protein nor nucleic) are excluded too.
+  const isProteinChain = !!activeChain && activeChain.isProtein;
+
   const canMutate =
-    !!activeChain &&
-    !activeChain.isNucleic &&
-    !!mutableCell &&
-    !isErasedCell(mutableCell);
+    isProteinChain && !!mutableCell && !isErasedCell(mutableCell);
 
   const handleMutate = (target: string): void => {
     if (!activeChain || !mutableCell || mutableCell.authSeqId === undefined) {
@@ -579,8 +584,7 @@ export function SequenceEditorPanel(): React.ReactElement {
     ? PTM_OPTIONS[mutableCell.origCode]
     : undefined;
   const canPtm =
-    !!activeChain &&
-    !activeChain.isNucleic &&
+    isProteinChain &&
     !!ptmChoices &&
     ptmSeqId !== undefined &&
     !!mutableCell &&
@@ -763,7 +767,8 @@ export function SequenceEditorPanel(): React.ReactElement {
           >
             {c.authChainId}
             <span className="ml-1 opacity-60">
-              {c.isNucleic ? "nt" : "aa"} · {c.residues.length}
+              {c.isNucleic ? "nt" : c.isProtein ? "aa" : "lig"} ·{" "}
+              {c.residues.length}
             </span>
           </button>
         ))}
@@ -819,7 +824,7 @@ export function SequenceEditorPanel(): React.ReactElement {
                     : cell.mark === "ptm"
                       ? "rounded-sm bg-purple-500/25 text-purple-600 dark:text-purple-300"
                       : cell.mark === "mutated"
-                        ? "rounded-sm bg-amber-500/25 text-amber-700 dark:text-amber-300"
+                        ? "rounded-sm bg-teal-500/25 text-teal-700 dark:text-teal-300"
                         : isErased
                           ? "text-red-400/60 line-through"
                           : cell.resolved
@@ -880,11 +885,17 @@ export function SequenceEditorPanel(): React.ReactElement {
         <div className="flex gap-2">
           <button
             onClick={handleErase}
-            disabled={selectedResidues.length === 0 || selectionHasErased}
-            title={
+            disabled={
+              !isProteinChain ||
+              selectedResidues.length === 0 ||
               selectionHasErased
-                ? "Already erased — restore it first"
-                : "Erase resolved residues in the selection (missing residues can't be erased)"
+            }
+            title={
+              !isProteinChain
+                ? "DNA/RNA/ligand chains are view-only — editing isn't supported"
+                : selectionHasErased
+                  ? "Already erased — restore it first"
+                  : "Erase resolved residues in the selection (missing residues can't be erased)"
             }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
@@ -897,9 +908,11 @@ export function SequenceEditorPanel(): React.ReactElement {
             title={
               canMutate
                 ? "Substitute the selected residue and rebuild it via inpainting"
-                : mutableCell && isErasedCell(mutableCell)
-                  ? "Erased — restore it first"
-                  : "Select a single protein residue (requires mmCIF poly_seq_scheme)"
+                : !isProteinChain
+                  ? "DNA/RNA/ligand chains are view-only — editing isn't supported"
+                  : mutableCell && isErasedCell(mutableCell)
+                    ? "Erased — restore it first"
+                    : "Select a single protein residue (requires mmCIF poly_seq_scheme)"
             }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
@@ -912,9 +925,11 @@ export function SequenceEditorPanel(): React.ReactElement {
             title={
               canPtm
                 ? "Add a post-translational modification to the selected residue"
-                : mutableCell && isErasedCell(mutableCell)
-                  ? "Erased — restore it first"
-                  : "Select a single Ser/Thr/Tyr/Lys residue"
+                : !isProteinChain
+                  ? "DNA/RNA/ligand chains are view-only — editing isn't supported"
+                  : mutableCell && isErasedCell(mutableCell)
+                    ? "Erased — restore it first"
+                    : "Select a single Ser/Thr/Tyr/Lys residue"
             }
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
           >
@@ -923,8 +938,18 @@ export function SequenceEditorPanel(): React.ReactElement {
           </button>
         </div>
 
+        {/* DNA/RNA/ligand chains are view-only — the inpainting method is not
+            reliable for non-protein entities. */}
+        {activeChain && !isProteinChain && (
+          <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+            Chain <span className="font-mono">{activeChain.authChainId}</span>{" "}
+            is {activeChain.isNucleic ? "DNA/RNA" : "a ligand"} — editing (erase
+            / mutate / PTM) is supported for protein chains only.
+          </p>
+        )}
+
         {/* Contextual hint for why PTM may be unavailable */}
-        {mutableCell && !activeChain.isNucleic && !canPtm && (
+        {mutableCell && isProteinChain && !canPtm && (
           <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
             PTM applies to Ser/Thr/Tyr/Lys —{" "}
             {mutableCell.resName ?? mutableCell.origCode} has none.
@@ -1034,11 +1059,11 @@ export function SequenceEditorPanel(): React.ReactElement {
         </div>
       )}
 
-      {/* Staged mutations — marked amber in the grid, restorable */}
+      {/* Staged mutations — marked teal in the grid, restorable */}
       {stagedMutations.length > 0 && (
-        <div className="rounded-md border border-amber-400/30 bg-amber-500/5 p-2">
+        <div className="rounded-md border border-teal-400/30 bg-teal-500/5 p-2">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+            <span className="text-xs font-semibold text-teal-600 dark:text-teal-400">
               Mutations ({stagedMutations.length})
             </span>
             <button

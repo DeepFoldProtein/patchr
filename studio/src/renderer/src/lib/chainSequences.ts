@@ -30,6 +30,10 @@ export interface ChainSequence {
   authChainId: string;
   /** Whether the chain is nucleic acid (affects one-letter fallbacks). */
   isNucleic: boolean;
+  /** Whether the chain is predominantly amino acids. A chain that is neither
+   * protein nor nucleic (e.g. a ligand / ion pseudo-chain) has both false and
+   * is treated as view-only by the editor. */
+  isProtein: boolean;
   residues: ResidueCell[];
 }
 
@@ -88,6 +92,10 @@ function isNucleicResName(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(NUC_TO_1, name);
 }
 
+function isAminoResName(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(AA_3_TO_1, name);
+}
+
 function oneLetter(resName: string, nucleic: boolean): string {
   const n = resName.toUpperCase();
   if (nucleic) return NUC_TO_1[n] ?? "N";
@@ -110,7 +118,12 @@ export function getChainSequences(
   // chainId -> ordered residues, deduped by (authSeqId, insCode)
   const chainMap = new Map<
     string,
-    { residues: ResidueCell[]; seen: Set<string>; nucleicVotes: number }
+    {
+      residues: ResidueCell[];
+      seen: Set<string>;
+      nucleicVotes: number;
+      proteinVotes: number;
+    }
   >();
 
   for (const unit of structure.units) {
@@ -128,7 +141,12 @@ export function getChainSequences(
 
       let entry = chainMap.get(chainId);
       if (!entry) {
-        entry = { residues: [], seen: new Set(), nucleicVotes: 0 };
+        entry = {
+          residues: [],
+          seen: new Set(),
+          nucleicVotes: 0,
+          proteinVotes: 0
+        };
         chainMap.set(chainId, entry);
       }
 
@@ -136,8 +154,9 @@ export function getChainSequences(
       if (entry.seen.has(key)) continue;
       entry.seen.add(key);
 
-      const nucleic = isNucleicResName(resName.toUpperCase());
-      if (nucleic) entry.nucleicVotes++;
+      const upper = resName.toUpperCase();
+      if (isNucleicResName(upper)) entry.nucleicVotes++;
+      else if (isAminoResName(upper)) entry.proteinVotes++;
 
       entry.residues.push({
         authSeqId,
@@ -156,10 +175,12 @@ export function getChainSequences(
       return a.insCode.localeCompare(b.insCode);
     });
     const isNucleic = entry.nucleicVotes > entry.residues.length / 2;
+    const isProtein =
+      !isNucleic && entry.proteinVotes > entry.residues.length / 2;
     for (const r of entry.residues) {
       r.code = oneLetter(r.resName, isNucleic);
     }
-    result.push({ authChainId, isNucleic, residues: entry.residues });
+    result.push({ authChainId, isNucleic, isProtein, residues: entry.residues });
   }
 
   result.sort((a, b) => a.authChainId.localeCompare(b.authChainId));

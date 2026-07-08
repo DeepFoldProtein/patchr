@@ -1,5 +1,5 @@
 import React from "react";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { MissingRegionReviewSection } from "./repair/GapReviewSection";
 import { ProjectManager } from "./ProjectManager";
 import {
@@ -7,9 +7,7 @@ import {
   enableSequenceMappingAtom,
   skipTerminalAtom,
   erasedRegionsAtom,
-  stagedPtmsAtom,
-  stagedMutationsAtom,
-  uniprotReferenceAtom
+  stagedPtmsAtom
 } from "../store/repair-atoms";
 import { eraseResiduesFromCif } from "../lib/cifErase";
 import { countStructureTokens } from "../lib/tokenCount";
@@ -1026,32 +1024,7 @@ function RepairConsole(): React.ReactElement {
           onToggle={() => toggleSection("results")}
         >
           <div className="space-y-3">
-            {/* Legend */}
-            <div className="flex items-center gap-4 text-xs border-b border-border pb-2">
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#eab308" }}
-                />
-                <span className="text-muted-foreground">
-                  LRD Boundary (Flexible Region)
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#f97316" }}
-                />
-                <span className="text-muted-foreground">Partially Fixed</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="w-3 h-3 rounded"
-                  style={{ backgroundColor: "#ef4444" }}
-                />
-                <span className="text-muted-foreground">Fully Inpainted</span>
-              </div>
-            </div>
+            {/* Color legend moved to the 3D viewer (single source of truth). */}
             {/* Hide All Button */}
             <div className="flex justify-end">
               <Button
@@ -1384,10 +1357,8 @@ function ContextInpaintSection({
   const [fastaInput] = useAtom(fastaInputAtom);
   const [enableSequenceMapping] = useAtom(enableSequenceMappingAtom);
   const skipTerminal = useAtomValue(skipTerminalAtom);
-  const [erasedRegions, setErasedRegions] = useAtom(erasedRegionsAtom);
-  const [stagedPtms, setStagedPtms] = useAtom(stagedPtmsAtom);
-  const setStagedMutations = useSetAtom(stagedMutationsAtom);
-  const setUniprotReference = useSetAtom(uniprotReferenceAtom);
+  const [erasedRegions] = useAtom(erasedRegionsAtom);
+  const [stagedPtms] = useAtom(stagedPtmsAtom);
   // Skip-terminal is an independent choice (the Sequence editor's toggle), even
   // when a reference sequence is provided.
   const skipTerminalEffective = skipTerminal;
@@ -1414,6 +1385,12 @@ function ContextInpaintSection({
   const [progressMessage, setProgressMessage] = React.useState<string | null>(
     null
   );
+  // GPU queue position while the job waits for a free GPU (whole-cluster).
+  const [queueInfo, setQueueInfo] = React.useState<{
+    position: number;
+    total: number;
+    running: number;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   // Always use ALL chains — server resolves automatically
@@ -1494,6 +1471,7 @@ function ContextInpaintSection({
     }
 
     setError(null);
+    setQueueInfo(null);
     setJobStatus("uploading");
 
     try {
@@ -1606,12 +1584,11 @@ function ContextInpaintSection({
       setJobId(newJobId);
       setJobStatus("template_generating");
 
-      // The staged edits are now baked into the submitted job; clear them (and
-      // their 3D ghosting / grid marks) so a later run starts clean.
-      if (erasedRegions.length > 0) setErasedRegions([]);
-      setStagedPtms([]);
-      setStagedMutations([]);
-      setUniprotReference("");
+      // NOTE: staged edits (erase/mutate/PTM) are intentionally NOT cleared here.
+      // They stay visible (with their 3D ghosting) for the duration of the run so
+      // the user sees what's being regenerated, and — crucially — so a failed
+      // download can be retried without having to re-mark everything. They are
+      // cleared only once the job completes and the result is loaded (below).
 
       // Store request info for error logging
       const requestInfo = {
@@ -1757,6 +1734,33 @@ function ContextInpaintSection({
 
           const status = statusResult.data;
 
+          // While the job is queued (backend "pending"), surface its live
+          // whole-cluster GPU queue position instead of a fake progress bar.
+          if (status.status === "pending") {
+            setJobStatus("queued");
+            setProgress(0);
+            setProgressMessage(null);
+            try {
+              const q = await window.api.boltz.queueStatus?.(apiUrl, newJobId);
+              const jp = q?.success ? q.data?.job : undefined;
+              if (jp && jp.state === "queued" && jp.position) {
+                setQueueInfo({
+                  position: jp.position,
+                  total: q!.data!.total,
+                  running: q!.data!.running
+                });
+              } else {
+                setQueueInfo(null);
+              }
+            } catch {
+              setQueueInfo(null);
+            }
+            return; // don't fall through to progress parsing while queued
+          }
+          // No longer queued — clear queue info and show real progress.
+          setQueueInfo(null);
+          if (status.status === "running_prediction") setJobStatus("running");
+
           // Update progress display
           if (status.progress !== undefined) {
             let progressValue = 0;
@@ -1803,6 +1807,11 @@ function ContextInpaintSection({
 
               setJobStatus("completed");
               setError(null);
+
+              // NOTE: staged edits (erase/mutate/PTM) are intentionally NOT
+              // cleared on completion — the user keeps their marks + ghosting so
+              // they can compare, re-run, or tweak. They are cleared only via the
+              // explicit "Reset" button in the Sequence editor.
 
               // Results are automatically available in Results section
               // No need to store resultFiles here anymore
@@ -1859,23 +1868,48 @@ function ContextInpaintSection({
                 ? "Uploading structure..."
                 : jobStatus === "template_generating"
                   ? "Generating template..."
-                  : jobStatus === "running_prediction"
-                    ? "Starting prediction..."
-                    : jobStatus === "running"
-                      ? "Running prediction..."
-                      : jobStatus === "downloading"
-                        ? "Downloading results..."
-                        : jobStatus === "completed"
-                          ? "Completed"
-                          : jobStatus === "failed"
-                            ? "Failed"
-                            : jobStatus.replace("_", " ")}
+                  : jobStatus === "queued"
+                    ? "Waiting in queue..."
+                    : jobStatus === "running_prediction"
+                      ? "Starting prediction..."
+                      : jobStatus === "running"
+                        ? "Running prediction..."
+                        : jobStatus === "downloading"
+                          ? "Downloading results..."
+                          : jobStatus === "completed"
+                            ? "Completed"
+                            : jobStatus === "failed"
+                              ? "Failed"
+                              : jobStatus.replace("_", " ")}
             </span>
           </div>
           {jobId && (
             <div className="text-xs text-muted-foreground">Job ID: {jobId}</div>
           )}
-          {(progress > 0 || jobStatus === "running") && (
+          {jobStatus === "queued" && (
+            <div className="mt-2 rounded-md border border-blue-400/30 bg-blue-500/5 px-3 py-2">
+              {queueInfo ? (
+                <>
+                  <div className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    #{queueInfo.position} in queue
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {queueInfo.position <= 1
+                      ? "You're next — waiting for a free GPU."
+                      : `${queueInfo.position - 1} job${
+                          queueInfo.position - 1 === 1 ? "" : "s"
+                        } ahead of you.`}
+                    {` · ${queueInfo.running} running now.`}
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  Waiting for a free GPU…
+                </div>
+              )}
+            </div>
+          )}
+          {jobStatus !== "queued" && (progress > 0 || jobStatus === "running") && (
             <div className="mt-2">
               <Progress value={progress} className="h-2" />
               <div className="mt-1 text-xs text-muted-foreground">
@@ -1933,8 +1967,16 @@ function ContextInpaintSection({
           {overTokenLimit && (
             <p className="mt-1">
               Above the default server's ~{DEFAULT_SERVER_TOKEN_LIMIT}-token
-              limit (3090). Start your own inference server and set its URL in
-              the Project tab.
+              limit (3090).{" "}
+              <a
+                href="https://github.com/DeepFoldProtein/patchr"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline underline-offset-2 hover:opacity-80"
+              >
+                Start your own inference server
+              </a>{" "}
+              and set its URL in the Project tab.
             </p>
           )}
         </div>

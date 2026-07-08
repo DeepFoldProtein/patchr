@@ -160,6 +160,24 @@ export interface BoltzAPI {
     };
     error?: string;
   }>;
+  queueStatus: (
+    apiUrl: string,
+    jobId?: string
+  ) => Promise<{
+    success: boolean;
+    data?: {
+      running: number;
+      queued: number;
+      total: number;
+      job?: {
+        job_id: string;
+        state: string;
+        position: number | null;
+        ahead: number | null;
+      };
+    };
+    error?: string;
+  }>;
   runPrediction: (
     apiUrl: string,
     payload: {
@@ -222,6 +240,20 @@ export interface AppAPI {
   ) => Promise<{ success: boolean; content?: string; error?: string }>;
 }
 
+export interface UpdaterEventPayload {
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+
+export interface UpdaterAPI {
+  quitAndInstall: () => Promise<void>;
+  check: () => Promise<{ success: boolean; version?: string; error?: string }>;
+  onEvent: (
+    callback: (type: string, payload?: UpdaterEventPayload) => void
+  ) => () => void;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
@@ -230,6 +262,7 @@ declare global {
       uniprot: UniProtAPI;
       boltz: BoltzAPI;
       app: AppAPI;
+      updater: UpdaterAPI;
     };
   }
 }

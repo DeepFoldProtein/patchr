@@ -1,6 +1,11 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
+import { useAtomValue } from "jotai";
 import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { bus } from "../../lib/event-bus";
+import {
+  stagedMutationsAtom,
+  type StagedMutation
+} from "../../store/repair-atoms";
 import {
   pathBasename,
   pathDirname,
@@ -28,6 +33,7 @@ import { OrderedSet } from "molstar/lib/mol-data/int";
 import type { StructureHierarchyRef } from "molstar/lib/mol-plugin-state/manager/structure/hierarchy-state";
 import { Script } from "molstar/lib/mol-script/script";
 import { Color } from "molstar/lib/mol-util/color";
+import { clearStructureTransparency } from "molstar/lib/mol-plugin-state/helpers/structure-transparency";
 import { createChainColorLayers } from "./useChainColors";
 
 /**
@@ -39,6 +45,13 @@ import { createChainColorLayers } from "./useChainColors";
 const loadedStructures = new Map<string, StructureHierarchyRef | null>();
 
 export function useSuperpose(plugin: PluginUIContext | null): void {
+  // Staged mutations aren't structurally identifiable in a result (a mutated
+  // residue just looks like a normal amino acid), so we highlight them from the
+  // staged list. A ref keeps the latest value without recreating the loader.
+  const stagedMutations = useAtomValue(stagedMutationsAtom);
+  const mutationsRef = useRef<StagedMutation[]>(stagedMutations);
+  mutationsRef.current = stagedMutations;
+
   const loadAndSuperpose = useCallback(
     async (filePath: string, fileContent: string, superpose: boolean) => {
       if (!plugin) {
@@ -72,6 +85,15 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             `✓ Modified CIF _entry.id to: ${runId} for sequence panel`
           );
         }
+
+        // Boltz emits modified residues (PTMs: SEP/TPO/PTR/MLY/M3L/…) into
+        // `_chem_comp` with `.type = ?`. Mol* uses that type to classify a
+        // residue as polymer vs. ligand — with `?` it can't tell MLY is a peptide
+        // residue, so it drops it from the polymer cartoon, leaving an empty gap
+        // at the PTM site (the cartoon-only result preset shows nothing there).
+        // Restore the type so the modified residue is traced as part of the chain.
+        modifiedFileContent =
+          fixModifiedResidueChemCompType(modifiedFileContent);
 
         // Load result structure using Molstar's standard loading method
         const resultDataNode = await plugin.builders.data.rawData({
@@ -204,6 +226,11 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             console.error("Failed to perform superposition:", superposeErr);
             // Continue loading without superposition
           }
+        } else {
+          console.warn(
+            `[Superposition] SKIPPED — superpose=${superpose}, originalStructureFound=${!!originalStructure}, resultData=${!!resultStructureData}, structuresInScene=${allStructures.length}. ` +
+              `Result stays in its own coordinate frame (may sit far from the base → empty-middle framing).`
+          );
         }
 
         plugin.canvas3d?.requestCameraReset();
@@ -244,10 +271,61 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             plugin,
             filePath,
             resultStructureData,
-            resultHierarchyRef
+            resultHierarchyRef,
+            mutationsRef.current
           );
           console.log(`[Superpose] ✓ Combined colors applied`);
         }
+
+        // Clear any lingering erase-ghosting transparency so the result (and the
+        // base) render fully opaque. The erased residues are regenerated in the
+        // result, so ghosting them would obscure exactly what the user wants to
+        // see (Mol* selection renders opaque over transparent geometry, which is
+        // why clicking a residue "revealed" it). The staged erase list is left
+        // intact — only the stale 3D ghosting is dropped.
+        try {
+          const allStructures =
+            plugin.managers.structure.hierarchy.current.structures;
+          for (const s of allStructures) {
+            if (s.components?.length) {
+              await clearStructureTransparency(plugin, s.components);
+            }
+          }
+        } catch (transpErr) {
+          console.warn(
+            "Failed to clear erase transparency on result load:",
+            transpErr
+          );
+        }
+
+        // Frame the RESULT explicitly. requestCameraReset() fits *all* structures
+        // — including the hidden base and, when superposition is skipped, a result
+        // that sits far from it — which leaves the result off-center in empty
+        // space (the "empty middle"). Re-fetch the current (post-transform) result
+        // structure and focus only it, at its actual rendered position. Deferred a
+        // frame so the transform / representation updates have settled.
+        requestAnimationFrame(() => {
+          try {
+            const cur = plugin.managers.structure.hierarchy.current.structures;
+            const rr =
+              cur.find(s => s.cell?.obj?.label === uniqueLabel) ??
+              cur[cur.length - 1];
+            const data = rr?.cell?.obj?.data;
+            if (data) {
+              plugin.managers.camera.focusLoci(
+                Structure.toStructureElementLoci(data)
+              );
+              const sph = data.boundary?.sphere;
+              console.log(
+                `[Camera] focused on result "${uniqueLabel}" (radius=${sph ? sph.radius.toFixed(0) : "?"}Å, center=${sph ? sph.center.map((v: number) => v.toFixed(0)).join(",") : "?"})`
+              );
+            } else {
+              console.warn("[Camera] no result structure to focus");
+            }
+          } catch (e) {
+            console.warn("[Camera] focus on result failed:", e);
+          }
+        });
 
         // Emit event that structure is loaded (for tracking in UI)
         bus.emit("inpainting:structure-loaded", { filePath });
@@ -725,7 +803,8 @@ async function applyChainColorsOnly(
   plugin: PluginUIContext,
   structure: Structure,
   hierarchyRef: StructureHierarchyRef | null,
-  resultIndex: number = 0
+  resultIndex: number = 0,
+  mutations: StagedMutation[] = []
 ): Promise<void> {
   try {
     // Get parent ref
@@ -755,14 +834,16 @@ async function applyChainColorsOnly(
       true,
       resultIndex
     );
-    if (chainColorLayers.length > 0) {
-      await applyOverpaintToRepresentations(
-        plugin,
-        parentRef,
-        chainColorLayers
-      );
+    // Edits on top of the chain colors: mutation teal + PTM purple.
+    const layers = [
+      ...chainColorLayers,
+      ...createMutationTealLayers(structure, mutations),
+      ...createPtmPurpleLayers(structure)
+    ];
+    if (layers.length > 0) {
+      await applyOverpaintToRepresentations(plugin, parentRef, layers);
       console.log(
-        `[Chain Colors Fallback] ✓ Applied ${chainColorLayers.length} chain color layer(s) with palette index ${resultIndex}`
+        `[Chain Colors Fallback] ✓ Applied ${layers.length} layer(s) (chain colors + edits) with palette index ${resultIndex}`
       );
     }
   } catch (err) {
@@ -779,7 +860,8 @@ async function applyInpaintingMetadataColors(
   plugin: PluginUIContext,
   filePath: string,
   structure: Structure | undefined,
-  hierarchyRef: StructureHierarchyRef | null
+  hierarchyRef: StructureHierarchyRef | null,
+  mutations: StagedMutation[] = []
 ): Promise<void> {
   if (!structure) {
     console.warn("[Inpainting Metadata] No structure available for coloring");
@@ -887,7 +969,13 @@ async function applyInpaintingMetadataColors(
         filePath
       );
       // Still apply chain colors even if no metadata found
-      await applyChainColorsOnly(plugin, structure, hierarchyRef, resultIndex);
+      await applyChainColorsOnly(
+        plugin,
+        structure,
+        hierarchyRef,
+        resultIndex,
+        mutations
+      );
       return;
     }
 
@@ -912,7 +1000,13 @@ async function applyInpaintingMetadataColors(
     if (!metadata.chains || Object.keys(metadata.chains).length === 0) {
       console.warn(`[Inpainting Metadata] No chains data in metadata`);
       // Still apply chain colors even if no chain data in metadata
-      await applyChainColorsOnly(plugin, structure, hierarchyRef, resultIndex);
+      await applyChainColorsOnly(
+        plugin,
+        structure,
+        hierarchyRef,
+        resultIndex,
+        mutations
+      );
       return;
     }
 
@@ -1121,6 +1215,13 @@ async function applyInpaintingMetadataColors(
       }
     }
 
+    // Edits (mutation teal + PTM purple) last → top priority: PTM = Mutation >
+    // Fully Inpainted = Partially Fixed = Boundary. A mutated / modified residue
+    // keeps its edit color even when it overlaps an inpainting region. (A residue
+    // can't be both mutated and PTM'd, so their relative order is irrelevant.)
+    overpaintLayers.push(...createMutationTealLayers(structure, mutations));
+    overpaintLayers.push(...createPtmPurpleLayers(structure));
+
     // Apply all overpaint layers to existing representations
     if (overpaintLayers.length > 0) {
       await applyOverpaintToRepresentations(plugin, parentRef, overpaintLayers);
@@ -1199,6 +1300,153 @@ function createOverpaintLayer(
     );
     return null;
   }
+}
+
+/**
+ * Restore `_chem_comp.type` for modified amino-acid residues that Boltz writes
+ * with an unknown type (`?`). Without a peptide-linking type, Mol* treats the
+ * residue as a non-polymer ligand and omits it from the polymer cartoon, so the
+ * PTM site renders as an empty gap. We rewrite the type to `'L-peptide linking'`
+ * (`peptide linking` for glycine-like) so the residue is traced with the chain.
+ * Matches `_chem_comp` loop rows, which begin with the component id.
+ */
+const MODIFIED_AA_CCDS = [
+  "SEP",
+  "TPO",
+  "PTR",
+  "MLY",
+  "M3L",
+  "ALY",
+  "MSE",
+  "HYP",
+  "CSO",
+  "KCX",
+  "SAC",
+  "CAS",
+  "PCA",
+  "CME",
+  "OCS",
+  "CSD",
+  "SAH",
+  "MLZ"
+];
+function fixModifiedResidueChemCompType(cif: string): string {
+  const pattern = new RegExp(
+    `^([ \\t]*)(${MODIFIED_AA_CCDS.join("|")})([ \\t]+)\\?`,
+    "gm"
+  );
+  let n = 0;
+  const out = cif.replace(pattern, (_m, indent, ccd, sp) => {
+    n++;
+    return `${indent}${ccd}${sp}'L-peptide linking'`;
+  });
+  if (n > 0) {
+    console.log(
+      `[CIF Fix] Set _chem_comp.type='L-peptide linking' for ${n} modified residue(s) so they render in the cartoon`
+    );
+  }
+  return out;
+}
+
+// Post-translational-modification CCDs the studio can introduce (matches the
+// Sequence editor's PTM_OPTIONS). Residues carrying one of these in a result
+// structure are painted purple so PTM sites are visually distinct — purple == PTM.
+const PTM_CCDS = new Set(["SEP", "TPO", "PTR", "MLY", "M3L", "ALY"]);
+const PTM_PURPLE = 0xa855f7; // Tailwind purple-500, matches the sequence panel
+
+/**
+ * Scan the loaded structure for residues whose component id is a known PTM CCD
+ * and build purple overpaint layers for them (one per chain). Independent of the
+ * inpainting metadata so PTM sites are highlighted in every result view.
+ */
+function createPtmPurpleLayers(structure: Structure): Array<{
+  bundle: typeof StructureElement.Bundle.Empty;
+  color: Color;
+  clear: boolean;
+}> {
+  const byChain = new Map<string, Set<number>>();
+  for (const unit of structure.units) {
+    if (!Unit.isAtomic(unit)) continue;
+    const loc = StructureElement.Location.create(structure, unit);
+    for (let i = 0; i < unit.elements.length; i++) {
+      loc.element = unit.elements[i];
+      const comp = StructureProperties.atom.label_comp_id(loc).toUpperCase();
+      if (!PTM_CCDS.has(comp)) continue;
+      const chainId = StructureProperties.chain.auth_asym_id(loc);
+      const seqId = StructureProperties.residue.auth_seq_id(loc);
+      let set = byChain.get(chainId);
+      if (!set) {
+        set = new Set();
+        byChain.set(chainId, set);
+      }
+      set.add(seqId);
+    }
+  }
+
+  const layers: Array<{
+    bundle: typeof StructureElement.Bundle.Empty;
+    color: Color;
+    clear: boolean;
+  }> = [];
+  for (const [chainId, seqIds] of byChain) {
+    const layer = createOverpaintLayer(
+      structure,
+      chainId,
+      Array.from(seqIds),
+      PTM_PURPLE
+    );
+    if (layer) {
+      layers.push(layer);
+      console.log(
+        `[PTM] Painted chain ${chainId} residues [${Array.from(seqIds).join(", ")}] purple (#a855f7)`
+      );
+    }
+  }
+  return layers;
+}
+
+const MUTATION_TEAL = 0x14b8a6; // Tailwind teal-500, matches the sequence panel
+
+/**
+ * Build teal overpaint layers for staged mutations. Mutated residues aren't
+ * structurally distinguishable in the result, so we color them from the staged
+ * list (chain + author residue number). Applied at the same top priority as PTM.
+ */
+function createMutationTealLayers(
+  structure: Structure,
+  mutations: StagedMutation[]
+): Array<{
+  bundle: typeof StructureElement.Bundle.Empty;
+  color: Color;
+  clear: boolean;
+}> {
+  const byChain = new Map<string, number[]>();
+  for (const m of mutations) {
+    const arr = byChain.get(m.chainId) ?? [];
+    arr.push(m.authSeqId);
+    byChain.set(m.chainId, arr);
+  }
+
+  const layers: Array<{
+    bundle: typeof StructureElement.Bundle.Empty;
+    color: Color;
+    clear: boolean;
+  }> = [];
+  for (const [chainId, seqIds] of byChain) {
+    const layer = createOverpaintLayer(
+      structure,
+      chainId,
+      seqIds,
+      MUTATION_TEAL
+    );
+    if (layer) {
+      layers.push(layer);
+      console.log(
+        `[Mutation] Painted chain ${chainId} residues [${seqIds.join(", ")}] teal (#14b8a6)`
+      );
+    }
+  }
+  return layers;
 }
 
 /**

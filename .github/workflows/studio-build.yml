@@ -39,9 +39,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patchr-studio-macos
+          # latest-mac.yml + *.blockmap are required for electron-updater to
+          # detect and download updates. The .zip (not the .dmg) is the update
+          # payload on macOS.
           path: |
             studio/dist/*.dmg
             studio/dist/*.zip
+            studio/dist/latest-mac.yml
+            studio/dist/*.blockmap
 
   build-windows:
     runs-on: windows-latest
@@ -72,7 +77,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patchr-studio-windows
-          path: studio/dist/*.exe
+          # latest.yml + *.blockmap are required for electron-updater on Windows.
+          path: |
+            studio/dist/*.exe
+            studio/dist/latest.yml
+            studio/dist/*.blockmap
 
   build-linux:
     runs-on: ubuntu-latest
@@ -100,9 +109,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patchr-studio-linux
+          # latest-linux.yml is required for electron-updater on Linux (AppImage).
           path: |
             studio/dist/*.AppImage
             studio/dist/*.deb
+            studio/dist/latest-linux.yml
 
   release:
     needs: [build-macos, build-windows, build-linux]
