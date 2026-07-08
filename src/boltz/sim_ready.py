@@ -884,8 +884,23 @@ def _build_atom_type_map(topology, forcefield_obj) -> dict:
         template_for_res = None
 
     for residue in topology.residues():
-        tmpl = (template_for_res[residue.index] if template_for_res
-                else forcefield_obj._templates.get(residue.name))
+        # _matchAllResiduesToTemplates' return type varies across OpenMM versions
+        # (list indexed by residue.index in some, dict keyed by residue/index in
+        # others) and unmatched residues may be absent — the old direct subscription
+        # crashed with KeyError/IndexError (surfaced as the useless error "0"). Try
+        # index, then residue-object key, then fall back to the reliable name-based
+        # template lookup (correct for standard residues), then element-based below.
+        tmpl = None
+        if template_for_res is not None:
+            try:
+                tmpl = template_for_res[residue.index]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    tmpl = template_for_res[residue]
+                except (KeyError, IndexError, TypeError):
+                    tmpl = None
+        if tmpl is None:
+            tmpl = forcefield_obj._templates.get(residue.name)
 
         if tmpl is None:
             for atom in residue.atoms():

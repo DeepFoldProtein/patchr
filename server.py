@@ -282,6 +282,33 @@ def _scan_gpu_queue() -> tuple[int, list]:
     return running, queued
 
 
+def _load_all_jobs() -> list:
+    """Return every job across ALL replicas by reading the shared file-backed
+    _status.json records under WORK_DIR, merged with this replica's in-memory
+    jobs_db (for jobs not yet persisted). The list endpoint must NOT rely on the
+    local jobs_db alone: behind the round-robin LB each replica only holds the
+    jobs it created, and its copies of jobs updated elsewhere go stale."""
+    import json as _json
+    seen: dict = {}
+    try:
+        for d in WORK_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            f = d / "_status.json"
+            if not f.is_file():
+                continue
+            try:
+                rec = _json.loads(f.read_text())
+            except Exception:
+                continue
+            seen[rec.get("job_id") or d.name] = rec
+    except Exception:
+        pass
+    for jid, rec in jobs_db.items():
+        seen.setdefault(jid, rec)
+    return list(seen.values())
+
+
 def _job_queue_view(job_id: str, running: int, queued: list) -> dict:
     """Build the per-job queue view (state + 1-based position) from a scan."""
     order = [jid for _, jid in queued]
@@ -1552,10 +1579,12 @@ async def list_jobs(
     offset: int = 0,
 ):
     """List all jobs, optionally filtered by status."""
-    jobs = list(jobs_db.values())
+    # Read the shared file-backed records so the list is complete and current
+    # across replicas (not just this replica's in-memory, possibly-stale view).
+    jobs = _load_all_jobs()
     if status:
-        jobs = [j for j in jobs if j["status"] == status]
-    jobs.sort(key=lambda x: x["created_at"], reverse=True)
+        jobs = [j for j in jobs if j.get("status") == status]
+    jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     total = len(jobs)
     jobs = jobs[offset : offset + limit]
     return JobListResponse(
@@ -1779,7 +1808,9 @@ def _run_sim_ready_sync(sim_job_id: str, cif_path: str, request: "SimReadyReques
 
     except Exception as e:
         logging.exception(f"Sim-ready failed for job {sim_job_id}")
-        update_job_status(sim_job_id, JobStatus.FAILED, error=str(e))
+        # Include the exception type — a bare str(e) can be uselessly cryptic
+        # (e.g. a KeyError renders as just "0").
+        update_job_status(sim_job_id, JobStatus.FAILED, error=f"{type(e).__name__}: {e}")
 
 
 @app.post("/api/v1/sim-ready")
