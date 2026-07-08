@@ -14,10 +14,9 @@
 [Website](https://patchr.deepfold.org/) | [Atlas](https://patchr.deepfold.org/atlas) | [Paper](#cite) | [PATCHR-Studio](#patchr-studio)
 
 **Download PATCHR-Studio:**&nbsp;&nbsp;
-[Windows](https://github.com/DeepFoldProtein/patchr/releases/download/v1.0.0/patchr-studio-1.0.0-setup.exe) ·
-[macOS (Intel)](https://github.com/DeepFoldProtein/patchr/releases/download/v1.0.0/patchr-studio-1.0.0.dmg) ·
-[macOS (Apple Silicon)](https://github.com/DeepFoldProtein/patchr/releases/download/v1.0.0/Patchr.Studio-1.0.0-arm64-mac.zip) ·
-[Linux](https://github.com/DeepFoldProtein/patchr/releases/download/v1.0.0/patchr-studio-1.0.0.AppImage)
+[Windows](https://github.com/DeepFoldProtein/patchr/releases/latest/download/patchr-studio-setup.exe) ·
+[macOS (Apple Silicon)](https://github.com/DeepFoldProtein/patchr/releases/latest/download/patchr-studio.dmg) ·
+[Linux](https://github.com/DeepFoldProtein/patchr/releases/latest/download/patchr-studio.AppImage)
 
 </div>
 

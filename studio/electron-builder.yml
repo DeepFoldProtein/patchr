@@ -24,7 +24,8 @@ win:
       arch:
         - x64
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  # Version-less name so /releases/latest/download/patchr-studio-setup.exe is stable.
+  artifactName: ${name}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -38,7 +39,8 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: true
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  # Version-less so /releases/latest/download/patchr-studio.dmg is a stable link.
+  artifactName: ${name}.${ext}
 linux:
   target:
     - target: AppImage
@@ -50,5 +52,6 @@ linux:
   maintainer: electronjs.org
   category: Utility
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  # Version-less so /releases/latest/download/patchr-studio.AppImage is stable.
+  artifactName: ${name}.${ext}
 npmRebuild: false
