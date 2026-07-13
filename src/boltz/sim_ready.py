@@ -353,6 +353,40 @@ def _remove_atoms_from_fixer(fixer, atom_indices_to_remove: set):
     fixer.positions = new_positions * pos_unit
 
 
+def _solvate(modeller, forcefield, config):
+    """Add the solvent box + neutralizing ions (own function so callers can wrap it)."""
+    import openmm.unit as unit
+    modeller.addSolvent(
+        forcefield,
+        model=WATER_MAP.get(config.water_model, config.water_model),
+        padding=config.padding * unit.nanometer,
+        positiveIon=config.positive_ion,
+        negativeIon=config.negative_ion,
+        ionicStrength=config.ion_concentration * unit.molar,
+        neutralize=True,
+    )
+
+
+def _raise_if_template_error(exc, forcefield, topology, ff_name):
+    """If ``exc`` is an OpenMM missing-template error, re-raise a clear, actionable
+    message naming the unparameterizable residues; otherwise return so the caller can
+    re-raise the original. Guarantees no cryptic "No template found" reaches the user."""
+    if "No template found" not in str(exc):
+        return
+    from collections import Counter
+    unmatched = forcefield.getUnmatchedResidues(topology)
+    counts = Counter(r.name for r in unmatched)
+    detail = ", ".join(f"{n}×{c}" for n, c in counts.items()) or "unknown residue(s)"
+    raise ValueError(
+        f"sim-ready cannot build a {ff_name} force field system for this structure: "
+        f"{len(unmatched)} residue(s) have no template ({detail}). This composition is "
+        f"not supported — it typically contains modified nucleotides, non-standard "
+        f"residues, or a covalently-linked ligand that the available force fields do "
+        f"not parameterize. Standard protein / DNA / RNA / ion / water structures are "
+        f"supported."
+    ) from exc
+
+
 def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimReadyResult:
     """Run the full simulation-ready pipeline.
 
@@ -455,25 +489,29 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
 
     _progress("solvating", 0.4)
 
-    modeller.addSolvent(
-        forcefield,
-        model=WATER_MAP.get(config.water_model, config.water_model),
-        padding=config.padding * unit.nanometer,
-        positiveIon=config.positive_ion,
-        negativeIon=config.negative_ion,
-        ionicStrength=config.ion_concentration * unit.molar,
-        neutralize=True,
-    )
+    # addSolvent builds a system internally (to neutralize), so a template failure can
+    # surface here as well as at createSystem below — convert both to a clear error.
+    try:
+        _solvate(modeller, forcefield, config)
+    except ValueError as e:
+        _raise_if_template_error(e, forcefield, modeller.topology, ff_name)
+        raise
 
     _progress("building_system", 0.6)
 
-    # Step 5: Create system (for serialization / export)
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        constraints=app.HBonds,
-    )
+    # Step 5: Create system (for serialization / export).
+    try:
+        system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=app.HBonds,
+        )
+    except ValueError as e:
+        _raise_if_template_error(e, forcefield, modeller.topology, ff_name)
+        raise
+
+    _progress("writing_output", 0.8)
 
     _progress("writing_output", 0.8)
 
