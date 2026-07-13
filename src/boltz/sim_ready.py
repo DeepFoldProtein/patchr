@@ -21,6 +21,7 @@ References:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,6 +95,24 @@ _CHARMM_ATOM_RENAME = {"OP1": "O1P", "OP2": "O2P"}
 
 _WATER_RESIDUES = {"HOH", "WAT", "TIP3", "SOL", "TIP4", "TIP5", "SPC"}
 
+# Residues a protein/nucleic force field CAN parameterize (standard amino acids +
+# common protonation/terminal variants, nucleotides, water, ions, peptide caps).
+# Used to protect standard residues from being dropped by the unmatched-residue net
+# (getUnmatchedResidues also flags standard residues at chain breaks/disulfides,
+# which createSystem handles correctly).
+_STANDARD_RESIDUES = (
+    {"ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+     "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL"}
+    | {"HID", "HIE", "HIP", "HSD", "HSE", "HSP", "CYX", "CYM", "LYN", "ASH",
+       "GLH", "TYM", "MSE", "SEC", "PYL"}                       # variants
+    | {"ACE", "NME", "NMA", "NH2", "FOR"}                        # peptide caps
+    | {"DA", "DC", "DG", "DT", "DU", "A", "C", "G", "U", "I",
+       "DA5", "DA3", "DC5", "DC3", "DG5", "DG3", "DT5", "DT3"}   # nucleotides
+    | _WATER_RESIDUES
+    | {"NA", "CL", "K", "MG", "CA", "ZN", "FE", "MN", "NA+", "CL-",
+       "K+", "MG2", "CA2", "ZN2"}                                # ions
+)
+
 _ION_RESIDUES = {
     "NA", "CL", "Na+", "Cl-", "K", "K+",
     "NA+", "CL-", "SOD", "CLA", "POT", "MG", "CA", "ZN",
@@ -148,6 +167,7 @@ class SimReadyResult:
     n_ions: int = 0
     box_size: tuple = (0.0, 0.0, 0.0)
     total_charge: float = 0.0
+    dropped_residues: dict = field(default_factory=dict)  # resname -> count dropped
 
     def to_dict(self) -> dict:
         # Convert absolute paths in files to relative paths (relative to output_dir)
@@ -168,6 +188,7 @@ class SimReadyResult:
             "n_ions": self.n_ions,
             "box_size": list(self.box_size),
             "total_charge": self.total_charge,
+            "dropped_residues": self.dropped_residues,
         }
 
 
@@ -372,8 +393,12 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
     fixer.findMissingResidues()
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
-    if not config.keep_water:
-        fixer.removeHeterogens(keepWater=False)
+    # Always strip non-water heterogens. Protein force fields (charmm36/amber) have no
+    # parameters for the ligands/ions/glycans (NAG, SO4, ...) that Boltz predictions
+    # routinely contain; leaving them makes forcefield.createSystem() fail with a
+    # cryptic "No template found for residue ..." error. keepWater still honours the
+    # user's keep_water choice for actual water molecules.
+    fixer.removeHeterogens(keepWater=config.keep_water)
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(config.ph)
@@ -391,7 +416,6 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
     # CHARMM36 does not have DNA/RNA polymer templates in OpenMM.
     # Auto-switch to AMBER14 when nucleic acids are present.
     if has_nucleic and ff_name.startswith("charmm"):
-        import logging
         logging.getLogger(__name__).warning(
             f"Structure contains nucleic acids but '{ff_name}' lacks DNA/RNA "
             f"polymer templates in OpenMM. Switching to 'amber14sb'."
@@ -407,6 +431,27 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
 
     # Step 4: Create modeller and solvate
     modeller = app.Modeller(fixer.topology, fixer.positions)
+
+    # Robustness net for residues the force field cannot parameterize (e.g. exotic
+    # ligands/glycans that survived removeHeterogens because they are covalently
+    # linked). Only NON-standard residues are eligible — getUnmatchedResidues also
+    # flags standard residues at chain breaks/disulfides that createSystem handles
+    # fine, so dropping those would corrupt the protein. Report what was dropped.
+    dropped_residues: dict = {}
+    _STD = _STANDARD_RESIDUES  # amino acids + nucleotides + water + ions
+    unmatched = [r for r in forcefield.getUnmatchedResidues(modeller.topology)
+                 if r.name not in _STD]
+    if unmatched:
+        from collections import Counter
+        counts = Counter(r.name for r in unmatched)
+        dropped_residues = dict(counts)
+        logging.getLogger(__name__).warning(
+            "sim-ready: dropping %d non-standard residue(s) with no %s force field "
+            "template (not parameterizable, excluded from the simulation system): %s",
+            len(unmatched), ff_name,
+            ", ".join(f"{n}×{c}" for n, c in counts.items()),
+        )
+        modeller.delete(unmatched)
 
     _progress("solvating", 0.4)
 
@@ -452,6 +497,7 @@ def prepare_sim_ready(config: SimReadyConfig, progress_callback=None) -> SimRead
     result.n_waters = n_waters
     result.n_ions = n_ions
     result.box_size = box_nm
+    result.dropped_residues = dropped_residues
 
     # Step 7: Write output files based on engine
     if config.engine == "openmm":
