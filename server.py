@@ -1598,7 +1598,9 @@ async def download_file(job_id: str, file_type: str):
     """
     Download files from a job.
 
-    file_type: 'cif', 'yaml', or 'prediction' (zip archive).
+    file_type: 'cif' / 'yaml' (input template), 'prediction' (zip of all outputs),
+    'sim_ready' (zip), 'predicted_cif' (inpainted structure, CIF), or 'pdb'
+    (inpainted structure converted to PDB).
     """
     # _refresh_job (not a bare jobs_db check): on a multi-replica deployment the
     # replica serving this request may not own the job, so pull the on-disk record
@@ -1670,6 +1672,35 @@ async def download_file(job_id: str, file_type: str):
                     zipf.write(fp, str(rel_path))
 
         file_path = zip_path
+
+    elif file_type in ("pdb", "predicted_cif"):
+        # The inpainted (predicted) structure as a single file: the best model CIF
+        # directly (predicted_cif) or converted to PDB (pdb).
+        pred_rel = job.get("prediction_dir")
+        if not pred_rel:
+            raise HTTPException(status_code=404, detail="Prediction results not found")
+        pred_dir = Path(pred_rel)
+        if not pred_dir.is_absolute():
+            pred_dir = WORK_DIR / pred_dir
+        cifs = sorted(pred_dir.rglob("*_model_0.cif")) or sorted(pred_dir.rglob("*_model_*.cif"))
+        if not cifs:
+            raise HTTPException(status_code=404, detail="No predicted structure CIF found")
+        src_cif = cifs[0]
+        if file_type == "predicted_cif":
+            file_path = src_cif
+        else:
+            # Convert with the low-level gemmi parser (gemmi.read_structure does not
+            # handle Boltz ModelCIF); cache the PDB next to the job dir.
+            pdb_out = WORK_DIR / job_id / f"{src_cif.stem}.pdb"
+            try:
+                import gemmi
+                doc = gemmi.cif.read(str(src_cif))
+                st = gemmi.make_structure_from_block(doc[0])
+                st.setup_entities()
+                st.write_pdb(str(pdb_out))
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"CIF→PDB conversion failed: {e}")
+            file_path = pdb_out
     else:
         raise HTTPException(status_code=400, detail=f"Invalid file_type: {file_type}")
 

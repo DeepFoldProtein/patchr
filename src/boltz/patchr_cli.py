@@ -371,6 +371,10 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
             method=method,
         )
 
+    # Write a PDB copy next to every predicted CIF so results are available in both
+    # formats without a separate conversion step.
+    _write_pdb_copies(out_dir=out_dir)
+
     # Post-processing: sim-ready
     if sim_ready_engine:
         _run_post_processing(
@@ -379,6 +383,32 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
             sim_ready_engine=sim_ready_engine,
             ff=sim_ff,
         )
+
+
+def _write_pdb_copies(out_dir: str) -> None:
+    """Write a .pdb sibling for each predicted *_model_*.cif under out_dir, so the
+    inpainted structure is available as both CIF and PDB. Best-effort per file."""
+    import glob
+
+    import gemmi
+
+    out_path = Path(out_dir).expanduser()
+    cif_files = sorted(glob.glob(str(out_path / "**" / "*_model_*.cif"), recursive=True))
+    written = 0
+    for cif in cif_files:
+        pdb = cif[:-4] + ".pdb"
+        try:
+            # Use the low-level cif parser (like sim_ready._cif_to_pdb_string): the
+            # high-level gemmi.read_structure() does not handle Boltz's ModelCIF output.
+            doc = gemmi.cif.read(cif)
+            st = gemmi.make_structure_from_block(doc[0])
+            st.setup_entities()
+            st.write_pdb(pdb)
+            written += 1
+        except Exception as e:  # noqa: BLE001 — PDB has hard limits (chains, atom count)
+            click.echo(f"Warning: could not write PDB for {Path(cif).name}: {e}")
+    if written:
+        click.echo(f"Wrote {written} PDB file(s) alongside the predicted CIF(s).")
 
 
 def _run_post_processing(

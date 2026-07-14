@@ -241,3 +241,7 @@ deploy/coolify/.env
 deploy/coolify/.env.production
 deploy/coolify/installation-*.log
 deploy/results/
+
+bench_inpaint/
+bench_loop/
+deploy/
