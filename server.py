@@ -1141,12 +1141,34 @@ def _run_boltz_prediction_sync(
 
         update_job_status(job_id, JobStatus.RUNNING_PREDICTION, progress="Finalizing results")
 
+        # Emit a PDB sibling next to every predicted CIF so results are available in
+        # both formats (the CLI path does this too). Best-effort per file — PDB has
+        # hard limits (chains, atom count) that some structures exceed.
+        _write_pdb_copies(results_dir / "predictions")
+
     except Exception as e:
         error_msg = f"Prediction error: {str(e)}"
         import traceback
         traceback.print_exc()
         update_job_status(job_id, JobStatus.FAILED, error=error_msg)
         raise
+
+
+def _write_pdb_copies(pred_dir: Path) -> None:
+    """Write a .pdb sibling for each predicted *_model_*.cif under pred_dir."""
+    import gemmi
+
+    for cif in sorted(pred_dir.rglob("*_model_*.cif")):
+        pdb_out = cif.with_suffix(".pdb")
+        try:
+            # Low-level cif parser: gemmi.read_structure() does not handle Boltz's
+            # ModelCIF output (same approach as the download endpoint).
+            doc = gemmi.cif.read(str(cif))
+            st = gemmi.make_structure_from_block(doc[0])
+            st.setup_entities()
+            st.write_pdb(str(pdb_out))
+        except Exception as e:  # noqa: BLE001
+            print(f"[API] Warning: could not write PDB for {cif.name}: {e}")
 
 
 # ── Protenix prediction ─────────────────────────────────────────────────────
