@@ -208,6 +208,8 @@ Beyond reconstructing missing regions, the interactive sequence editor supports 
 
 Staged edits are listed and individually reversible prior to execution, and outputs are versioned for comparison across runs. Prediction, GPU queue status, and simulation-ready export are integrated.
 
+See [**docs/STUDIO.md**](docs/STUDIO.md) for the complete feature and parameter reference (Studio, CLI, and REST API).
+
 **No GPU?** Run the server on [Google Colab](https://colab.research.google.com/github/DeepFoldProtein/patchr/blob/main/colab_server.ipynb) for free and connect from PATCHR-Studio.
 
 ## Server
