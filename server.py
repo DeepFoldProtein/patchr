@@ -28,6 +28,7 @@ import torch
 import uvicorn
 from fastapi import (
     BackgroundTasks,
+    Depends,
     FastAPI,
     File,
     Form,
@@ -36,9 +37,11 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
-from server.dashboard import DASHBOARD_HTML, build_daily_stats
+from server.config import DEFAULT_DEVICE_ID, GPU_QUEUE_MAX, PROJECT_ROOT, WORK_DIR
+from server.dashboard import DASHBOARD_HTML, build_daily_stats, build_geo_stats
 from server.models import (
     JobListResponse,
     JobStatus,
@@ -48,14 +51,24 @@ from server.models import (
     SimReadyRequest,
     TemplateGenerateRequest,
 )
+from server import jobs as _jobs
+from server.jobs import (
+    ProgressTracker,
+    _job_queue_view,
+    _load_all_jobs,
+    _persist_job,
+    _refresh_job,
+    _scan_gpu_queue,
+    jobs_db,
+    progress_streams,
+    submit_gpu_job as _submit_gpu_job,
+    update_job_status,
+)
+from server.auth import require_dashboard_auth
+from server.reqlog import RequestLogMiddleware, _read_request_records
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import Callback
 from rdkit import Chem
-
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 # Import Boltz modules
 from boltz.data.module.inferencev2 import Boltz2InferenceDataModule
@@ -77,284 +90,18 @@ from boltz.model.models.boltz2 import Boltz2
 
 logger = logging.getLogger(__name__)
 
-# Constants
-WORK_DIR = Path(os.environ.get("PATCHR_WORK_DIR", "./patchr_jobs"))
-WORK_DIR.mkdir(parents=True, exist_ok=True)
-
-# Global server configuration
-DEFAULT_DEVICE_ID = os.environ.get("PATCHR_DEVICE_ID") or os.environ.get("BOLTZ_DEVICE_ID")
-
-
-# ── Model types ──────────────────────────────────────────────────────────────
+# Config constants (WORK_DIR, DEFAULT_DEVICE_ID, GPU_QUEUE_MAX, PROJECT_ROOT) live
+# in server/config.py; job state, the GPU queue and ProgressTracker in server/jobs.py
+# — all imported at the top of this file.
 
 # Model registry: model_type -> model object
 _model_registry: Dict[str, Any] = {}
 _model_params: Dict[str, Dict[str, Any]] = {}
 
-# ── GPU Job Queue ─────────────────────────────────────────────────────────
-# Replaces the old threading.Lock() approach.  A bounded asyncio.Queue holds
-# pending GPU tasks; a single background worker drains them one-at-a-time.
-# If the queue is full the API returns 503 immediately instead of blocking.
+# Model loading state (read by the /health endpoint).
+_model_loading: bool = False
+_model_loading_stage: str = ""
 
-_GPU_QUEUE_MAX = int(os.environ.get("PATCHR_GPU_QUEUE_MAX", "4"))
-_gpu_job_queue: asyncio.Queue | None = None   # initialised in startup_event
-_gpu_worker_task: asyncio.Task | None = None  # handle for the background worker
-_model_loading: bool = False                  # True while models are being loaded at startup
-_model_loading_stage: str = ""                # Current loading stage for health endpoint
-
-
-async def _gpu_worker():
-    """Background coroutine that processes GPU jobs sequentially."""
-    while True:
-        job_id, fn, future = await _gpu_job_queue.get()
-        try:
-            logger.info("[GPU-Queue] Starting job %s  (queue depth: %d)", job_id, _gpu_job_queue.qsize())
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, fn)
-            future.set_result(result)
-        except Exception as exc:
-            future.set_exception(exc)
-        finally:
-            _gpu_job_queue.task_done()
-            logger.info("[GPU-Queue] Finished job %s  (queue depth: %d)", job_id, _gpu_job_queue.qsize())
-
-
-async def _submit_gpu_job(job_id: str, fn: Callable, *, update_queued: bool = True) -> Future:
-    """Submit a synchronous callable to the GPU job queue.
-
-    Returns a Future that resolves when the job finishes.
-    Raises HTTPException(503) if the queue is full.
-    """
-    future: Future = Future()
-    try:
-        _gpu_job_queue.put_nowait((job_id, fn, future))
-    except asyncio.QueueFull:
-        raise HTTPException(
-            status_code=503,
-            detail=f"GPU job queue is full ({_GPU_QUEUE_MAX} pending). Try again later.",
-        )
-    if update_queued:
-        depth = _gpu_job_queue.qsize()
-        # queue_submitted_at is the ordering key used to compute a system-wide,
-        # cross-replica queue position (see _scan_gpu_queue / queue_status). It is
-        # the moment the job entered a GPU worker queue — distinct from created_at
-        # (job creation, often earlier, during template generation).
-        update_job_status(
-            job_id,
-            JobStatus.PENDING,
-            progress=f"Queued (position {depth}/{_GPU_QUEUE_MAX})",
-            queue_submitted_at=datetime.now().isoformat(),
-        )
-    return future
-
-
-# Enums and Pydantic models (JobStatus, ModelType, *Request/*Response) live in
-# server/models.py and are imported at the top of this file.
-
-# Job storage
-jobs_db: Dict[str, Dict] = {}
-progress_streams: Dict[str, asyncio.Queue] = {}
-
-
-def _persist_job(job_id: str) -> None:
-    """Write the job record to its dir under WORK_DIR so that a *second* replica
-    (e.g. a per-GPU instance sharing WORK_DIR behind a round-robin balancer) can
-    serve status/poll for a job it did not itself submit. Atomic, best-effort."""
-    rec = jobs_db.get(job_id)
-    if rec is None:
-        return
-    try:
-        import json as _json
-        d = WORK_DIR / job_id
-        d.mkdir(parents=True, exist_ok=True)
-        tmp = d / "_status.json.tmp"
-        tmp.write_text(_json.dumps(rec, default=str))
-        tmp.replace(d / "_status.json")
-    except Exception:
-        pass
-
-
-def _refresh_job(job_id: str) -> bool:
-    """Make ``jobs_db[job_id]`` reflect the on-disk record. The instance that owns
-    the job persists on every update, so re-reading the file lets any instance
-    return current status for jobs submitted elsewhere. Returns True if known."""
-    try:
-        f = WORK_DIR / job_id / "_status.json"
-        if f.is_file():
-            import json as _json
-            jobs_db[job_id] = _json.loads(f.read_text())
-    except Exception:
-        pass
-    return job_id in jobs_db
-
-
-def _scan_gpu_queue() -> tuple[int, list]:
-    """Aggregate GPU-queue state across ALL replicas from the file-backed job
-    records under WORK_DIR (each per-GPU instance persists _status.json there).
-
-    A single replica's in-memory ``_gpu_job_queue`` only sees its own jobs, so on
-    the round-robin LB deployment it cannot report the true system queue. Reading
-    the shared records makes any replica able to answer for the whole cluster.
-
-    Returns ``(running, queued)`` where ``running`` is the number of jobs executing
-    on a GPU right now (status running_prediction) and ``queued`` is a time-ordered
-    list of ``(queue_submitted_at, job_id)`` for jobs waiting for a GPU."""
-    import json as _json
-    running = 0
-    queued: list = []
-    try:
-        for d in WORK_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            f = d / "_status.json"
-            if not f.is_file():
-                continue
-            try:
-                rec = _json.loads(f.read_text())
-            except Exception:
-                continue
-            st = rec.get("status")
-            if st == JobStatus.RUNNING_PREDICTION:
-                running += 1
-            elif st == JobStatus.PENDING and rec.get("queue_submitted_at"):
-                queued.append((rec.get("queue_submitted_at") or "", rec.get("job_id") or d.name))
-    except Exception:
-        pass
-    queued.sort()
-    return running, queued
-
-
-def _load_all_jobs() -> list:
-    """Return every job across ALL replicas by reading the shared file-backed
-    _status.json records under WORK_DIR, merged with this replica's in-memory
-    jobs_db (for jobs not yet persisted). The list endpoint must NOT rely on the
-    local jobs_db alone: behind the round-robin LB each replica only holds the
-    jobs it created, and its copies of jobs updated elsewhere go stale."""
-    import json as _json
-    seen: dict = {}
-    try:
-        for d in WORK_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            f = d / "_status.json"
-            if not f.is_file():
-                continue
-            try:
-                rec = _json.loads(f.read_text())
-            except Exception:
-                continue
-            seen[rec.get("job_id") or d.name] = rec
-    except Exception:
-        pass
-    for jid, rec in jobs_db.items():
-        seen.setdefault(jid, rec)
-    return list(seen.values())
-
-
-def _job_queue_view(job_id: str, running: int, queued: list) -> dict:
-    """Build the per-job queue view (state + 1-based position) from a scan."""
-    order = [jid for _, jid in queued]
-    if job_id in order:
-        pos = order.index(job_id) + 1
-        return {"job_id": job_id, "state": "queued", "position": pos, "ahead": pos - 1}
-    _refresh_job(job_id)
-    st = jobs_db.get(job_id, {}).get("status")
-    if st == JobStatus.RUNNING_PREDICTION:
-        return {"job_id": job_id, "state": "running", "position": 0, "ahead": 0}
-    if st in (JobStatus.COMPLETED, JobStatus.FAILED):
-        return {"job_id": job_id, "state": st, "position": 0, "ahead": 0}
-    if st is not None:
-        # e.g. generating_template / freshly-pending (not yet on the GPU queue)
-        return {"job_id": job_id, "state": st, "position": None, "ahead": None}
-    return {"job_id": job_id, "state": "unknown", "position": None, "ahead": None}
-
-
-# ── Progress tracker (Boltz) ────────────────────────────────────────────────
-
-class ProgressTracker(Callback):
-    """Custom callback to track prediction progress."""
-
-    def __init__(self, job_id: str, event_loop=None):
-        super().__init__()
-        self.job_id = job_id
-        self.total_batches = 0
-        self.current_batch = 0
-        self.event_loop = event_loop
-        self.base_progress = 0
-        self.diffusion_progress = 0
-
-    def on_predict_start(self, trainer, pl_module):
-        self._emit_progress("Prediction started", 0)
-
-    def on_predict_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
-        self.current_batch = batch_idx
-        if hasattr(trainer, "num_predict_batches"):
-            self.total_batches = trainer.num_predict_batches[0]
-        self.base_progress = 0
-        self.diffusion_progress = 0
-        progress = 0
-        if self.total_batches > 0:
-            progress = int((self.current_batch / self.total_batches) * 100)
-        self._emit_progress(
-            f"Processing batch {self.current_batch + 1}/{self.total_batches or '?'}",
-            progress,
-        )
-
-    def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        self.current_batch = batch_idx + 1
-        if hasattr(trainer, "num_predict_batches"):
-            self.total_batches = trainer.num_predict_batches[0]
-        progress = 100
-        if self.total_batches > 0:
-            progress = int((self.current_batch / self.total_batches) * 100)
-        self._emit_progress(
-            f"Completed batch {self.current_batch}/{self.total_batches or '?'}",
-            progress,
-        )
-
-    def on_predict_end(self, trainer, pl_module):
-        self._emit_progress("Prediction completed", 100)
-
-    def update_base_progress(self, message: str, percentage: int):
-        self.base_progress = min(percentage, 40)
-        total_progress = self.base_progress + self.diffusion_progress
-        self._emit_progress(message, total_progress)
-
-    def update_diffusion_progress(self, message: str, step: int, total_steps: int):
-        if total_steps > 0:
-            diffusion_percentage = int((step / total_steps) * 60)
-            self.diffusion_progress = diffusion_percentage
-            total_progress = self.base_progress + self.diffusion_progress
-            self._emit_progress(message, total_progress)
-
-    def _emit_progress(self, message: str, percentage: int):
-        update_job_status(
-            self.job_id,
-            JobStatus.RUNNING_PREDICTION,
-            progress=f"{message} ({percentage}%)",
-        )
-        if self.job_id in progress_streams and self.event_loop:
-            try:
-                queue = progress_streams[self.job_id]
-                if self.event_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self._put_progress(queue, message, percentage),
-                        self.event_loop,
-                    )
-            except Exception:
-                pass
-
-    async def _put_progress(self, queue: asyncio.Queue, message: str, percentage: int):
-        try:
-            await queue.put(
-                {
-                    "message": message,
-                    "percentage": percentage,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-        except Exception:
-            pass
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
@@ -373,102 +120,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Request logging / failure recording ──────────────────────────────────────
-# Lightweight per-request record (method, path, status, latency, error/traceback)
-# so the status page and the /stats and /failures endpoints show real success/
-# failure history with reasons. Each replica appends to its own JSONL under the
-# shared WORK_DIR; the query endpoints aggregate across all replicas.
-import time as _time
-import socket as _socket
-import traceback as _tb
-from collections import deque as _deque
-from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
-from starlette.responses import Response as _RawResponse
-
-_REQ_DIR = WORK_DIR / "_requests"
-_REPLICA = _socket.gethostname()
-_recent_requests: _deque = _deque(maxlen=3000)
-_SKIP_LOG_PATHS = {"/api/v1/stats", "/api/v1/stats/daily", "/api/v1/failures",
-                   "/api/v1/health", "/dashboard", "/dashboard/echarts.js", "/favicon.ico"}
-
-
-def _record_request(rec: dict) -> None:
-    _recent_requests.append(rec)
-    try:
-        import json as _json
-        _REQ_DIR.mkdir(parents=True, exist_ok=True)
-        f = _REQ_DIR / f"{_REPLICA}.jsonl"
-        if f.exists() and f.stat().st_size > 5_000_000:  # bound the file (~5 MB)
-            tail = f.read_text(errors="replace").splitlines()[-15000:]
-            f.write_text("\n".join(tail) + "\n")
-        with open(f, "a") as fh:
-            fh.write(_json.dumps(rec) + "\n")
-    except Exception:
-        pass
-
-
-class RequestLogMiddleware(_BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        start = _time.time()
-        path = request.url.path
-        rec = {
-            "ts": datetime.now().isoformat(timespec="seconds"),
-            "method": request.method, "path": path, "replica": _REPLICA,
-        }
-        try:
-            response = await call_next(request)
-        except Exception as exc:  # unhandled → 500, capture traceback
-            rec.update(status=500, ms=round((_time.time() - start) * 1000, 1),
-                       error=f"{type(exc).__name__}: {exc}",
-                       traceback=_tb.format_exc()[-2000:])
-            if path not in _SKIP_LOG_PATHS:
-                _record_request(rec)
-            raise
-        rec["status"] = response.status_code
-        rec["ms"] = round((_time.time() - start) * 1000, 1)
-        if response.status_code >= 400:
-            # Buffer the (small) error body to capture the reason, then rebuild
-            # the response.  Success/streaming responses are passed through as-is.
-            import json as _json
-            body = b""
-            async for chunk in response.body_iterator:
-                body += chunk
-            try:
-                rec["error"] = _json.loads(body).get("detail") if body else ""
-            except Exception:
-                rec["error"] = body.decode(errors="replace")[:500]
-            headers = dict(response.headers)
-            headers.pop("content-length", None)
-            response = _RawResponse(content=body, status_code=response.status_code,
-                                    headers=headers, media_type=response.media_type)
-        if path not in _SKIP_LOG_PATHS:
-            _record_request(rec)
-        return response
-
-
 app.add_middleware(RequestLogMiddleware)
-
-
-def _read_request_records(limit_lines: int = 20000) -> list:
-    """Aggregate recent request records across all replicas' JSONL files."""
-    import json as _json
-    recs: list = []
-    try:
-        for f in _REQ_DIR.glob("*.jsonl"):
-            try:
-                lines = f.read_text(errors="replace").splitlines()[-limit_lines:]
-            except Exception:
-                continue
-            for ln in lines:
-                try:
-                    recs.append(_json.loads(ln))
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    recs.sort(key=lambda r: r.get("ts", ""))
-    return recs
-
 
 # ── Model preloading ────────────────────────────────────────────────────────
 
@@ -650,12 +302,11 @@ _startup_model: Optional[str] = None
 @app.on_event("startup")
 async def startup_event():
     """Start GPU job queue worker and kick off model loading in background."""
-    global _gpu_job_queue, _gpu_worker_task
-
-    # Initialise the bounded GPU job queue and its consumer
-    _gpu_job_queue = asyncio.Queue(maxsize=_GPU_QUEUE_MAX)
-    _gpu_worker_task = asyncio.create_task(_gpu_worker())
-    logger.info("[GPU-Queue] Worker started (max_depth=%d)", _GPU_QUEUE_MAX)
+    # GPU queue state lives in server.jobs so the pipeline code can submit jobs
+    # without importing server.py; create the queue + worker here on the loop.
+    _jobs.gpu_job_queue = asyncio.Queue(maxsize=GPU_QUEUE_MAX)
+    _jobs.gpu_worker_task = asyncio.create_task(_jobs._gpu_worker())
+    logger.info("[GPU-Queue] Worker started (max_depth=%d)", GPU_QUEUE_MAX)
 
     # Load models in background so the server can respond to health checks immediately
     # (model download on first run can take 5-10 minutes on slow connections)
@@ -691,25 +342,6 @@ async def _load_models_background():
         traceback.print_exc()
     finally:
         _model_loading = False
-
-
-# ── Job helpers ──────────────────────────────────────────────────────────────
-
-def update_job_status(
-    job_id: str,
-    status: JobStatus,
-    error: Optional[str] = None,
-    **kwargs,
-):
-    if job_id not in jobs_db:
-        return
-    jobs_db[job_id]["status"] = status
-    jobs_db[job_id]["updated_at"] = datetime.now().isoformat()
-    if error:
-        jobs_db[job_id]["error"] = error
-    for key, value in kwargs.items():
-        jobs_db[job_id][key] = value
-    _persist_job(job_id)
 
 
 # ── Template generation ─────────────────────────────────────────────────────
@@ -1865,9 +1497,9 @@ async def queue_status(job_id: Optional[str] = None):
         "running": running,
         "queued": len(queued),
         "total": running + len(queued),
-        "local_queue_depth": _gpu_job_queue.qsize() if _gpu_job_queue else 0,
-        "local_queue_max": _GPU_QUEUE_MAX,
-        "worker_alive": _gpu_worker_task is not None and not _gpu_worker_task.done(),
+        "local_queue_depth": _jobs.gpu_job_queue.qsize() if _jobs.gpu_job_queue else 0,
+        "local_queue_max": GPU_QUEUE_MAX,
+        "worker_alive": _jobs.gpu_worker_task is not None and not _jobs.gpu_worker_task.done(),
     }
     if job_id:
         resp["job"] = _job_queue_view(job_id, running, queued)
@@ -1923,9 +1555,10 @@ async def request_stats(window_min: int = 0):
 
 
 @app.get("/api/v1/failures")
-async def request_failures(limit: int = 50):
+async def request_failures(limit: int = 50, _: None = Depends(require_dashboard_auth)):
     """Most recent failed requests (HTTP >= 400) with their reason, across all
-    replicas — path, status, error message and (for 500s) a traceback tail."""
+    replicas — path, status, error message and (for 500s) a traceback tail. Gated
+    behind the dashboard password because records include client IPs."""
     fails = [r for r in _read_request_records() if int(r.get("status", 0)) >= 400]
     fails = fails[-limit:][::-1]
     return {"count": len(fails), "failures": fails}
@@ -1935,24 +1568,35 @@ async def request_failures(limit: int = 50):
 async def stats_daily(days: int = 30):
     """Per-day breakdown of jobs by category (inference / simulation / template)
     and outcome (completed / failed / running), plus HTTP request volume. ``days``
-    keeps the most recent N calendar days (0 = all). Aggregation lives in
-    server.dashboard.build_daily_stats."""
+    keeps the most recent N calendar days (0 = all). Public (no PII); the dashboard
+    itself uses the auth-gated /dashboard/data which additionally carries geo/IPs."""
     return build_daily_stats(_load_all_jobs(), _read_request_records(), days)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    """Self-contained daily activity dashboard (fetches /api/v1/stats/daily)."""
+async def dashboard(_: None = Depends(require_dashboard_auth)):
+    """Self-contained daily activity dashboard (fetches /dashboard/data)."""
     return HTMLResponse(DASHBOARD_HTML)
 
 
 @app.get("/dashboard/echarts.js")
-async def dashboard_echarts_js():
+async def dashboard_echarts_js(_: None = Depends(require_dashboard_auth)):
     """Serve the vendored ECharts bundle same-origin (no external CDN)."""
     return FileResponse(
         PROJECT_ROOT / "server" / "echarts.min.js",
         media_type="application/javascript",
     )
+
+
+@app.get("/dashboard/data")
+async def dashboard_data(days: int = 30, _: None = Depends(require_dashboard_auth)):
+    """Auth-gated dashboard payload: the daily breakdown plus geo (top countries)
+    and top client IPs derived from the request log."""
+    reqs = _read_request_records()
+    return {
+        **build_daily_stats(_load_all_jobs(), reqs, days),
+        "geo": build_geo_stats(reqs),
+    }
 
 
 # ── CLI entrypoint ──────────────────────────────────────────────────────────
@@ -1993,8 +1637,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.work_dir != WORK_DIR:
-        WORK_DIR = args.work_dir  # type: ignore
-        WORK_DIR.mkdir(parents=True, exist_ok=True)
+        # WORK_DIR is resolved once from PATCHR_WORK_DIR in server/config.py and
+        # shared by the job/reqlog modules, so it can't be re-pointed after import.
+        print("Warning: --work-dir is ignored; set PATCHR_WORK_DIR before start "
+              f"(current WORK_DIR={WORK_DIR}).")
 
     if args.device_id is not None:
         DEFAULT_DEVICE_ID = args.device_id  # type: ignore

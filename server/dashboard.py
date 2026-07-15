@@ -86,6 +86,48 @@ def build_daily_stats(jobs: List[dict], requests: List[dict], days: int = 30) ->
     return {"days": ordered, "totals": totals}
 
 
+def _is_private_ip(ip: str) -> bool:
+    """True for loopback / RFC1918 / link-local addresses (internal noise like
+    health checks and the nginx LB), which we exclude from the geo/IP tallies."""
+    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+        return True
+    if ip.startswith(("10.", "192.168.", "169.254.", "172.")):
+        # 172.16.0.0–172.31.255.255 is private; other 172.x is public.
+        if ip.startswith("172."):
+            try:
+                return 16 <= int(ip.split(".")[1]) <= 31
+            except (IndexError, ValueError):
+                return False
+        return True
+    if ip.startswith(("fc", "fd", "fe80")):  # IPv6 ULA / link-local
+        return True
+    return False
+
+
+def build_geo_stats(requests: List[dict], top: int = 12) -> dict:
+    """Tally external client requests by country (from the CF-IPCountry header) and
+    by IP, returning the top N of each plus a total. Private/loopback IPs and
+    unknown/placeholder country codes (XX unknown, T1 Tor) are excluded."""
+    from collections import Counter
+
+    countries: "Counter" = Counter()
+    ips: "Counter" = Counter()
+    for r in requests:
+        c = str(r.get("country") or "").upper()
+        if c and c not in ("XX", "T1"):
+            countries[c] += 1
+        ip = str(r.get("ip") or "")
+        if ip and not _is_private_ip(ip):
+            ips[ip] += 1
+    return {
+        "countries": [{"country": k, "count": v} for k, v in countries.most_common(top)],
+        "ips": [{"ip": k, "count": v} for k, v in ips.most_common(top)],
+        "country_total": sum(countries.values()),
+        "distinct_countries": len(countries),
+        "distinct_ips": len(ips),
+    }
+
+
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -110,6 +152,8 @@ DASHBOARD_HTML = r"""<!doctype html>
   .btns button{background:#21262d;color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px}
   .btns button.on{background:var(--inf);border-color:var(--inf);color:#04101f}
   #chart{width:100%;height:380px}
+  .geo{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}
+  @media(max-width:720px){ .geo{grid-template-columns:1fr} }
   table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
   th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--border)}
   th:first-child,td:first-child{text-align:left}
@@ -131,6 +175,13 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div id="chart"></div>
   </div>
   <div class="panel">
+    <div class="panel-head"><h2>Where requests come from</h2><span class="muted" id="geo-sub"></span></div>
+    <div class="geo">
+      <div id="geochart" style="width:100%;height:280px"></div>
+      <div style="overflow-x:auto"><table id="iptbl"></table></div>
+    </div>
+  </div>
+  <div class="panel">
     <div class="panel-head"><h2>Detail</h2></div>
     <div style="overflow-x:auto"><table id="tbl"></table></div>
   </div>
@@ -139,7 +190,30 @@ DASHBOARD_HTML = r"""<!doctype html>
 <script>
 let DAYS = 30, chart = null;
 const C = { ok:'#3fb950', fail:'#f85149', simOk:'#2f81f7', simFail:'#db6d28',
-            req:'#8b949e', grid:'#30363d', fg:'#e6edf3', muted:'#8b949e' };
+            req:'#8b949e', grid:'#30363d', fg:'#e6edf3', muted:'#8b949e', inf:'#58a6ff' };
+let geoChart = null;
+function flag(cc){
+  if(!/^[A-Za-z]{2}$/.test(cc)) return '';
+  return String.fromCodePoint.apply(null, cc.toUpperCase().split('').map(c=>127397+c.charCodeAt(0)))+' ';
+}
+function renderGeo(g){
+  document.getElementById('geo-sub').textContent = (g.distinct_countries||0)+' countries · '+(g.distinct_ips||0)+' external IPs';
+  const cs = (g.countries||[]).slice().reverse();
+  if(!geoChart) geoChart = echarts.init(document.getElementById('geochart'), null, {renderer:'canvas'});
+  geoChart.setOption({
+    backgroundColor:'transparent', textStyle:{color:C.fg},
+    tooltip:{trigger:'axis', axisPointer:{type:'shadow'}, backgroundColor:'#161b22', borderColor:C.grid, textStyle:{color:C.fg}},
+    grid:{left:64, right:28, top:8, bottom:18},
+    xAxis:{type:'value', minInterval:1, axisLabel:{color:C.muted}, splitLine:{lineStyle:{color:C.grid}}},
+    yAxis:{type:'category', data:cs.map(c=>flag(c.country)+c.country), axisLabel:{color:C.fg}, axisLine:{lineStyle:{color:C.grid}}},
+    series:[{type:'bar', color:C.inf, data:cs.map(c=>c.count), barMaxWidth:18,
+      label:{show:true, position:'right', color:C.muted}}]
+  }, true);
+  document.getElementById('iptbl').innerHTML='<thead><tr><th>Client IP</th><th>Requests</th></tr></thead><tbody>'
+    + ((g.ips||[]).length ? g.ips.map(x=>'<tr><td>'+x.ip+'</td><td>'+x.count+'</td></tr>').join('')
+       : '<tr><td class="muted">No external IPs recorded yet.</td><td class="muted">—</td></tr>')
+    +'</tbody>';
+}
 
 function initChart(){
   if(!chart) chart = echarts.init(document.getElementById('chart'), null, {renderer:'canvas'});
@@ -192,7 +266,7 @@ function cardReq(title,o){
 async function load(){
   const sub=document.getElementById('sub'), cards=document.getElementById('cards'), tbl=document.getElementById('tbl');
   try{
-    const r=await fetch('/api/v1/stats/daily?days='+DAYS);
+    const r=await fetch('/dashboard/data?days='+DAYS);
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json(), days=d.days, t=d.totals;
     sub.textContent='Updated '+new Date().toLocaleString()+' · '+days.length+' day(s)';
@@ -202,6 +276,7 @@ async function load(){
       cardReq('HTTP requests', t.requests),
     ].join('');
     render(days);
+    renderGeo(d.geo||{});
     tbl.innerHTML='<thead><tr><th>Date</th><th>Inf ✓</th><th>Inf ✗</th><th>Sim ✓</th><th>Sim ✗</th>'
       +'<th>Tmpl ✓</th><th>Tmpl ✗</th><th>Requests</th><th>Req fail</th></tr></thead><tbody>'
       + days.slice().reverse().map(x=>'<tr><td>'+x.date+'</td>'
@@ -217,7 +292,7 @@ document.getElementById('range').addEventListener('click',e=>{
   DAYS=+b.dataset.d; document.querySelectorAll('#range button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); load();
 });
-window.addEventListener('resize',()=>{ if(chart) chart.resize(); });
+window.addEventListener('resize',()=>{ if(chart) chart.resize(); if(geoChart) geoChart.resize(); });
 load(); setInterval(load, 30000);
 </script>
 </body></html>"""
