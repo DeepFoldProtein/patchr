@@ -3,7 +3,9 @@ aggregation helpers it is backed by.
 
 ``build_daily_stats`` takes already-loaded job and request records (so it stays
 free of any server global) and returns the JSON the ``/api/v1/stats/daily``
-endpoint serves; ``categorize_job`` classifies a single job record.
+endpoint serves; ``categorize_job`` classifies a single job record. The page
+renders with ECharts, vendored and served same-origin at /dashboard/echarts.js
+(no external CDN).
 """
 
 from typing import Dict, List
@@ -94,27 +96,20 @@ DASHBOARD_HTML = r"""<!doctype html>
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
+  .wrap{max-width:1160px;margin:0 auto;padding:28px 20px 60px}
   h1{font-size:20px;margin:0 0 2px} .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
-  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:26px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:22px}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
   .card h3{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   .big{font-size:28px;font-weight:700} .card .row{display:flex;gap:14px;align-items:baseline;margin-top:6px;font-size:13px}
   .ok{color:var(--ok)} .fail{color:var(--fail)} .muted{color:var(--muted)}
-  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 18px 10px;margin-bottom:22px}
-  .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:10px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:22px}
+  .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:10px}
   .panel-head h2{font-size:15px;margin:0}
-  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);align-items:center;flex-wrap:wrap}
-  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
   .btns{display:flex;gap:6px}
-  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px}
   .btns button.on{background:var(--inf);border-color:var(--inf);color:#04101f}
-  .chart{display:flex;align-items:flex-end;gap:10px;height:250px;overflow-x:auto;padding-top:8px}
-  .day{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:38px;flex:1}
-  .bars{display:flex;gap:3px;align-items:flex-end;height:220px}
-  .bar{width:13px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:3px 3px 0 0;overflow:hidden;background:#21262d}
-  .seg{width:100%} .seg.okc{background:var(--ok)} .seg.failc{background:var(--fail)}
-  .lbl{font-size:10px;color:var(--muted);white-space:nowrap;transform:rotate(-35deg);transform-origin:top left;height:22px}
+  #chart{width:100%;height:380px}
   table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
   th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--border)}
   th:first-child,td:first-child{text-align:left}
@@ -128,67 +123,59 @@ DASHBOARD_HTML = r"""<!doctype html>
   <div class="cards" id="cards"></div>
   <div class="panel">
     <div class="panel-head">
-      <h2>Jobs per day</h2>
-      <div class="legend">
-        <span><i style="background:var(--inf)"></i>inference</span>
-        <span><i style="background:var(--sim)"></i>simulation</span>
-        <span><i style="background:var(--ok)"></i>completed</span>
-        <span><i style="background:var(--fail)"></i>failed</span>
-        <span class="btns" id="range">
-          <button data-d="14">14d</button><button data-d="30" class="on">30d</button><button data-d="0">all</button>
-        </span>
+      <h2>Jobs &amp; requests per day</h2>
+      <div class="btns" id="range">
+        <button data-d="14">14d</button><button data-d="30" class="on">30d</button><button data-d="0">all</button>
       </div>
     </div>
-    <div class="chart" id="chart"></div>
+    <div id="chart"></div>
   </div>
   <div class="panel">
     <div class="panel-head"><h2>Detail</h2></div>
     <div style="overflow-x:auto"><table id="tbl"></table></div>
   </div>
 </div>
+<script src="/dashboard/echarts.js"></script>
 <script>
-let DAYS = 30;
-function seg(v,cls){ return v>0 ? '<div class="seg '+cls+'" style="height:'+v+'px" title="'+v+'"></div>' : ''; }
-async function load(){
-  const chart=document.getElementById('chart'), tbl=document.getElementById('tbl'),
-        cards=document.getElementById('cards'), sub=document.getElementById('sub');
-  try{
-    const r=await fetch('/api/v1/stats/daily?days='+DAYS);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    const days=d.days, t=d.totals;
-    sub.textContent='Updated '+new Date().toLocaleString()+' · '+days.length+' day(s)';
-    // cards
-    const irate=t.inference.completed+t.inference.failed, srate=t.simulation.completed+t.simulation.failed;
-    cards.innerHTML=[
-      card('Inference jobs', t.inference, irate),
-      card('Simulation jobs', t.simulation, srate),
-      cardReq('HTTP requests', t.requests),
-    ].join('');
-    // chart scaling
-    let mx=1;
-    days.forEach(x=>{ ['inference','simulation'].forEach(k=>{ mx=Math.max(mx, x[k].completed+x[k].failed+x[k].running); }); });
-    const H=200;
-    chart.innerHTML = days.length? days.map(x=>{
-      const bar=(k,col)=>{
-        const o=x[k], sc=v=>Math.round(v/mx*H);
-        const tip=k+' '+x.date+' — ok:'+o.completed+' fail:'+o.failed+(o.running?' run:'+o.running:'');
-        return '<div class="bar" style="outline:2px solid '+col+';outline-offset:-1px" title="'+tip+'">'
-          + seg(sc(o.failed),'failc') + seg(sc(o.running),'okc') + seg(sc(o.completed),'okc') + '</div>';
-      };
-      return '<div class="day"><div class="bars">'+bar('inference','var(--inf)')+bar('simulation','var(--sim)')
-        + '</div><div class="lbl">'+x.date.slice(5)+'</div></div>';
-    }).join('') : '<div class="muted" style="padding:30px">No activity in range.</div>';
-    // table
-    tbl.innerHTML='<thead><tr><th>Date</th><th>Inf ✓</th><th>Inf ✗</th><th>Sim ✓</th><th>Sim ✗</th>'
-      +'<th>Tmpl ✓</th><th>Tmpl ✗</th><th>Requests</th><th>Req fail</th></tr></thead><tbody>'
-      + days.slice().reverse().map(x=>'<tr><td>'+x.date+'</td>'
-        +'<td class="ok">'+x.inference.completed+'</td><td class="'+(x.inference.failed?'fail':'muted')+'">'+x.inference.failed+'</td>'
-        +'<td class="ok">'+x.simulation.completed+'</td><td class="'+(x.simulation.failed?'fail':'muted')+'">'+x.simulation.failed+'</td>'
-        +'<td class="ok">'+x.template.completed+'</td><td class="'+(x.template.failed?'fail':'muted')+'">'+x.template.failed+'</td>'
-        +'<td>'+x.requests.total+'</td><td class="'+(x.requests.failed?'fail':'muted')+'">'+x.requests.failed+'</td></tr>').join('')
-      +'</tbody>';
-  }catch(e){ chart.innerHTML='<div class="err">Failed to load stats: '+e.message+'</div>'; }
+let DAYS = 30, chart = null;
+const C = { ok:'#3fb950', fail:'#f85149', simOk:'#2f81f7', simFail:'#db6d28',
+            req:'#8b949e', grid:'#30363d', fg:'#e6edf3', muted:'#8b949e' };
+
+function initChart(){
+  if(!chart) chart = echarts.init(document.getElementById('chart'), null, {renderer:'canvas'});
+  return chart;
+}
+function render(days){
+  const x = days.map(d=>d.date.slice(5));
+  const s = (k,o)=>days.map(d=>d[k][o]);
+  initChart().setOption({
+    backgroundColor:'transparent',
+    textStyle:{color:C.fg},
+    tooltip:{trigger:'axis', backgroundColor:'#161b22', borderColor:C.grid,
+      textStyle:{color:C.fg}, axisPointer:{type:'shadow'}},
+    legend:{top:0, textStyle:{color:C.muted},
+      data:['Inference ✓','Inference ✗','Simulation ✓','Simulation ✗','Requests']},
+    grid:{left:44, right:52, top:40, bottom:56},
+    dataZoom: days.length>20 ? [{type:'slider', bottom:8, height:16,
+      borderColor:C.grid, textStyle:{color:C.muted}}] : [],
+    xAxis:{type:'category', data:x, axisLine:{lineStyle:{color:C.grid}},
+      axisLabel:{color:C.muted, hideOverlap:true}},
+    yAxis:[
+      {type:'value', name:'jobs', nameTextStyle:{color:C.muted}, minInterval:1,
+        axisLabel:{color:C.muted}, splitLine:{lineStyle:{color:C.grid}}},
+      {type:'value', name:'requests', nameTextStyle:{color:C.muted}, minInterval:1,
+        axisLabel:{color:C.muted}, splitLine:{show:false}}
+    ],
+    series:[
+      {name:'Inference ✓', type:'bar', stack:'inf', color:C.ok, data:s('inference','completed'),
+        emphasis:{focus:'series'}},
+      {name:'Inference ✗', type:'bar', stack:'inf', color:C.fail, data:s('inference','failed')},
+      {name:'Simulation ✓', type:'bar', stack:'sim', color:C.simOk, data:s('simulation','completed')},
+      {name:'Simulation ✗', type:'bar', stack:'sim', color:C.simFail, data:s('simulation','failed')},
+      {name:'Requests', type:'line', yAxisIndex:1, color:C.req, smooth:true, symbol:'circle',
+        symbolSize:5, lineStyle:{width:2, type:'dashed'}, data:days.map(d=>d.requests.total)}
+    ]
+  }, true);
 }
 function card(title,o,tot){
   return '<div class="card"><h3>'+title+'</h3><div class="big">'+tot+'</div>'
@@ -202,11 +189,35 @@ function cardReq(title,o){
     +'<div class="row"><span class="ok">'+okp+'% ok</span>'
     +'<span class="'+(o.failed?'fail':'muted')+'">'+o.failed+' errors</span></div></div>';
 }
+async function load(){
+  const sub=document.getElementById('sub'), cards=document.getElementById('cards'), tbl=document.getElementById('tbl');
+  try{
+    const r=await fetch('/api/v1/stats/daily?days='+DAYS);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json(), days=d.days, t=d.totals;
+    sub.textContent='Updated '+new Date().toLocaleString()+' · '+days.length+' day(s)';
+    cards.innerHTML=[
+      card('Inference jobs', t.inference, t.inference.completed+t.inference.failed),
+      card('Simulation jobs', t.simulation, t.simulation.completed+t.simulation.failed),
+      cardReq('HTTP requests', t.requests),
+    ].join('');
+    render(days);
+    tbl.innerHTML='<thead><tr><th>Date</th><th>Inf ✓</th><th>Inf ✗</th><th>Sim ✓</th><th>Sim ✗</th>'
+      +'<th>Tmpl ✓</th><th>Tmpl ✗</th><th>Requests</th><th>Req fail</th></tr></thead><tbody>'
+      + days.slice().reverse().map(x=>'<tr><td>'+x.date+'</td>'
+        +'<td class="ok">'+x.inference.completed+'</td><td class="'+(x.inference.failed?'fail':'muted')+'">'+x.inference.failed+'</td>'
+        +'<td class="ok">'+x.simulation.completed+'</td><td class="'+(x.simulation.failed?'fail':'muted')+'">'+x.simulation.failed+'</td>'
+        +'<td class="ok">'+x.template.completed+'</td><td class="'+(x.template.failed?'fail':'muted')+'">'+x.template.failed+'</td>'
+        +'<td>'+x.requests.total+'</td><td class="'+(x.requests.failed?'fail':'muted')+'">'+x.requests.failed+'</td></tr>').join('')
+      +'</tbody>';
+  }catch(e){ document.getElementById('chart').innerHTML='<div class="err">Failed to load stats: '+e.message+'</div>'; }
+}
 document.getElementById('range').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   DAYS=+b.dataset.d; document.querySelectorAll('#range button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); load();
 });
+window.addEventListener('resize',()=>{ if(chart) chart.resize(); });
 load(); setInterval(load, 30000);
 </script>
 </body></html>"""

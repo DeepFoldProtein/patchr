@@ -389,7 +389,7 @@ _REQ_DIR = WORK_DIR / "_requests"
 _REPLICA = _socket.gethostname()
 _recent_requests: _deque = _deque(maxlen=3000)
 _SKIP_LOG_PATHS = {"/api/v1/stats", "/api/v1/stats/daily", "/api/v1/failures",
-                   "/api/v1/health", "/dashboard", "/favicon.ico"}
+                   "/api/v1/health", "/dashboard", "/dashboard/echarts.js", "/favicon.ico"}
 
 
 def _record_request(rec: dict) -> None:
@@ -1944,6 +1944,15 @@ async def stats_daily(days: int = 30):
 async def dashboard():
     """Self-contained daily activity dashboard (fetches /api/v1/stats/daily)."""
     return HTMLResponse(DASHBOARD_HTML)
+
+
+@app.get("/dashboard/echarts.js")
+async def dashboard_echarts_js():
+    """Serve the vendored ECharts bundle same-origin (no external CDN)."""
+    return FileResponse(
+        PROJECT_ROOT / "server" / "echarts.min.js",
+        media_type="application/javascript",
+    )
 
 
 # ── CLI entrypoint ──────────────────────────────────────────────────────────
