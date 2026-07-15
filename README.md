@@ -32,25 +32,22 @@
 <div align="center">
 <table>
   <tr>
-    <td align="center"><img src="docs/inpainting_1kx3.gif" width="360"/></td>
-    <td align="center"><img src="docs/inpainting_6gis_ext.gif" width="360"/></td>
+    <td align="center"><img src="docs/inpainting_1kx3_drift.gif" width="300"/></td>
+    <td align="center"><img src="docs/inpainting_6gis_drift.gif" width="300"/></td>
+    <td align="center"><img src="docs/inpainting_8gzr_drift.gif" width="300"/></td>
   </tr>
   <tr align="center">
     <td><b>1KX3</b> : nucleosome histone-tail inpainting</td>
     <td><b>6GIS</b> : PCNA + 50 bp DNA extension</td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/inpainting_8gzr.gif" width="360"/></td>
-    <td align="center"><img src="docs/inpainting_4zlo.gif" width="360"/></td>
-  </tr>
-  <tr align="center">
     <td><b>8GZR</b> : NS3 polymerase + RNA reconstruction</td>
-    <td><b>4ZLO</b> : Kinase inpainting with ligand</td>
   </tr>
 </table>
+
+<sub>Template-constrained diffusion in progress: the template is rigidly realigned to the evolving coordinate frame at every denoising step, so it tracks the generation instead of drifting away from it.</sub>
+
 </div>
 
-Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. PATCHR fills them in using **diffusion-based inpainting** while keeping existing coordinates **exactly as-is**.
+Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. PATCHR fills them in using **template-constrained diffusion** while keeping existing coordinates **exactly as-is**.
 
 - **Backend-agnostic** -- supports [Boltz-2](https://github.com/jwohlwend/boltz) and [Protenix](https://github.com/bytedance/protenix)
 - Works with **proteins, DNA, RNA**, and multi-chain complexes
@@ -58,9 +55,9 @@ Most experimental structures in the PDB have **missing regions** -- flexible loo
 
 <div align="center">
 
-## [PATCHR Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
+## [PATCHR-Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
 
-From **every PDB complex with an internal missing region** (excluding very large structures), PATCHR inpainted the full set of **66,417 multimeric structures** &mdash; all browsable and downloadable.
+From every PDB complex with an **internal missing region** &mdash; a gap flanked on both sides by resolved residues, rather than a disordered chain terminus, so that inpainting is genuinely required &mdash; and within a token budget of 4,000, PATCHR has completed **65,537 multimeric assemblies** spanning protein-protein, protein-nucleic acid, and ligand-bound complexes &mdash; all browsable and downloadable.
 
 ### [Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
 
@@ -68,17 +65,24 @@ From **every PDB complex with an internal missing region** (excluding very large
 
 ---
 
-**Benchmark** &mdash; 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. C&#945; and all-atom RMSD computed over inpainted residues only.
+**Benchmark** &mdash; 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. Mean backbone RMSD over missing residues, reported for C&#945; and for all atoms.
 
 | Method / Configuration | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
 |---|:---:|:---:|
-| **PATCHR (full, + LRD)** | **1.781** | **2.542** |
-| Boltz-2 + template conditioning | 4.647 | 5.510 |
-| Boltz-2 + template conditioning + steering (threshold = 5.0 &#8491;) | 3.675 | 4.342 |
-| Boltz-2 + template conditioning + steering (threshold = 2.0 &#8491;) | 3.397 | 4.081 |
-| Boltz-2 + template conditioning + steering (threshold = 0.5 &#8491;) | 3.219 | 3.889 |
-| RFdiffusion2 (all-atom) | 9.188 | 10.199 |
-| RFdiffusion (backbone-only) | 2.043 | &mdash; |
+| *All-atom models* | | |
+| **PATCHR** | **1.781** | **2.542** |
+| Boltz-2 baseline (no modification) | 11.187 | 11.932 |
+| &nbsp;&nbsp;+ template conditioning | 4.647 | 5.510 |
+| &nbsp;&nbsp;+ template conditioning + steering (threshold = 5.0 &#8491;) | 3.675 | 4.342 |
+| &nbsp;&nbsp;+ template conditioning + steering (threshold = 2.0 &#8491;) | 3.397 | 4.081 |
+| &nbsp;&nbsp;+ template conditioning + steering (threshold = 0.5 &#8491;) | 3.219 | 3.889 |
+| RFdiffusion2 <sup>&sect;</sup> | 9.188 | 10.199 |
+| *Backbone-only models* | | |
+| RFdiffusion | 2.043 | &mdash; |
+
+<sup>&sect;</sup> Flow-matching model; produces severely distorted structures, value reported for reference.
+
+Boltz-2 ablation rows each add one modification to the previous. PATCHR retains template conditioning but replaces steering with TCD and LRD applied during diffusion.
 
 ## Installation
 
@@ -188,13 +192,14 @@ patchr sim-ready prediction.cif --engine openmm --padding 1.2 --ion-conc 0.15
 
 ## How It Works
 
-PATCHR uses diffusion-based generation conditioned on your experimental structure as a rigid template:
+PATCHR operates entirely at inference time on a pretrained diffusion model and requires no retraining. Two components are added around the backbone's denoising module:
 
-| | Technique | What it does |
+| | Component | What it does |
 |---|---|---|
-| 1 | **Template Conditioning** | Anchors known coordinates at every diffusion step |
-| 2 | **Synchronized Rigid Template Tracking** | Keeps the template aligned with the evolving generation |
-| 3 | **Local Refinement Denoising** | Cleans up bond geometry at template-generation junctions |
+| 1 | **Template-Constrained Diffusion (TCD)** | Injects the fixed template atoms through a binary mask at every denoising step while the missing segments are denoised, and rigidly realigns the template to the evolving coordinate frame by the weighted Kabsch algorithm |
+| 2 | **Local Refinement Diffusion (LRD)** | Re-denoises a narrow boundary window at each template-generated junction, restoring covalent connectivity and stereochemistry without disturbing the global fold |
+
+TCD differs from the template *conditioning* of AlphaFold3-architecture models, where the template enters the network as an embedding with no guarantee that the deposited coordinates survive into the output. By applying the template directly at the denoising step, PATCHR keeps the experimental coordinates fixed throughout generation.
 
 ## PATCHR-Studio
 
@@ -231,14 +236,15 @@ Beyond the headline RMSDs above, PATCHR also produces simulation-ready geometry:
 | Connectivity pass rate | 99.4% |
 
 <details>
-<summary><b>Impact of Local Refinement Denoising (LRD)</b></summary>
+<summary><b>Impact of Local Refinement Diffusion (LRD)</b></summary>
 
 | Metric | With LRD | Without LRD |
 |---|:---:|:---:|
 | Structures with no issues | **99.4%** | 87.4% |
-| C&#945;--C&#945; gaps (4.5--10 &#8491;) | 0.21% | 4.57% |
+| Broken chains (>10.0 &#8491;) | 0.32% | 0.74% |
+| C&#945;--C&#945; gaps (4.5--10.0 &#8491;) | 0.21% | 4.57% |
 | Peptide bond (C--N) issues | 0.85% | 15.43% |
-| Broken chains (>10 &#8491;) | 0.32% | 0.74% |
+| Backbone atom distance issues | 0.32% | 0.00% |
 
 </details>
 
@@ -247,15 +253,15 @@ Beyond the headline RMSDs above, PATCHR also produces simulation-ready geometry:
 
 | Secondary structure | RMSD (&#8491;) | | Solvent accessibility | RMSD (&#8491;) |
 |---|:---:|---|---|:---:|
-| Helix | 0.30 | | Buried | 0.39 |
-| Strand | 0.26 | | Intermediate | 0.65 |
-| Loop | 0.85 | | Surface | 1.01 |
+| Loop | 0.852 | | Surface-exposed | 1.006 |
+| Helix | 0.296 | | Interface | 0.646 |
+| Strand | 0.257 | | Buried | 0.389 |
 
 </details>
 
 ## Future Work
 
-Any model trained on the AlphaFold3 framework can be converted into an inpainting model through the PATCHR protocol. Currently implemented for **Boltz-2** and **Protenix** only; extending to additional AF3-family backends is planned.
+The PATCHR protocol applies to any model built on the AlphaFold3 architecture, where atomic coordinates are generated by an EDM-based diffusion module in a global reference frame. Currently implemented for **Boltz-2** and **Protenix** only; extending to additional AF3-family backends is planned.
 
 ## Acknowledgments
 
@@ -269,8 +275,8 @@ MIT -- free for academic and commercial use.
 ```bibtex
 @article{bae2025patchr,
   author = {Bae, Hanjin and Kim, Kunwoo and Yoo, Jejoong and Joo, Keehyoung},
-  title = {PATCHR-Studio: Template-conditioned diffusion-based molecular structure
-           inpainting for Protein, RNA, and DNA complexes},
-  year = {2025}
+  title = {PATCHR: Molecular Structure Inpainting for Protein, RNA, and DNA
+           Complexes Using Template-Constrained Diffusion},
+  year = {2026}
 }
 ```

@@ -1,7 +1,7 @@
 # PATCHR-Studio: Capabilities and Parameters
 
 Reference documentation for PATCHR-Studio, the desktop application for
-template-conditioned structure inpainting, and for the equivalent CLI and REST
+template-constrained structure inpainting, and for the equivalent CLI and REST
 interfaces. This document enumerates what each interface can do and the
 parameters it exposes.
 
