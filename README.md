@@ -59,6 +59,10 @@ Most experimental structures in the PDB have **missing regions** -- flexible loo
 
 From every PDB complex with an **internal missing region** &mdash; a gap flanked on both sides by resolved residues, rather than a disordered chain terminus, so that inpainting is genuinely required &mdash; and within a token budget of 4,000, PATCHR has completed **65,537 multimeric assemblies** spanning protein-protein, protein-nucleic acid, and ligand-bound complexes &mdash; all browsable and downloadable.
 
+<a href="https://patchr.deepfold.org/atlas"><img src="docs/patchr-atlas-1a04.png" width="800" alt="PATCHR-Atlas: search a PDB ID, inspect the reconstruction, and download the completed model"/></a>
+
+<sub>Look up any PDB ID, inspect the reconstruction coloured by region type, and download the completed model &mdash; or take the full dataset in one archive.</sub>
+
 ### [Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
 
 </div>
