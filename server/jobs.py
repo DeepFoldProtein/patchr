@@ -6,7 +6,7 @@ import asyncio
 import logging
 from concurrent.futures import Future
 from datetime import datetime
-from typing import Callable
+from typing import Callable, Optional
 
 from fastapi import HTTPException
 from pytorch_lightning.callbacks import Callback
