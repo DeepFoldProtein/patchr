@@ -25,7 +25,7 @@
 <div align="center">
 <table>
   <tr><td align="center"><img src="docs/e2e_demo.gif" width="480"/></td></tr>
-  <tr align="center"><td><b>PATCHR-Studio</b> : end-to-end desktop workflow &mdash; load a structure, mark gaps, inpaint, and export</td></tr>
+  <tr align="center"><td><b>PATCHR-Studio</b> : the end-to-end desktop workflow (load a structure, mark gaps, inpaint, export)</td></tr>
 </table>
 </div>
 
@@ -47,21 +47,21 @@
 
 </div>
 
-Most experimental structures in the PDB have **missing regions** -- flexible loops, disordered terminals, unresolved sidechains. PATCHR fills them in using **template-constrained diffusion** while keeping existing coordinates **exactly as-is**.
+Only 18% of PDB40 entries are fully resolved. The rest have **missing regions**: flexible loops, disordered termini, unresolved side chains. PATCHR rebuilds them with **template-constrained diffusion**, and the coordinates that were resolved experimentally stay **exactly as deposited**.
 
-- **Backend-agnostic** -- supports [Boltz-2](https://github.com/jwohlwend/boltz) and [Protenix](https://github.com/bytedance/protenix)
-- Works with **proteins, DNA, RNA**, and multi-chain complexes
-- 99.4% connectivity pass rate, from short loops to 600+ residue extensions
+- **Backend-agnostic**: works with [Boltz-2](https://github.com/jwohlwend/boltz) and [Protenix](https://github.com/bytedance/protenix)
+- Handles **proteins, DNA, RNA**, and multi-chain complexes
+- 99.4% of reconstructions have no connectivity issues ([below](#performance)); rebuilt segments run from short loops to 600+ residue extensions
 
 <div align="center">
 
-## [PATCHR-Atlas](https://patchr.deepfold.org/atlas) &mdash; large-scale inpainting of the PDB
+## [PATCHR-Atlas](https://patchr.deepfold.org/atlas): large-scale inpainting of the PDB
 
-From every PDB complex with an **internal missing region** &mdash; a gap flanked on both sides by resolved residues, rather than a disordered chain terminus, so that inpainting is genuinely required &mdash; and within a token budget of 4,000, PATCHR has completed **65,537 multimeric assemblies** spanning protein-protein, protein-nucleic acid, and ligand-bound complexes &mdash; all browsable and downloadable.
+PATCHR has completed **65,537 multimeric assemblies**, covering every PDB complex that has an internal missing region and fits within a 4,000-token budget. An internal gap is one flanked on both sides by resolved residues, rather than trailing off a disordered terminus, so inpainting is genuinely required. The assemblies span protein-protein, protein-nucleic acid, and ligand-bound complexes.
 
 <a href="https://patchr.deepfold.org/atlas"><img src="docs/patchr-atlas-1a04.png" width="800" alt="PATCHR-Atlas: search a PDB ID, inspect the reconstruction, and download the completed model"/></a>
 
-<sub>Look up any PDB ID, inspect the reconstruction coloured by region type, and download the completed model &mdash; or take the full dataset in one archive.</sub>
+<sub>Look up any PDB ID, inspect the reconstruction coloured by region type, and download the completed model. The full dataset is also available as a single archive.</sub>
 
 ### [Explore the Atlas &rarr;](https://patchr.deepfold.org/atlas)
 
@@ -69,7 +69,7 @@ From every PDB complex with an **internal missing region** &mdash; a gap flanked
 
 ---
 
-**Benchmark** &mdash; 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. Mean backbone RMSD over missing residues, reported for C&#945; and for all atoms.
+**Benchmark.** 940 PDB40 structures with artificially introduced gaps mirroring real PDB missing-region statistics. Mean backbone RMSD over missing residues, reported for C&#945; and for all atoms.
 
 | Method / Configuration | C&#945; RMSD (&#8491;) | All-atom RMSD (&#8491;) |
 |---|:---:|:---:|
@@ -86,7 +86,7 @@ From every PDB complex with an **internal missing region** &mdash; a gap flanked
 
 <sup>&sect;</sup> Flow-matching model; produces severely distorted structures, value reported for reference.
 
-Boltz-2 ablation rows each add one modification to the previous. PATCHR retains template conditioning but replaces steering with TCD and LRD applied during diffusion.
+Each Boltz-2 ablation row adds one modification to the row above it. PATCHR keeps template conditioning but replaces steering with TCD and LRD.
 
 ## Installation
 
@@ -168,7 +168,7 @@ patchr predict examples/inpainting/1ck4_AB.yaml --out_dir results --diffusion_sa
 patchr predict examples/inpainting/1bna_AB.yaml --out_dir results --backend protenix
 patchr predict examples/inpainting/7eoq_ABCDEFGHIJKLMN.yaml --out_dir results --use_msa_server
 
-# Bulk prediction — pass a directory of YAML files
+# Bulk prediction: pass a directory of YAML files
 patchr predict my_templates/ --out_dir results
 patchr predict my_templates/ --out_dir results --backend protenix --seeds 42,101
 ```
@@ -200,22 +200,22 @@ PATCHR operates entirely at inference time on a pretrained diffusion model and r
 
 | | Component | What it does |
 |---|---|---|
-| 1 | **Template-Constrained Diffusion (TCD)** | Injects the fixed template atoms through a binary mask at every denoising step while the missing segments are denoised, and rigidly realigns the template to the evolving coordinate frame by the weighted Kabsch algorithm |
+| 1 | **Template-Constrained Diffusion (TCD)** | Injects the fixed template atoms through a binary mask at every denoising step, while the missing segments are denoised. Weighted Kabsch realigns the template to the evolving coordinate frame, so it tracks the generation |
 | 2 | **Local Refinement Diffusion (LRD)** | Re-denoises a narrow boundary window at each template-generated junction, restoring covalent connectivity and stereochemistry without disturbing the global fold |
 
-TCD differs from the template *conditioning* of AlphaFold3-architecture models, where the template enters the network as an embedding with no guarantee that the deposited coordinates survive into the output. By applying the template directly at the denoising step, PATCHR keeps the experimental coordinates fixed throughout generation.
+TCD is not the template *conditioning* that AlphaFold3-architecture models already offer. There the template enters the network as an embedding, and nothing guarantees the deposited coordinates survive into the output. PATCHR applies the template directly at the denoising step instead, which holds the experimental coordinates fixed throughout generation.
 
 ## PATCHR-Studio
 
-A desktop application providing a graphical interface to the full workflow, with no command line required. Download from the links above or the [releases page](https://github.com/DeepFoldProtein/patchr/releases).
+A desktop application that runs the whole workflow through a graphical interface, with no command line. Download it from the links above or the [releases page](https://github.com/DeepFoldProtein/patchr/releases).
 
-Beyond reconstructing missing regions, the interactive sequence editor supports residue-level edits applied directly on the structure and regenerated in a single inpainting run:
+The sequence editor also makes residue-level edits, which are rebuilt in the same inpainting run:
 
-- **Erase and regenerate** &mdash; remove resolved residues and re-inpaint them
-- **Mutation** &mdash; substitute a residue identity; the side chain is rebuilt by inpainting
-- **Post-translational modifications** &mdash; introduce modified residues (SEP, TPO, PTR, MLY, M3L)
+- **Erase and regenerate**: remove resolved residues and re-inpaint them
+- **Mutation**: substitute a residue identity; the side chain is rebuilt by inpainting
+- **Post-translational modifications**: install modified residues (SEP, TPO, PTR, MLY, M3L)
 
-Staged edits are listed and individually reversible prior to execution, and outputs are versioned for comparison across runs. Prediction, GPU queue status, and simulation-ready export are integrated.
+Edits are staged, so each one is listed and can be reverted before a run starts. Outputs are versioned, which lets runs be compared rather than overwritten. Studio also reports GPU queue position and exports simulation-ready inputs.
 
 See [**docs/STUDIO.md**](docs/STUDIO.md) for the complete feature and parameter reference (Studio, CLI, and REST API).
 
@@ -231,7 +231,7 @@ patchr serve --model all
 
 ## Performance
 
-Beyond the headline RMSDs above, PATCHR also produces simulation-ready geometry:
+PATCHR also produces geometry that passes the connectivity checks MD setup depends on:
 
 | Metric | Value |
 |---|---|
@@ -270,9 +270,10 @@ The PATCHR protocol applies to any model built on the AlphaFold3 architecture, w
 ## Acknowledgments
 
 PATCHR builds upon [Boltz-2](https://github.com/jwohlwend/boltz) by Passaro, Corso, Wohlwend et al. and [Protenix](https://github.com/bytedance/protenix) by ByteDance.
+
 ## License
 
-MIT -- free for academic and commercial use.
+MIT. Free for academic and commercial use.
 
 ## Cite
 
