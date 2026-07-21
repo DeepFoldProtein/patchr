@@ -401,6 +401,18 @@ class StructureProcessor(
                 # Store for later use
                 self.chain_entity_types[chain_id] = entity_type
             
+            # Branched glycans (oligosaccharides, e.g. NAG-(1-4)-NAG) cannot be
+            # represented in the AF3/boltz input format. Encoding them as a
+            # pseudo-protein corrupts the prediction: the "fixed" sugar atoms are
+            # not preserved and drift ~20 A. Drop such chains from the template /
+            # YAML / CIF and warn, rather than emitting a broken structure.
+            if entity_type == 'branched':
+                warning(f"Chain {chain_id}: branched glycan/oligosaccharide is not "
+                        f"representable in the boltz (AF3) input format — dropping this "
+                        f"chain (its sugar residues are excluded from the template and "
+                        f"prediction).")
+                continue
+
             # Ligand chain: no sequence, use CCD from atoms; include in CIF and YAML (docs/prediction.md)
             if entity_type == 'ligand':
                 atoms = self.parse_atom_records(chain_id)

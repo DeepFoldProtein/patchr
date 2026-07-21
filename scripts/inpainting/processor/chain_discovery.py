@@ -240,7 +240,12 @@ class ChainDiscoveryMixin:
                 elif 'non-polymer' in raw:
                     result[asym_id] = 'ligand'
                 elif 'branched' in raw:
-                    result[asym_id] = 'protein'
+                    # Branched glycans / oligosaccharides (e.g. NAG-(1-4)-NAG) have
+                    # no representation in the AF3/boltz input format. Keep the true
+                    # type so the processor can DROP the chain (see base.py) instead
+                    # of mis-encoding it as a pseudo-protein (which corrupts the
+                    # prediction — the "fixed" sugar atoms are not preserved).
+                    result[asym_id] = 'branched'
         return result
 
     def get_ligand_chain_ids(self) -> List[str]:
