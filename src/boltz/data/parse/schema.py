@@ -1069,8 +1069,19 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             else:
                 seq = str(item[entity_type]["ccd"])
 
-        # Group items by entity
-        items_to_group.setdefault((entity_type, seq), []).append(item)
+        # Group items by entity. The key MUST include modifications: homo-oligomer copies can
+        # share a sequence but carry DIFFERENT modifications (microheterogeneity, e.g. 1k55/3rch
+        # where one copy is a modified residue KCX/LLP and another is the plain parent LYS). Keying
+        # on (type, seq) alone merges them into one entity and applies the FIRST copy's
+        # modifications to every copy, so the unmodified copy gets the modification's extra atoms
+        # generated (absent from its template) and collapses. Including the modifications keeps
+        # copies with identical modifications grouped while splitting genuinely different ones.
+        if entity_type in {"protein", "dna", "rna"}:
+            _mods = item[entity_type].get("modifications", []) or []
+            _mod_key = tuple(sorted((m.get("position"), str(m.get("ccd"))) for m in _mods))
+        else:
+            _mod_key = ()
+        items_to_group.setdefault((entity_type, seq, _mod_key), []).append(item)
 
         # Map chain names to entity types and track order
         chain_names = item[entity_type]["id"]
