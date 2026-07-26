@@ -231,6 +231,14 @@ def generate_yaml_content(
                 for m in c["modifications"]:
                     lines.append(f"        - position: {m['position']}")
                     lines.append(f"          ccd: {_yaml_ccd_value(m['ccd'])}")
+            # --skip-terminal: kept range within the full sequence. predict slices
+            # sequence[kept_start-1:kept_end] and the template structure to match,
+            # so the stored YAML/CIF keep the full canonical sequence + numbering.
+            if c.get("trim"):
+                t = c["trim"]
+                lines.append("      trim:")
+                lines.append(f"        kept_start: {t['kept_start']}")
+                lines.append(f"        kept_end: {t['kept_end']}")
         lines.append("")
     lines.append("templates:")
     lines.append(f"  - cif: {cif_path}")

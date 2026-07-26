@@ -187,6 +187,31 @@ def _validate_inpainting_input(data: str) -> None:
         )
 
 
+def _apply_trim_preprocess(data: str, out_dir: str) -> str:
+    """Slice --skip-terminal-trimmed templates to their kept range before prediction.
+
+    Returns the path (file or dir) to feed the backend. A no-op when no chain carries a
+    ``trim`` field, so plain templates pass straight through. The sliced copies live under
+    ``<out_dir>/_trim_preprocessed`` so the stored full-numbering templates are untouched.
+    """
+    # scripts/ is importable in the patchr environment (see generate_inpainting_template).
+    import sys
+    from pathlib import Path as _Path
+    scripts_dir = _Path(__file__).resolve().parents[2] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from inpainting.trim_apply import apply_trim_to_data
+    except Exception as e:  # pragma: no cover - defensive
+        click.echo(f"[trim] preprocessing unavailable ({e}); using inputs as-is", err=True)
+        return data
+    work_dir = _Path(out_dir).expanduser() / "_trim_preprocessed"
+    new_data = apply_trim_to_data(data, work_dir)
+    if new_data != data:
+        click.echo(f"[trim] applied --skip-terminal slicing → {new_data}")
+    return new_data
+
+
 # ---------------------------------------------------------------------------
 # patchr predict
 # ---------------------------------------------------------------------------
@@ -323,6 +348,13 @@ def predict(  # noqa: C901, PLR0912, PLR0913, PLR0915
     """
     # ── Validate that input contains inpainting templates ──────────────
     _validate_inpainting_input(data)
+
+    # ── Apply --skip-terminal trim (if any) before prediction ──────────
+    # Templates store the FULL sequence + original numbering with a per-chain
+    # `trim: {kept_start, kept_end}`. Slice the sequence/structure/metadata to the
+    # kept range here so the backend never generates the trimmed terminals. No-op
+    # when no chain carries a trim.
+    data = _apply_trim_preprocess(data, out_dir)
 
     if backend == "protenix":
         _predict_protenix(

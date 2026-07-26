@@ -6,6 +6,24 @@ from .log import info, warning, fatal
 
 
 class SequenceExtractMixin:
+    @staticmethod
+    def _read_canonical_seq(cif_dict, entity_id):
+        """RCSB canonical one-letter sequence for an entity, or None if absent.
+
+        Reads _entity_poly.pdbx_seq_one_letter_code_can, keyed by _entity_poly.entity_id.
+        Whitespace/newlines are stripped (the value is a multi-line text field).
+        """
+        cans = cif_dict.get('_entity_poly.pdbx_seq_one_letter_code_can')
+        ents = cif_dict.get('_entity_poly.entity_id')
+        if cans is None or ents is None:
+            return None
+        if isinstance(cans, str):
+            cans, ents = [cans], [ents]
+        for eid, can in zip(ents, cans):
+            if eid == entity_id:
+                return ''.join(can.split())
+        return None
+
     def extract_seqres_from_cif(self, chain_id: str) -> str:
         """Extract SEQRES sequence from CIF file for the specified chain using BioPython."""
         if not self.cif_content:
@@ -22,6 +40,11 @@ class SequenceExtractMixin:
             if '_entity_poly_seq.mon_id' in cif_dict:
                 mon_ids = cif_dict['_entity_poly_seq.mon_id']
                 entity_ids = cif_dict['_entity_poly_seq.entity_id']
+                # _entity_poly_seq.num is the 1-based SEQRES index. Microheterogeneity
+                # points repeat the same num across multiple rows (with hetero='y'); we
+                # must index by num, not by row, or the sequence frame-shifts by +1 from
+                # that point on. Kept for the dedup below; absent in rare/legacy blocks.
+                seq_nums = cif_dict.get('_entity_poly_seq.num')
 
                 # Get struct_asym to map chain to entity
                 if '_struct_asym.id' in cif_dict and '_struct_asym.entity_id' in cif_dict:
@@ -47,6 +70,32 @@ class SequenceExtractMixin:
                     if target_entity_id is None:
                         warning(f"Could not find entity mapping for chain {chain_id}, skipping")
                         return ""
+
+                    # Prefer RCSB's precomputed canonical sequence
+                    # (_entity_poly.pdbx_seq_one_letter_code_can). It already resolves
+                    # every modified residue to its canonical one-letter code via the CCD
+                    # (e.g. SEC->U, DU->U, PTR->Y) — no hardcoded 3->1 table, no
+                    # mon_std_parent lookup, no DNA/RNA misdetection. This makes the YAML
+                    # sequence byte-identical to OF3/_can. Modified positions are still
+                    # emitted in `modifications:`; boltz overwrites the sequence letter
+                    # there with the CCD, so the canonical letter is harmless to inference.
+                    #
+                    # Exception: a few multi-residue chromophores (e.g. CRO, PIA, QYX)
+                    # expand to >1 letter in _can, so it is longer than the residue count.
+                    # In that case fall back to the num-indexed reconstruction below, which
+                    # collapses each chromophore to a single position (matching OF3).
+                    can_seq = self._read_canonical_seq(cif_dict, target_entity_id)
+                    if can_seq is not None:
+                        n_res = len({num for eid, num in zip(
+                            entity_ids, cif_dict.get('_entity_poly_seq.num', []))
+                            if eid == target_entity_id})
+                        if n_res == 0 or len(can_seq) == n_res:
+                            info(f"Using RCSB canonical sequence for chain {chain_id} "
+                                 f"(entity {target_entity_id}, length: {len(can_seq)})")
+                            return can_seq
+                        warning(f"Canonical sequence length {len(can_seq)} != residue "
+                                f"count {n_res} for chain {chain_id} (chromophore "
+                                f"expansion?); rebuilding from entity_poly_seq")
 
                     # Determine entity type for this chain
                     # First try to get from chain_entity_types (if already set)
@@ -146,11 +195,21 @@ class SequenceExtractMixin:
                     else:
                         seqres_entity_type = 'protein'  # Default
 
-                    # Second pass: convert to sequence
-                    # Also track non-standard residues with their sequence positions
+                    # Second pass: convert to sequence.
+                    # Deduplicate by _entity_poly_seq.num so microheterogeneity points
+                    # (same num, multiple mon_id rows) occupy a single position. Keep the
+                    # first monomer at each num — this matches RCSB's own
+                    # pdbx_seq_one_letter_code_can convention (verified on 1din/1ejg).
                     seq_num = 0  # 1-based position in sequence
-                    for mon_id, entity_id in zip(mon_ids, entity_ids):
+                    _seen_nums = set()
+                    _rows = zip(mon_ids, entity_ids, seq_nums) if seq_nums is not None \
+                        else ((m, e, None) for m, e in zip(mon_ids, entity_ids))
+                    for mon_id, entity_id, num in _rows:
                         if entity_id == target_entity_id:
+                            if num is not None:
+                                if num in _seen_nums:
+                                    continue  # microheterogeneity duplicate row
+                                _seen_nums.add(num)
                             seq_num += 1
                             mon_id_upper = mon_id.upper()
 

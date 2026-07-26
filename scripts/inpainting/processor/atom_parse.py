@@ -135,20 +135,26 @@ class AtomParseMixin:
 
     @staticmethod
     def _filter_altloc_global_largest(atoms: List[Dict]) -> List[Dict]:
-        """Collapse alternate conformations to a single conformer per residue.
+        """Collapse alternate locations to a single residue + conformer per position.
 
-        Mirrors ``protenix.data.core.parser.MMCIFParser.filter_altloc`` with
-        ``altloc="global_largest"``: altloc letters are ranked by their mean
-        occupancy across the chain, and each residue keeps only its highest-ranked
-        altloc (plus altloc-'.'/'?' atoms shared by all conformers).
+        The label_alt_id mechanism carries two distinct things at one residue: pure
+        conformers (same comp_id, different coordinates) and point microheterogeneity
+        (different comp_id per altloc, e.g. MET/VAL). Left unfiltered both are emitted,
+        producing physically impossible residues and inflated atom counts.
 
-        Why this matters for template fixing: some depositions carry a
-        zero-occupancy placeholder altloc (e.g. 3cdd MSE SE altloc 'A' occ=0.00,
-        dumped ~0.7 A from CG) that sorts *first* alphabetically. The template
-        featurizer's biotite parse selects altloc "first", so without this filter
-        the fixed coordinate for such an atom is the garbage placeholder and the
-        prediction faithfully reproduces a collapsed atom. Ranking by occupancy
-        selects the real conformer instead, matching what the input parser sees.
+        Selection:
+          * altloc letters are ranked by their MEAN occupancy across the chain (mirrors
+            protenix ``filter_altloc="global_largest"``). This drops zero-occupancy
+            placeholder altlocs (e.g. 3cdd MSE SE altloc 'A' occ=0.00 ~0.7 A from CG)
+            that would otherwise sort first alphabetically and become the fixed
+            coordinate — ranking by occupancy keeps the real conformer.
+          * for point microheterogeneity (different comp_id per altloc), the residue
+            IDENTITY is pinned to the FIRST-seen comp_id in atom_site order. RCSB lists
+            the primary altloc first and _entity_poly_seq lists the primary monomer
+            first, so first-seen matches the canonical sequence (RCSB _can / OF3). This
+            keeps the fixed structure consistent with its declared sequence even when
+            the dominant conformer by occupancy is a different residue.
+          * altloc-'.'/'?' atoms (shared by all conformers) always pass through.
         """
         from collections import defaultdict
 
@@ -173,24 +179,31 @@ class AtomParseMixin:
         # global (per-chain) ranking of altloc letters by mean occupancy, desc
         rank = sorted(occ_by_alt, key=lambda c: sum(occ_by_alt[c]) / len(occ_by_alt[c]), reverse=True)
 
-        # group atoms by residue (chain + author seq id + insertion code); comp_id is
-        # intentionally excluded so a residue with different resnames per altloc
-        # (e.g. 2pxs XYG|DYG at the same res id) still collapses to one conformer.
+        # group atoms by residue (chain + author seq id + insertion code) and record the
+        # first-seen comp_id (the canonical / _can primary identity) for each residue.
         resmap = defaultdict(list)
+        first_comp = {}
         for idx, a in enumerate(atoms):
             key = (a.get('label_asym_id'), a.get('auth_seq_id', '?'), a.get('pdbx_PDB_ins_code', '?'))
             resmap[key].append(idx)
+            if key not in first_comp:
+                first_comp[key] = a.get('label_comp_id', '?')
 
         keep = [True] * len(atoms)
-        for idxs in resmap.values():
-            present = {altchar(atoms[i]) for i in idxs if altchar(atoms[i]) != '.'}
-            if not present:
-                continue
-            best = next(c for c in rank if c in present)
+        for key, idxs in resmap.items():
+            prim = first_comp[key]
+            hetero = any(atoms[i].get('label_comp_id', '?') != prim for i in idxs)
+            # rank the highest altloc among the primary identity's conformers
+            present = {altchar(atoms[i]) for i in idxs
+                       if altchar(atoms[i]) != '.' and atoms[i].get('label_comp_id', '?') == prim}
+            best = next((c for c in rank if c in present), None)
             for i in idxs:
+                comp = atoms[i].get('label_comp_id', '?')
                 c = altchar(atoms[i])
-                if c != '.' and c != best:
-                    keep[i] = False
+                if hetero and comp != prim:
+                    keep[i] = False           # drop non-canonical microheterogeneity residue
+                elif best is not None and c != '.' and c != best:
+                    keep[i] = False           # drop non-selected conformer
         return [a for a, k in zip(atoms, keep) if k]
 
 
@@ -302,10 +315,13 @@ class AtomParseMixin:
             new_seq_id = key_to_seqres[residue_key]
 
             new_atom = atom.copy()
-            # Update both label_seq_id and auth_seq_id - remove insertion codes
+            # auth_seq_id is intentionally set equal to label_seq_id (the SEQRES index)
+            # and insertion codes are dropped, giving clean 1..N author numbering.
+            # auth_asym_id is preserved separately (author_chain_ids) so the original
+            # author chain identity still survives.
             new_atom['label_seq_id'] = str(new_seq_id)
             new_atom['auth_seq_id'] = str(new_seq_id)
-            new_atom['pdbx_PDB_ins_code'] = '?'  # Remove insertion code
+            new_atom['pdbx_PDB_ins_code'] = '?'
 
             renumbered_atoms.append(new_atom)
 

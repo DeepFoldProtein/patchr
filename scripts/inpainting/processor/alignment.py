@@ -406,6 +406,40 @@ class AlignmentMixin:
             struct_seq_list.append(one_letter)
         struct_seq = ''.join(struct_seq_list)
 
+        # Prefer _atom_site.label_seq_id as the direct SEQRES position of each observed
+        # residue. mmCIF defines label_seq_id as the 1-based index into _entity_poly_seq
+        # (== SEQRES), so when it is present, in-range and unique it is exact — no
+        # alignment needed. BLASTP realignment (below) can mis-place residues next to
+        # missing-residue gaps (it merges adjacent gaps to save a gap-opening penalty),
+        # corrupting the sequence via the reconcile step. Verified across all PDB
+        # polymer chains: SEQRES[label_seq_id] == observed comp_id for 100% of residues.
+        # Only fall back to alignment when the SEQRES target is not the mmCIF SEQRES
+        # (UniProt/--sequence modes) or label_seq_id is missing/out-of-range/duplicated.
+        if final_sequence == seqres_sequence:
+            labelseq_map = {}
+            ok = True
+            for idx in struct_residue_order:
+                key = self._residue_index_to_key[idx]
+                atoms_list = residue_info.get(key, {}).get('atoms') or []
+                lsid = atoms_list[0].get('label_seq_id') if atoms_list else None
+                try:
+                    pos = int(lsid)
+                except (TypeError, ValueError):
+                    ok = False
+                    break
+                if not (1 <= pos <= len(seqres_sequence)):
+                    ok = False
+                    break
+                labelseq_map[idx] = pos
+            if ok and len(set(labelseq_map.values())) == len(labelseq_map):
+                info(f"Using label_seq_id direct mapping ({len(labelseq_map)} residues)")
+                if labelseq_map:
+                    mp = sorted(labelseq_map.values())
+                    info(f"Mapped to sequence positions: {mp[0]} to {mp[-1]}")
+                return labelseq_map
+            info("label_seq_id unusable (missing/out-of-range/duplicate); "
+                 "falling back to alignment")
+
         # Always use alignment-based method to handle insertion codes and structural order properly
         # No longer try to use auth_seq_id directly as it may have insertion codes
         info(f"Aligning structure ({len(struct_residue_order)} residues) to SEQRES ({len(seqres_sequence)} residues)")

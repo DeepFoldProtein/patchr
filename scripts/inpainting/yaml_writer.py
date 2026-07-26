@@ -57,6 +57,8 @@ def generate_yaml(
                 for m in d.get("modifications", [])
             ],
         }
+        if d.get("trim"):
+            entry["trim"] = d["trim"]
         if d.get("entity_type") == "ligand":
             entry["ccd"] = d.get("ccd", "UNK")
             if d.get("smiles"):

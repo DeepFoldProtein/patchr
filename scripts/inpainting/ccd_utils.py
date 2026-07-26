@@ -83,15 +83,47 @@ def get_non_standard_parent_from_ccd(ccd: Optional[dict], ccd_code: str) -> Opti
         return None
 
     mol = load_ccd_molecule(ccd or {}, ccd_code)
-    if mol is None:
-        return None
+    if mol is not None:
+        try:
+            if mol.HasProp("_chem_comp.mon_nstd_parent_comp_id"):
+                parent = mol.GetProp("_chem_comp.mon_nstd_parent_comp_id")
+                if parent and parent in STANDARD_RES_THREE_LETTER:
+                    return (parent, STANDARD_RES_ONE_LETTER[parent])
+        except Exception:
+            pass
 
+    # boltz's ccd.pkl / mols pickles carry only geometry (no _chem_comp.* props), so
+    # the lookup above never fires. Fall back to gemmi's tabulated residue table, which
+    # is derived from the RCSB CCD: a *lower-case* one-letter code marks a non-standard
+    # residue derived from that standard parent (MSE->'m'->MET, PCA->'e'->GLU,
+    # SEP->'s'->SER). This resolves the common modified residues without the hand-curated
+    # NONSTANDARD_TO_STANDARD table (which stays as a last-resort fallback in the callers
+    # for CCD-absent names such as CHARMM's HSD/HSE/CYX).
+    parent = _gemmi_parent_three(ccd_code)
+    if parent:
+        return (parent, STANDARD_RES_ONE_LETTER[parent])
+
+    return None
+
+
+_ONE_TO_THREE = {v: k for k, v in STANDARD_RES_ONE_LETTER.items()
+                 if len(k) == 3 and k in STANDARD_AA_THREE_LETTER}
+
+
+def _gemmi_parent_three(ccd_code: str) -> Optional[str]:
+    """Parent standard three-letter residue for a modified AA via gemmi's CCD table.
+
+    Returns None when gemmi does not know the residue or treats it as standard
+    (upper-case one-letter code, e.g. SEC->'U', PYL->'O').
+    """
     try:
-        if mol.HasProp("_chem_comp.mon_nstd_parent_comp_id"):
-            parent = mol.GetProp("_chem_comp.mon_nstd_parent_comp_id")
-            if parent and parent in STANDARD_RES_THREE_LETTER:
-                return (parent, STANDARD_RES_ONE_LETTER[parent])
-    except Exception:
-        pass
-
+        import gemmi
+    except ImportError:
+        return None
+    info = gemmi.find_tabulated_residue(ccd_code)
+    if info is None:
+        return None
+    ol = (info.one_letter_code or "").strip()
+    if len(ol) == 1 and ol.islower():
+        return _ONE_TO_THREE.get(ol.upper())
     return None

@@ -478,9 +478,12 @@ class StructureProcessor(
                         seqres_sequence = self.extract_sequence_from_atoms(base_id)
                         if not seqres_sequence:
                             seqres_sequence = self.extract_seqres_from_cif(base_id)
-                # Verify sequence type matches entity type
+                # Verify sequence type matches entity type. Allow U (SEC) and O (PYL):
+                # the canonical sequence uses these standard one-letter codes for the
+                # 21st/22nd amino acids, so they are valid in a protein SEQRES and must
+                # not trigger the nucleic-acid-misassignment fallback.
                 if entity_type == 'protein':
-                    protein_residues = set('ACDEFGHIKLMNPQRSTVWY')
+                    protein_residues = set('ACDEFGHIKLMNPQRSTVWYUO')
                     if not all(c in protein_residues for c in seqres_sequence if c != 'X'):
                         # SEQRES doesn't match, extract from atoms
                         warning(f"SEQRES sequence type doesn't match protein atoms, extracting from atoms")
@@ -582,42 +585,32 @@ class StructureProcessor(
             if entity_type == 'protein':
                 _, chain_inpainting_metadata = self.determine_inpainting_region(atoms, residue_mapping, final_sequence)
 
-            # --skip-terminal: trim sequence to exclude N/C-terminal missing residues.
-            # Only internal (non-terminal) gaps will be left for inpainting.
-            trim_offset = 0
-            n_trim = 0
+            # --skip-terminal: mark N/C-terminal missing residues so they are NOT
+            # inpainted, WITHOUT truncating the sequence or renumbering. The full
+            # canonical sequence and original SEQRES numbering (label_seq_id) are kept
+            # in the YAML/CIF; the trimmed range [kept_start, kept_end] (1-based, full-
+            # sequence coords) is recorded so `patchr predict` can slice the sequence and
+            # structure at read time. Only internal gaps stay in fully_inpainted_residues.
+            chain_trim = None
             if self.skip_terminal and entity_type == 'protein':
                 present_positions = set(residue_mapping.values())
                 if present_positions:
-                    first_present = min(present_positions)
-                    last_present = max(present_positions)
-                    trim_offset = first_present - 1
-                    n_trim = len(final_sequence) - last_present
-                    if trim_offset > 0 or n_trim > 0:
-                        old_len = len(final_sequence)
-                        final_sequence = final_sequence[first_present - 1 : last_present]
-                        residue_mapping = {k: v - trim_offset for k, v in residue_mapping.items()}
-                        detail(f"--skip-terminal: trimmed sequence {old_len} → {len(final_sequence)} "
-                               f"(removed {trim_offset} N-terminal, {n_trim} C-terminal missing residues)")
-
-            # Apply skip-terminal offset to inpainting metadata. Run whenever any
-            # terminal was trimmed (N *or* C): _shift_and_filter both shifts by the
-            # N-terminal offset and drops residues past the new C-terminus, so a
-            # C-terminal-only trim (trim_offset==0, n_trim>0) must still go through
-            # — otherwise the trimmed terminal residues stay listed as inpainted.
-            if chain_inpainting_metadata is not None and (trim_offset > 0 or n_trim > 0):
-                trimmed_len = len(final_sequence)
-                def _shift_and_filter(residues):
-                    return [r - trim_offset for r in residues if trim_offset < r <= trim_offset + trimmed_len]
-                chain_inpainting_metadata["fully_fixed_residues"] = _shift_and_filter(
-                    chain_inpainting_metadata["fully_fixed_residues"])
-                chain_inpainting_metadata["fully_inpainted_residues"] = _shift_and_filter(
-                    chain_inpainting_metadata["fully_inpainted_residues"])
-                chain_inpainting_metadata["partially_fixed_residues"] = [
-                    {**entry, "residue": entry["residue"] - trim_offset}
-                    for entry in chain_inpainting_metadata["partially_fixed_residues"]
-                    if trim_offset < entry["residue"] <= trim_offset + trimmed_len
-                ]
+                    kept_start = min(present_positions)
+                    kept_end = max(present_positions)
+                    if kept_start > 1 or kept_end < len(final_sequence):
+                        chain_trim = {"kept_start": kept_start, "kept_end": kept_end,
+                                      "full_length": len(final_sequence)}
+                        detail(f"--skip-terminal: keeping full sequence (len "
+                               f"{len(final_sequence)}); marked terminal residues "
+                               f"1..{kept_start-1} and {kept_end+1}..{len(final_sequence)} "
+                               f"as trimmed (not inpainted)")
+                        if chain_inpainting_metadata is not None:
+                            def _within(residues):
+                                return [r for r in residues if kept_start <= r <= kept_end]
+                            # Present residues are already inside the kept range; only
+                            # the terminal *missing* residues need dropping from inpaint.
+                            chain_inpainting_metadata["fully_inpainted_residues"] = _within(
+                                chain_inpainting_metadata["fully_inpainted_residues"])
 
             # Renumber atoms (update label_entity_id and label_asym_id for multimeric)
             renumbered_atoms = self.renumber_atoms(atoms, residue_mapping)
@@ -656,39 +649,45 @@ class StructureProcessor(
                     'MET': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R',
                     'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y',
                 }
+            # Invariant check only — do NOT overwrite the SEQRES-derived sequence with
+            # observed atom residues. With label_seq_id-based mapping the position of
+            # each atom is exact, so any disagreement here is either (a) a real
+            # SEQRES/coordinate discrepancy that we must not silently "fix", or (b) an
+            # altloc/microheterogeneity position where seq_pos_to_monomer captured the
+            # first (possibly lower-occupancy) altloc. Overwriting previously propagated
+            # BLASTP mis-placements into the sequence; now we only warn.
             _seq_list = list(final_sequence)
-            _seq_changed = False
+            _mismatches = []
             for pos, comp_id in seq_pos_to_monomer.items():
                 if pos < 1 or pos > len(_seq_list):
                     continue
                 actual_one = _recon_map.get(comp_id.upper())
                 if actual_one is None:
-                    continue  # non-standard residue, will be handled by modifications
-                expected_one = _seq_list[pos - 1]
-                if expected_one != actual_one:
-                    _seq_list[pos - 1] = actual_one
-                    _seq_changed = True
-            if _seq_changed:
-                old_seq = final_sequence
-                final_sequence = ''.join(_seq_list)
-                _n_diff = sum(1 for a, b in zip(old_seq, final_sequence) if a != b)
-                info(f"Reconciled sequence with atoms: {_n_diff} position(s) updated for chain {chain_id}")
+                    continue  # non-standard residue, handled by modifications
+                if _seq_list[pos - 1] != actual_one:
+                    _mismatches.append((pos, _seq_list[pos - 1], actual_one, comp_id))
+            if _mismatches:
+                _preview = ", ".join(f"{p}:SEQRES={e}/atom={a}({c})"
+                                     for p, e, a, c in _mismatches[:5])
+                warning(f"SEQRES/atom mismatch at {len(_mismatches)} position(s) for "
+                        f"chain {chain_id} (not overwriting): {_preview}")
 
             # Modifications for YAML: use _entity_poly_seq (same as generate_yaml.py) so ACE, PTR, DIP all appear
             # For synthetic chains (e.g. D-2) from assembly: try base chain ID first, then the
             # full chain_id (handles re-processed generated CIFs where synthetic chains are real entities).
-            # NOTE: positions from _entity_poly_seq / struct_conn / non_standard_residues are in original
-            # SEQRES coordinates; apply trim_offset (set above when --skip-terminal is active) to convert
-            # them to the trimmed coordinate system.  seq_pos_to_monomer is already in trimmed coords.
+            # positions from _entity_poly_seq / struct_conn / non_standard_residues are in
+            # SEQRES coordinates, which is exactly the coordinate system of the full
+            # (un-truncated) sequence kept here — no shift needed. --skip-terminal keeps
+            # the full sequence and records a `trim` range instead; predict applies it.
             _mod_key = self._base_chain_id(chain_id)
             if _mod_key not in self._modifications_from_entity_poly and chain_id in self._modifications_from_entity_poly:
                 _mod_key = chain_id
-            seq_len_trimmed = len(final_sequence)
+            seq_len_full = len(final_sequence)
             if _mod_key in self._modifications_from_entity_poly:
                 chain_modifications = []
                 for m in self._modifications_from_entity_poly[_mod_key]:
-                    new_pos = m['position'] - trim_offset
-                    if 1 <= new_pos <= seq_len_trimmed:
+                    new_pos = m['position']
+                    if 1 <= new_pos <= seq_len_full:
                         chain_modifications.append({'position': new_pos, 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
             else:
                 chain_modifications = []
@@ -699,8 +698,8 @@ class StructureProcessor(
                 _conn_key = chain_id
             if _conn_key in getattr(self, '_modifications_from_struct_conn', {}):
                 for m in self._modifications_from_struct_conn[_conn_key]:
-                    new_pos = m['position'] - trim_offset
-                    if 1 <= new_pos <= seq_len_trimmed and new_pos not in positions_added:
+                    new_pos = m['position']
+                    if 1 <= new_pos <= seq_len_full and new_pos not in positions_added:
                         chain_modifications.append({'position': new_pos, 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
                         positions_added.add(new_pos)
             if _mod_key not in self._modifications_from_entity_poly:
@@ -709,8 +708,8 @@ class StructureProcessor(
                     _ns_key = chain_id
                 if _ns_key in self.non_standard_residues:
                     for seq_pos, ns_info in sorted(self.non_standard_residues[_ns_key].items()):
-                        new_pos = seq_pos - trim_offset
-                        if 1 <= new_pos <= seq_len_trimmed and new_pos not in positions_added:
+                        new_pos = seq_pos
+                        if 1 <= new_pos <= seq_len_full and new_pos not in positions_added:
                             chain_modifications.append({
                                 'position': new_pos, 'ccd': ns_info['ccd'],
                                 'parent': ns_info['parent'], 'parent_one': ns_info['parent_one']
@@ -724,8 +723,7 @@ class StructureProcessor(
             # User-requested PTMs (--modification CHAIN:SEQID:CCD). SEQID is the
             # 1-based ENTITY (canonical) sequence position — the same numbering boltz
             # uses for `modifications.position` and the entity seq_id the studio sends.
-            # It is shifted by trim_offset when --skip-terminal drops N-terminal
-            # residues, exactly like the entity_poly modifications above.
+            # --skip-terminal keeps the full sequence, so no coordinate shift is applied.
             #
             # CHAIN is resolved in the AUTHOR namespace: user_modifications is keyed by
             # the author chain id (what the viewer shows), so we match on the author id
@@ -746,11 +744,10 @@ class StructureProcessor(
             if _umods:
                 for _um in _umods:
                     _seqid = int(_um['resid'])
-                    _pos = _seqid - trim_offset
-                    if not (1 <= _pos <= seq_len_trimmed):
+                    _pos = _seqid
+                    if not (1 <= _pos <= seq_len_full):
                         warning(f"--modification: chain {author_chain_id} seq_id {_seqid} "
-                                f"is outside the modelled sequence (1..{seq_len_trimmed}"
-                                f"{f', trimmed by {trim_offset}' if trim_offset else ''}) — skipped")
+                                f"is outside the modelled sequence (1..{seq_len_full}) — skipped")
                         continue
                     chain_modifications = [m for m in chain_modifications if m['position'] != _pos]
                     chain_modifications.append({'position': _pos, 'ccd': str(_um['ccd']).upper(),
@@ -776,7 +773,7 @@ class StructureProcessor(
                         _m['parent_one'] = STANDARD_RES_ONE_LETTER.get(_m['parent'], 'X')
                     continue
                 # (a) non_standard_residues keyed by untrimmed SEQRES position
-                ns_info = _ns_chain.get(_m['position'] + trim_offset)
+                ns_info = _ns_chain.get(_m['position'])
                 if ns_info and ns_info.get('parent') in STANDARD_RES_THREE_LETTER:
                     _m['parent'] = ns_info['parent']
                     _m['parent_one'] = ns_info.get('parent_one') or STANDARD_RES_ONE_LETTER.get(ns_info['parent'], 'X')
@@ -865,24 +862,15 @@ class StructureProcessor(
                     if 1 <= pos <= len(seq_list):
                         seq_list[pos - 1] = STANDARD_RES_ONE_LETTER.get(new_comp, 'X')
                 final_sequence = ''.join(seq_list)
-            # Modification positions in the YAML sequence: replace with the
-            # *parent* one-letter code when known (e.g. BRU → 'U', MSE → 'M'),
-            # falling back to 'X' only when no parent can be resolved.  This
-            # matches RCSB's `pdbx_seq_one_letter_code_can` convention.
+            # The sequence now comes from RCSB's canonical field, which already carries
+            # the correct one-letter code at every modified position (SEC->U, BRU->U,
+            # PTR->Y, ...). We deliberately do NOT overwrite those with the parent code:
+            # doing so diverged from _can/OF3 (e.g. SEC->C) and is unnecessary because
+            # boltz replaces each modification position's token with the CCD from the
+            # `modifications` list. Positions whose atoms were rewritten to a parent
+            # residue (category 4/5, CCD unavailable) were already patched above via
+            # `_rewrites`, so the sequence stays consistent with the emitted structure.
             output_sequence = final_sequence
-            for mod in chain_modifications:
-                pos = mod.get('position')
-                ccd = mod.get('ccd', '')
-                if not (pos and 1 <= pos <= len(output_sequence)):
-                    continue
-                if ccd in STANDARD_RES_THREE_LETTER:
-                    # Standard AA / nucleotide listed as a "modification" — leave the
-                    # SEQRES letter as-is.
-                    continue
-                replacement = mod.get('parent_one') or 'X'
-                seq_list = list(output_sequence)
-                seq_list[pos - 1] = replacement
-                output_sequence = ''.join(seq_list)
             if chain_modifications:
                 info(f"Chain {chain_id} has {len(chain_modifications)} modification(s):")
                 for mod in chain_modifications:
@@ -905,6 +893,7 @@ class StructureProcessor(
                 'author_chain_id': author_chain_id,  # Author chain ID for output files
                 'modifications': chain_modifications,  # modifications for YAML output
                 'inpainting_metadata': chain_inpainting_metadata,  # None for non-protein chains
+                'trim': chain_trim,  # {kept_start, kept_end, full_length} or None (--skip-terminal)
             }
             
             entity_id += 1
