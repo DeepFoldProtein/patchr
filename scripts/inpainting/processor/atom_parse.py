@@ -126,11 +126,72 @@ class AtomParseMixin:
                     }
                     atoms.append(atom)
 
+            atoms = self._filter_altloc_global_largest(atoms)
             info(f"Parsed {len(atoms)} atoms for chain {chain_id}")
             return atoms
 
         except Exception as e:
             fatal(f"Error parsing atom records: {e}")
+
+    @staticmethod
+    def _filter_altloc_global_largest(atoms: List[Dict]) -> List[Dict]:
+        """Collapse alternate conformations to a single conformer per residue.
+
+        Mirrors ``protenix.data.core.parser.MMCIFParser.filter_altloc`` with
+        ``altloc="global_largest"``: altloc letters are ranked by their mean
+        occupancy across the chain, and each residue keeps only its highest-ranked
+        altloc (plus altloc-'.'/'?' atoms shared by all conformers).
+
+        Why this matters for template fixing: some depositions carry a
+        zero-occupancy placeholder altloc (e.g. 3cdd MSE SE altloc 'A' occ=0.00,
+        dumped ~0.7 A from CG) that sorts *first* alphabetically. The template
+        featurizer's biotite parse selects altloc "first", so without this filter
+        the fixed coordinate for such an atom is the garbage placeholder and the
+        prediction faithfully reproduces a collapsed atom. Ranking by occupancy
+        selects the real conformer instead, matching what the input parser sees.
+        """
+        from collections import defaultdict
+
+        def altchar(a):
+            c = a.get('label_alt_id', '.')
+            return c if c not in ('.', '?', '', None) else '.'
+
+        def occ(a):
+            try:
+                return float(a.get('occupancy', '1.00'))
+            except (TypeError, ValueError):
+                return 0.0
+
+        occ_by_alt = defaultdict(list)
+        for a in atoms:
+            c = altchar(a)
+            if c != '.':
+                occ_by_alt[c].append(occ(a))
+        if not occ_by_alt:
+            return atoms  # no alternate conformations present
+
+        # global (per-chain) ranking of altloc letters by mean occupancy, desc
+        rank = sorted(occ_by_alt, key=lambda c: sum(occ_by_alt[c]) / len(occ_by_alt[c]), reverse=True)
+
+        # group atoms by residue (chain + author seq id + insertion code); comp_id is
+        # intentionally excluded so a residue with different resnames per altloc
+        # (e.g. 2pxs XYG|DYG at the same res id) still collapses to one conformer.
+        resmap = defaultdict(list)
+        for idx, a in enumerate(atoms):
+            key = (a.get('label_asym_id'), a.get('auth_seq_id', '?'), a.get('pdbx_PDB_ins_code', '?'))
+            resmap[key].append(idx)
+
+        keep = [True] * len(atoms)
+        for idxs in resmap.values():
+            present = {altchar(atoms[i]) for i in idxs if altchar(atoms[i]) != '.'}
+            if not present:
+                continue
+            best = next(c for c in rank if c in present)
+            for i in idxs:
+                c = altchar(atoms[i])
+                if c != '.' and c != best:
+                    keep[i] = False
+        return [a for a, k in zip(atoms, keep) if k]
 
 
     def _extract_solvent_atoms(self) -> List[Dict]:

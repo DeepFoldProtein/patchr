@@ -127,34 +127,64 @@ def parse_struct_conn(
         return [], set()
 
     coord_lookup = _atom_coord_lookup(atoms_by_chain)
+
+    # patchr reassigns chain labels: an assembly copy becomes "<base>-<N>" (e.g.
+    # source chain B -> output B-2), and a single source chain may expand to
+    # several output copies. The source _struct_conn always uses the ORIGINAL
+    # label_asym_id, so map each source label to its output chain(s) and
+    # rewrite/replicate every bond onto the output labels. A source chain with
+    # no output (e.g. a dropped branched glycan) maps to nothing -> its bonds are
+    # dropped. For inter-chain bonds across homomer copies, wrong copy pairings
+    # are pruned by the distance filter (when coordinates are available).
+    import re as _re
+    src_to_out: Dict[str, List[str]] = {}
+    for cid in chain_ids:
+        src_to_out.setdefault(_re.sub(r'-\d+$', '', cid), []).append(cid)
+
     rows = []
     dropped = 0
     for i in range(n):
         row = {k: (cif_dict[k][i] if i < len(cif_dict[k]) else '?') for k in conn_keys}
         p1 = row.get('_struct_conn.ptnr1_label_asym_id', '')
         p2 = row.get('_struct_conn.ptnr2_label_asym_id', '')
-        if p1 not in chain_ids or p2 not in chain_ids:
-            continue
+        outs1 = src_to_out.get(p1, [])
+        outs2 = src_to_out.get(p2, [])
+        if not outs1 or not outs2:
+            continue  # a partner chain is absent from the output (e.g. dropped)
 
-        if atoms_by_chain:
-            c1 = coord_lookup(
-                p1,
-                row.get('_struct_conn.ptnr1_label_seq_id', '?'),
-                row.get('_struct_conn.ptnr1_label_atom_id', ''),
-            )
-            c2 = coord_lookup(
-                p2,
-                row.get('_struct_conn.ptnr2_label_seq_id', '?'),
-                row.get('_struct_conn.ptnr2_label_atom_id', ''),
-            )
-            if c1 is not None and c2 is not None:
-                dist = ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2) ** 0.5
-                if dist > max_bond_distance:
-                    dropped += 1
-                    continue
-                row['_struct_conn.pdbx_dist_value'] = f"{dist:.3f}"
+        if p1 == p2:                                    # intra-chain: one bond per copy
+            pairs = [(c, c) for c in outs1]
+        elif len(outs1) == len(outs2):                  # pair copies by index
+            pairs = list(zip(outs1, outs2))
+        else:                                           # fall back to all pairs
+            pairs = [(a, b) for a in outs1 for b in outs2]
 
-        rows.append(row)
+        for k_pair, (o1, o2) in enumerate(pairs):
+            newrow = dict(row)
+            newrow['_struct_conn.ptnr1_label_asym_id'] = o1
+            newrow['_struct_conn.ptnr2_label_asym_id'] = o2
+            if len(pairs) > 1 and k_pair > 0:           # keep _struct_conn.id unique
+                newrow['_struct_conn.id'] = f"{row.get('_struct_conn.id', 'conn')}_{k_pair + 1}"
+
+            if atoms_by_chain:
+                c1 = coord_lookup(
+                    o1,
+                    newrow.get('_struct_conn.ptnr1_label_seq_id', '?'),
+                    newrow.get('_struct_conn.ptnr1_label_atom_id', ''),
+                )
+                c2 = coord_lookup(
+                    o2,
+                    newrow.get('_struct_conn.ptnr2_label_seq_id', '?'),
+                    newrow.get('_struct_conn.ptnr2_label_atom_id', ''),
+                )
+                if c1 is not None and c2 is not None:
+                    dist = ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2) ** 0.5
+                    if dist > max_bond_distance:
+                        dropped += 1
+                        continue
+                    newrow['_struct_conn.pdbx_dist_value'] = f"{dist:.3f}"
+
+            rows.append(newrow)
     conn_type_ids = {row.get('_struct_conn.conn_type_id', 'covale') for row in rows}
     if dropped:
         # Inform the caller via a side-channel — parse_struct_conn is used in a
