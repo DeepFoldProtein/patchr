@@ -701,6 +701,15 @@ class StructureProcessor(
                         if actual in STANDARD_AA_THREE_LETTER or actual in STANDARD_NUCLEOTIDE_CODES:
                             continue  # this copy is the plain parent residue -> no modification
                         ccd = actual  # this copy carries a different modification -> use it
+                    elif actual is None and seq_pos_to_monomer:
+                        # This chain resolves other positions but NOT this one. Entity-level
+                        # modifications are entity-wide, so two copies that resolve different
+                        # residue ranges (e.g. complementary DNA strands: chain B resolves
+                        # 12-18, chain C resolves 4-11) each inherit the other's modifications.
+                        # A modification at an unresolved position has no template atom to fix
+                        # it, so boltz inpaints the modified residue freely and it collapses.
+                        # Drop it — the position is inpainted as its plain sequence residue.
+                        continue
                     chain_modifications.append({'position': new_pos, 'ccd': ccd, 'parent': None, 'parent_one': None})
             else:
                 chain_modifications = []
