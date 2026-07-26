@@ -565,7 +565,23 @@ def get_template_records_from_search(
         for chain_id, template_chain_id in zip(chain_ids, template_chain_ids):
             chain_seq = sequences[chain_id]
             template_seq = template_sequences[template_chain_id]
-            alignments = get_local_alignments(chain_seq, template_seq)
+            if len(chain_seq) == len(template_seq):
+                # Inpainting self-template: query and template are the same chain,
+                # so map residues by index directly. Sequence-based local alignment
+                # can shift the whole chain by one when a modified residue (e.g. a
+                # GTP 5' cap) is encoded with a different one-letter code in the
+                # query vs. the template, which would map the modification onto its
+                # neighbour (wrong CCD) and break atom-level fixing.
+                alignments = [
+                    Alignment(
+                        query_st=0,
+                        query_en=len(chain_seq),
+                        template_st=0,
+                        template_en=len(template_seq),
+                    )
+                ]
+            else:
+                alignments = get_local_alignments(chain_seq, template_seq)
             for alignment in alignments:
                 template_record = TemplateInfo(
                     name=template_id,
