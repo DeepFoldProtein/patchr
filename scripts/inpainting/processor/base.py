@@ -687,8 +687,21 @@ class StructureProcessor(
                 chain_modifications = []
                 for m in self._modifications_from_entity_poly[_mod_key]:
                     new_pos = m['position']
-                    if 1 <= new_pos <= seq_len_full:
-                        chain_modifications.append({'position': new_pos, 'ccd': m['ccd'], 'parent': None, 'parent_one': None})
+                    if not (1 <= new_pos <= seq_len_full):
+                        continue
+                    # Per-copy microheterogeneity guard: the entity's canonical residue may be
+                    # modified (e.g. KCX) while THIS copy's deposited atoms are the plain parent
+                    # (LYS) or carry a different comp (e.g. 1k55 chains A/B are KCX but C/D are LYS).
+                    # Applying the entity modification would add atoms (the carboxyl) that are
+                    # absent from this copy's template, so boltz generates and collapses them.
+                    # When this position is resolved for this chain, trust the observed comp.
+                    ccd = m['ccd']
+                    actual = seq_pos_to_monomer.get(new_pos)
+                    if actual is not None and actual != ccd:
+                        if actual in STANDARD_AA_THREE_LETTER or actual in STANDARD_NUCLEOTIDE_CODES:
+                            continue  # this copy is the plain parent residue -> no modification
+                        ccd = actual  # this copy carries a different modification -> use it
+                    chain_modifications.append({'position': new_pos, 'ccd': ccd, 'parent': None, 'parent_one': None})
             else:
                 chain_modifications = []
             positions_added = {m['position'] for m in chain_modifications}
@@ -755,6 +768,22 @@ class StructureProcessor(
                     info(f"--modification: chain {author_chain_id} seq_id {_seqid} "
                          f"-> sequence position {_pos} -> {str(_um['ccd']).upper()}")
                 positions_added = {m['position'] for m in chain_modifications}
+
+            # Per-copy microheterogeneity safety net (covers every modification source, incl.
+            # _struct_conn): if a position is RESOLVED for this chain as a plain standard residue
+            # but a source applied an entity-level modification there (e.g. 1k55 chains A/B are KCX
+            # while C/D are plain LYS), drop it — otherwise boltz builds the modified residue and
+            # generates its extra atoms (the carboxyl), which are absent from this copy's template
+            # and collapse. Unresolved positions (no atoms) keep the modification so they inpaint
+            # as the right residue type.
+            def _keep_mod(_m):
+                _act = seq_pos_to_monomer.get(_m['position'])
+                if _act is None or _act == _m['ccd']:
+                    return True
+                if _act in STANDARD_AA_THREE_LETTER or _act in STANDARD_NUCLEOTIDE_CODES:
+                    return False
+                return True
+            chain_modifications = [_m for _m in chain_modifications if _keep_mod(_m)]
 
             chain_modifications.sort(key=lambda m: m['position'])
 
