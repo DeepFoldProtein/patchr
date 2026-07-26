@@ -14,6 +14,50 @@ if str(_scripts_dir) not in sys.path:
 from benchmark.generate_yaml import generate_yaml_content, _yaml_str
 
 
+def _ccd_atom_positions(cif_path: Path):
+    """Return {ccd: set(label_seq_int)} of positions that carry atoms of each comp in `cif_path`.
+    Used to detect fused-chromophore duplicate modifications (see generate_yaml)."""
+    positions: Dict[str, set] = {}
+    try:
+        import gemmi
+        block = gemmi.cif.read(str(cif_path)).sole_block()
+        cat = block.get_mmcif_category('_atom_site.')
+        comps = cat.get('label_comp_id', []) if cat else []
+        seqs = cat.get('label_seq_id', []) if cat else []
+        for comp, seq in zip(comps, seqs):
+            try:
+                positions.setdefault(comp, set()).add(int(seq))
+            except (ValueError, TypeError):
+                continue
+    except Exception:
+        pass
+    return positions
+
+
+def _dedupe_fused_modifications(mods, ccd_atom_positions):
+    """Drop duplicate modifications of the same CCD that point at a position with no atoms of that
+    CCD in the template. A fused chromophore (CRO/NRQ/...) occupies several consecutive SEQRES
+    positions but deposits atoms at ONE, so the modification list carries duplicate CRO entries and
+    boltz builds duplicate chromophore copies that collapse onto the real one (e.g. 3evv CRO at
+    185/186/187). A CCD at a single position is always kept, so a genuinely unresolved modification
+    still inpaints as the correct residue type."""
+    if not mods:
+        return mods
+    by_ccd: Dict[str, list] = {}
+    for m in mods:
+        by_ccd.setdefault(m["ccd"], []).append(m)
+    kept = []
+    for ccd, group in by_ccd.items():
+        if len(group) <= 1:
+            kept.extend(group)
+            continue
+        atom_pos = ccd_atom_positions.get(ccd, set())
+        with_atoms = [m for m in group if m["position"] in atom_pos]
+        kept.extend(with_atoms if with_atoms else group)
+    kept.sort(key=lambda m: m["position"])
+    return kept
+
+
 def _resolve_path(target: Path, output_dir: Path, use_absolute: bool) -> str:
     """Return a path string — absolute or relative to *output_dir*."""
     if use_absolute:
@@ -39,6 +83,9 @@ def generate_yaml(
             metadata so the YAML works regardless of working directory.  If
             False, paths are relative to *output_dir*.
     """
+    # positions carrying atoms of each CCD in the template, for fused-chromophore dedup below.
+    ccd_atom_positions = _ccd_atom_positions(cif_path)
+
     chains = []
     label_ids = []  # label_asym_id (what goes into chain_id in YAML)
 
@@ -48,13 +95,14 @@ def generate_yaml(
         # unlike auth_asym_id which can collide (e.g. a polymer chain and its
         # glycan fragments sharing author chain "A" in 8WLO).
         label_ids.append(chain_id)
+        mods_out = _dedupe_fused_modifications(list(d.get("modifications", [])), ccd_atom_positions)
         entry = {
             "id": chain_id,
             "sequence": d.get("sequence", ""),
             "entity_type": d.get("entity_type", "protein"),
             "modifications": [
                 {"position": m["position"], "ccd": m["ccd"]}
-                for m in d.get("modifications", [])
+                for m in mods_out
             ],
         }
         if d.get("trim"):
