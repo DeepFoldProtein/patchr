@@ -5,17 +5,18 @@ import type { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { missingRegionsDetectedAtom } from "../../store/repair-atoms";
 import type { MissingRegionInfo } from "../../types";
 import { bus } from "../../lib/event-bus";
-import {
-  Structure,
-  StructureElement,
-  Unit
-} from "molstar/lib/mol-model/structure";
-import { StructureProperties } from "molstar/lib/mol-model/structure/structure/properties";
+import { Structure, StructureElement } from "molstar/lib/mol-model/structure";
 import { Vec3 } from "molstar/lib/mol-math/linear-algebra";
-import { OrderedSet } from "molstar/lib/mol-data/int";
 import { Loci } from "molstar/lib/mol-model/loci";
 import { StateTransforms } from "molstar/lib/mol-plugin-state/transforms";
+import { StateSelection, StateTransform } from "molstar/lib/mol-state";
+import { MeasurementGroupTag } from "molstar/lib/mol-plugin-state/manager/structure/measurement";
 import { logger } from "../../lib/logger";
+import {
+  findResidueLoci,
+  findResidueLociByLabelSeqId,
+  findNearbyResidueLoci
+} from "../../lib/residueIndex";
 
 // Gap boundary representation을 추적하기 위한 label prefix
 const GAP_BOUNDARY_LABEL_PREFIX = "Missing Region Boundary";
@@ -116,10 +117,13 @@ export function useMissingRegionVisuals(
         const structure = structures[0].cell.obj?.data as Structure | undefined;
         if (!structure) return;
 
-        // Partial residues에 대해 text label 추가
-        await visualizePartialResidues(plugin, structure, gaps);
-
-        // Complete gaps에 대해 measurement distance lines 생성
+        // Complete gaps에 대해 measurement distance lines 생성.
+        //
+        // Partial residues는 여기서 그리지 않는다. 한 residue당 하나씩 생기기
+        // 때문에 저해상도 구조에서는 수천 개가 된다 (6WBL, 5.13 Å: 잔기 2182개
+        // 중 1880개). 그만큼의 Distance3D representation은 렌더가 감당하지
+        // 못하고, 텍스트 라벨이 서로 겹쳐 읽을 수도 없다. 대신 목록에서 선택한
+        // 것만 selectPartialResidue()가 그린다.
         await visualizeCompleteGaps(plugin, structure, gaps);
 
         logger.log(
@@ -275,6 +279,18 @@ async function selectPartialResidue(
     // Ball-and-stick representation 추가 (sidechain 표시)
     await addBallAndStickForSelection(plugin, loci, "Partial");
 
+    // 어떤 원자가 빠졌는지 알려주는 텍스트 라벨. 예전에는 로드 시 모든 partial
+    // residue에 대해 미리 만들었지만, 이제 선택한 하나만 만든다. 같은 residue를
+    // 양 끝점으로 주면 선 없이 텍스트만 표시된다.
+    await commitDistances(plugin, [
+      {
+        a: loci,
+        b: loci,
+        customText: partialLabelText(missingRegion),
+        label: `${GAP_BOUNDARY_LABEL_PREFIX} Partial Label`
+      }
+    ]);
+
     // Focus on the residue
     const bounds = Loci.getBoundingSphere(loci);
     if (bounds) {
@@ -293,86 +309,9 @@ async function selectPartialResidue(
   }
 }
 
-/**
- * Structure에서 residue의 loci 찾기
- */
-function findResidueLoci(
-  structure: Structure,
-  chainId: string,
-  authSeqId: number,
-  insCode: string | undefined
-): StructureElement.Loci | null {
-  for (const unit of structure.units) {
-    if (!Unit.isAtomic(unit)) continue;
-
-    const elements: StructureElement.UnitIndex[] = [];
-
-    for (let i = 0; i < unit.elements.length; i++) {
-      const loc = StructureElement.Location.create(
-        structure,
-        unit,
-        unit.elements[i]
-      );
-      const elemChainId = StructureProperties.chain.auth_asym_id(loc);
-      const elemAuthSeqId = StructureProperties.residue.auth_seq_id(loc);
-      const elemInsCode =
-        StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
-
-      if (
-        elemChainId === chainId &&
-        elemAuthSeqId === authSeqId &&
-        elemInsCode === (insCode || "")
-      ) {
-        elements.push(i as StructureElement.UnitIndex);
-      }
-    }
-
-    if (elements.length > 0) {
-      return StructureElement.Loci(structure, [
-        { unit, indices: OrderedSet.ofSortedArray(elements) }
-      ]);
-    }
-  }
-
-  return null;
-}
-
-/**
- * Structure에서 label_seq_id로 residue의 loci 찾기
- */
-function findResidueLociByLabelSeqId(
-  structure: Structure,
-  chainId: string,
-  labelSeqId: number
-): StructureElement.Loci | null {
-  for (const unit of structure.units) {
-    if (!Unit.isAtomic(unit)) continue;
-
-    const elements: StructureElement.UnitIndex[] = [];
-
-    for (let i = 0; i < unit.elements.length; i++) {
-      const loc = StructureElement.Location.create(
-        structure,
-        unit,
-        unit.elements[i]
-      );
-      const elemChainId = StructureProperties.chain.auth_asym_id(loc);
-      const elemLabelSeqId = StructureProperties.residue.label_seq_id(loc);
-
-      if (elemChainId === chainId && elemLabelSeqId === labelSeqId) {
-        elements.push(i as StructureElement.UnitIndex);
-      }
-    }
-
-    if (elements.length > 0) {
-      return StructureElement.Loci(structure, [
-        { unit, indices: OrderedSet.ofSortedArray(elements) }
-      ]);
-    }
-  }
-
-  return null;
-}
+// findResidueLoci / findResidueLociByLabelSeqId / findNearbyResidueLoci now come
+// from lib/residueIndex, which indexes the structure once instead of rescanning
+// every atom on every lookup.
 
 /**
  * 선택된 residue에 ball-and-stick representation 추가 (sidechain 표시)
@@ -417,67 +356,112 @@ async function addBallAndStickForSelection(
   }
 }
 
+// One measurement to be written into the shared state-tree update.
+interface PendingDistance {
+  a: StructureElement.Loci;
+  b: StructureElement.Loci;
+  customText: string;
+  /**
+   * Label for the Selections node. Prefixing it with
+   * GAP_BOUNDARY_LABEL_PREFIX makes clearPreviousMissingRegionBoundaries
+   * delete the measurement (and its representation) on the next selection,
+   * which is what transient click-time labels want. Persistent gap lines
+   * keep the default so they survive.
+   */
+  label?: string;
+}
+
+/** "SER123: 4 atom(s) missing" */
+function partialLabelText(region: MissingRegionInfo): string {
+  const missingAtomCount = region.missingAtoms?.length ?? 0;
+  const residueName = region.sequence || "UNK";
+  return `${residueName}${region.startAuthSeqId}${region.insertionCode || ""}: ${missingAtomCount} atom(s) missing`;
+}
+
 /**
- * Partial residues에 대해 text label 추가 (MolStar measurement API 사용)
- * 각 partial residue 위에 "N missing atoms" 텍스트 라벨 표시
+ * Add every measurement in a single state-tree update.
+ *
+ * `measurement.addDistance` commits per call, so N gaps meant N state
+ * reconciliations and N canvas rebuilds. This mirrors the transforms that
+ * manager builds — same Selections + Distance3D pair under the same
+ * "Measurements" group — but commits once. The manager re-derives its own state
+ * from the tree whenever it changes, so the batched nodes are still tracked.
  */
-async function visualizePartialResidues(
+async function commitDistances(
   plugin: PluginUIContext,
-  structure: Structure,
-  gaps: MissingRegionInfo[]
+  items: PendingDistance[]
 ): Promise<void> {
-  const partialGaps = gaps.filter(g => g.regionType === "partial");
-  if (partialGaps.length === 0) return;
+  if (items.length === 0) return;
 
-  logger.log(
-    "[Missing Region Visuals] Adding text labels for",
-    partialGaps.length,
-    "partial residues"
+  const state = plugin.state.data;
+  const builder = state.build();
+
+  const existingGroupRef = StateSelection.findTagInSubtree(
+    state.tree,
+    StateTransform.RootRef,
+    MeasurementGroupTag
   );
-
-  for (const gap of partialGaps) {
-    try {
-      // Partial residue의 loci 찾기
-      const loci = findResidueLoci(
-        structure,
-        gap.chainId,
-        gap.startAuthSeqId!,
-        gap.insertionCode
-      );
-
-      if (!loci) {
-        logger.warn(
-          `[Missing Region Visuals] Could not find residue for partial ${gap.regionId}`
+  const group = existingGroupRef
+    ? builder.to(existingGroupRef)
+    : builder
+        .toRoot()
+        .group(
+          StateTransforms.Misc.CreateGroup,
+          { label: "Measurements" },
+          { tags: MeasurementGroupTag }
         );
-        continue;
-      }
 
-      // 누락된 원자 개수 계산
-      const missingAtomCount = gap.missingAtoms?.length ?? 0;
-      const residueName = gap.sequence || "UNK";
+  const { distanceUnitLabel, textColor } =
+    plugin.managers.structure.measurement.state.options;
 
-      // 텍스트 라벨 생성: "Residue XYZ: 5 atoms missing"
-      const labelText = `${residueName}${gap.startAuthSeqId}${gap.insertionCode || ""}: ${missingAtomCount} atom(s) missing`;
+  let queued = 0;
+  for (const item of items) {
+    const cellA = plugin.helpers.substructureParent.get(item.a.structure);
+    const cellB = plugin.helpers.substructureParent.get(item.b.structure);
+    if (!cellA || !cellB) continue;
 
-      // Distance API를 사용하여 custom text 표시
-      // 같은 residue를 양 끝점으로 사용하면 선 없이 텍스트만 표시됨
-      await plugin.managers.structure.measurement.addDistance(loci, loci, {
-        customText: labelText,
-        visualParams: {
-          textSize: 0.8 // 텍스트 크기 조정
-        }
+    const refA = cellA.transform.ref;
+    const refB = cellB.transform.ref;
+    const dependsOn = refA === refB ? [refA] : [refA, refB];
+
+    group
+      .apply(
+        StateTransforms.Model.MultiStructureSelectionFromBundle,
+        {
+          selections: [
+            {
+              key: "a",
+              groupId: "a",
+              ref: refA,
+              bundle: StructureElement.Bundle.fromLoci(item.a)
+            },
+            {
+              key: "b",
+              groupId: "b",
+              ref: refB,
+              bundle: StructureElement.Bundle.fromLoci(item.b)
+            }
+          ],
+          isTransitive: true,
+          label: item.label ?? "Distance"
+        },
+        { dependsOn }
+      )
+      .apply(StateTransforms.Representation.StructureSelectionsDistance3D, {
+        customText: item.customText,
+        unitLabel: distanceUnitLabel,
+        textColor,
+        textSize: 0.8
       });
-
-      logger.log(
-        `[Missing Region Visuals] ✓ Added label for partial residue ${gap.regionId}: "${labelText}"`
-      );
-    } catch (error) {
-      logger.error(
-        `[Missing Region Visuals] Failed to create label for ${gap.regionId}:`,
-        error
-      );
-    }
+    queued++;
   }
+
+  if (queued === 0) return;
+
+  await builder.commit();
+  logger.log(
+    `[Missing Region Visuals] Committed ${queued} measurement(s) in one update`
+  );
 }
 
 /**
@@ -498,146 +482,86 @@ async function visualizeCompleteGaps(
     "complete gaps"
   );
 
+  const pending: PendingDistance[] = [];
+
   for (const gap of completeGaps) {
-    try {
-      // Terminal gaps는 텍스트 라벨 표시
-      if (gap.terminalType === "nterm" || gap.terminalType === "cterm") {
-        // Terminal gap의 경계 residue 찾기
-        const boundaryLoci =
-          gap.terminalType === "nterm"
-            ? findResidueLociByLabelSeqId(
-                structure,
-                gap.chainId,
-                gap.endResId + 1
-              )
-            : findResidueLociByLabelSeqId(
-                structure,
-                gap.chainId,
-                gap.startResId - 1
-              );
+    // Terminal gaps는 텍스트 라벨 표시
+    if (gap.terminalType === "nterm" || gap.terminalType === "cterm") {
+      // Terminal gap의 경계 residue 찾기
+      const boundaryLoci =
+        gap.terminalType === "nterm"
+          ? findResidueLociByLabelSeqId(
+              structure,
+              gap.chainId,
+              gap.endResId + 1
+            )
+          : findResidueLociByLabelSeqId(
+              structure,
+              gap.chainId,
+              gap.startResId - 1
+            );
 
-        if (boundaryLoci) {
-          // Distance API를 사용하여 custom text 표시
-          // 같은 residue를 양 끝점으로 사용하면 선 없이 텍스트만 표시됨
-          const labelText =
-            gap.terminalType === "nterm"
-              ? `N-term: ${gap.regionLength} missing residues`
-              : `C-term: ${gap.regionLength} missing residues`;
-
-          await plugin.managers.structure.measurement.addDistance(
-            boundaryLoci,
-            boundaryLoci,
-            {
-              customText: labelText,
-              visualParams: {
-                textSize: 0.8 // 기본값보다 크게
-              }
-            }
-          );
-
-          logger.log(
-            `[Missing Region Visuals] ✓ Added label for ${gap.terminalType} gap ${gap.regionId}: "${labelText}"`
-          );
-        } else {
-          logger.warn(
-            `[Missing Region Visuals] Could not find boundary residue for ${gap.terminalType} gap ${gap.regionId}`
-          );
-        }
-        continue;
-      }
-
-      // Internal gaps: distance line 표시
-      // Gap 경계 residue의 loci 찾기
-      const startLoci = findNearbyResidueLoci(
-        structure,
-        gap.chainId,
-        gap.startAuthSeqId!,
-        gap.insertionCode,
-        "before"
-      );
-
-      const endLoci = findNearbyResidueLoci(
-        structure,
-        gap.chainId,
-        gap.endAuthSeqId!,
-        gap.endInsertionCode,
-        "after"
-      );
-
-      if (!startLoci || !endLoci) {
+      if (!boundaryLoci) {
         logger.warn(
-          `[Missing Region Visuals] Could not find loci for gap ${gap.regionId}`
+          `[Missing Region Visuals] Could not find boundary residue for ${gap.terminalType} gap ${gap.regionId}`
         );
         continue;
       }
 
-      // Molstar measurement API를 사용하여 distance 추가
-      await plugin.managers.structure.measurement.addDistance(
-        startLoci,
-        endLoci,
-        {
-          customText: `Gap: ${gap.regionLength} residues`,
-          visualParams: {
-            textSize: 0.8 // 텍스트 크기 조정
-          }
-        }
-      );
+      // 같은 residue를 양 끝점으로 사용하면 선 없이 텍스트만 표시됨
+      const labelText =
+        gap.terminalType === "nterm"
+          ? `N-term: ${gap.regionLength} missing residues`
+          : `C-term: ${gap.regionLength} missing residues`;
 
-      logger.log(
-        `[Missing Region Visuals] ✓ Distance line for ${gap.regionId} (${gap.regionLength} residues)`
-      );
-    } catch (error) {
-      logger.error(
-        `[Missing Region Visuals] Failed to create distance line for ${gap.regionId}:`,
-        error
-      );
-    }
-  }
-}
-
-/**
- * Residue loci 찾기 (없으면 주변 residue 검색)
- */
-function findNearbyResidueLoci(
-  structure: Structure,
-  chainId: string,
-  seqId: number,
-  insCode: string | undefined,
-  direction: "before" | "after"
-): StructureElement.Loci | null {
-  // 먼저 정확한 위치 시도
-  let loci = findResidueLoci(structure, chainId, seqId, insCode);
-  if (loci) return loci;
-
-  // 없으면 주변 검색
-  const searchDirection = direction === "before" ? -1 : 1;
-
-  for (let offset = 1; offset <= 5; offset++) {
-    const nearbySeqId = seqId + searchDirection * offset;
-
-    // Insertion code 없이 시도
-    loci = findResidueLoci(structure, chainId, nearbySeqId, undefined);
-    if (loci) {
-      logger.log(
-        `  Found nearby residue at ${nearbySeqId} (offset=${searchDirection * offset})`
-      );
-      return loci;
+      pending.push({
+        a: boundaryLoci,
+        b: boundaryLoci,
+        customText: labelText
+      });
+      continue;
     }
 
-    // 일반적인 insertion code들 시도
-    for (const tryInsCode of ["A", "B", "C", "D", "E"]) {
-      loci = findResidueLoci(structure, chainId, nearbySeqId, tryInsCode);
-      if (loci) {
-        logger.log(
-          `  Found nearby residue at ${nearbySeqId}${tryInsCode} (offset=${searchDirection * offset})`
-        );
-        return loci;
-      }
+    // Internal gaps: distance line 표시
+    // Gap 경계 residue의 loci 찾기
+    const startLoci = findNearbyResidueLoci(
+      structure,
+      gap.chainId,
+      gap.startAuthSeqId!,
+      gap.insertionCode,
+      "before"
+    );
+
+    const endLoci = findNearbyResidueLoci(
+      structure,
+      gap.chainId,
+      gap.endAuthSeqId!,
+      gap.endInsertionCode,
+      "after"
+    );
+
+    if (!startLoci || !endLoci) {
+      logger.warn(
+        `[Missing Region Visuals] Could not find loci for gap ${gap.regionId}`
+      );
+      continue;
     }
+
+    pending.push({
+      a: startLoci,
+      b: endLoci,
+      customText: `Gap: ${gap.regionLength} residues`
+    });
   }
 
-  logger.warn(`  Could not find any residue near ${seqId}${insCode || ""}`);
-  return null;
+  try {
+    await commitDistances(plugin, pending);
+  } catch (error) {
+    logger.error(
+      "[Missing Region Visuals] Failed to create gap distance lines:",
+      error
+    );
+  }
 }
 
 /**

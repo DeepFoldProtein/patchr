@@ -121,28 +121,33 @@ function generateMapping(
       insCode: string;
     }> = [];
 
-    // Convert elements to array for iteration
-    const elementsArray = Array.from(unit.elements);
-    for (const element of elementsArray) {
-      const loc = StructureElement.Location.create(structure, unit, element);
+    // One Location per unit, mutated in place; a Set for dedupe. Allocating a
+    // Location per atom and scanning `residues` per atom made this O(atoms x
+    // residues) and blocked the UI on large chains.
+    const seen = new Set<string>();
+    const loc = StructureElement.Location.create(structure, unit);
+    for (let i = 0; i < unit.elements.length; i++) {
+      loc.element = unit.elements[i];
       const labelSeqId = StructureProperties.residue.label_seq_id(loc);
       const authSeqId = StructureProperties.residue.auth_seq_id(loc);
       const insCode = StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
 
-      // Check if we already have this residue
-      const existing = residues.find(
-        r =>
-          r.labelSeqId === labelSeqId &&
-          r.authSeqId === authSeqId &&
-          r.insCode === insCode
-      );
-      if (!existing) {
-        residues.push({ labelSeqId, authSeqId, insCode });
-      }
+      const key = `${labelSeqId}|${authSeqId}|${insCode}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      residues.push({ labelSeqId, authSeqId, insCode });
     }
 
     // Sort by label_seq_id
     residues.sort((a, b) => a.labelSeqId - b.labelSeqId);
+
+    // First residue per label_seq_id, matching the previous `find` semantics.
+    const residueByLabelSeqId = new Map<number, (typeof residues)[number]>();
+    for (const residue of residues) {
+      if (!residueByLabelSeqId.has(residue.labelSeqId)) {
+        residueByLabelSeqId.set(residue.labelSeqId, residue);
+      }
+    }
 
     // Get missing regions for this chain
     const chainMissingRegions = missingByChain.get(chainId) || [];
@@ -167,10 +172,15 @@ function generateMapping(
 
     // Process residues in canonical order (label_seq_id order)
     // Insert missing residues at their positions
-    const maxResId = Math.max(
-      ...residues.map(r => r.labelSeqId),
-      ...sortedMissingRegions.map(r => r.endResId)
-    );
+    // Folded rather than spread: `Math.max(...arr)` throws RangeError once the
+    // array exceeds the argument limit, which large chains do.
+    let maxResId = 0;
+    for (const r of residues) {
+      if (r.labelSeqId > maxResId) maxResId = r.labelSeqId;
+    }
+    for (const r of sortedMissingRegions) {
+      if (r.endResId > maxResId) maxResId = r.endResId;
+    }
 
     for (let pos = 1; pos <= maxResId; pos++) {
       // Check if there's a missing region at this position
@@ -194,7 +204,7 @@ function generateMapping(
         canonicalIndex++;
       } else {
         // Find existing residue at this label_seq_id
-        const residue = residues.find(r => r.labelSeqId === pos);
+        const residue = residueByLabelSeqId.get(pos);
         if (residue) {
           const authResIdKey = residue.insCode
             ? `${residue.authSeqId}${residue.insCode}`

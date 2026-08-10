@@ -100,6 +100,9 @@ export function ControlPanel(): React.ReactElement {
           <ServerConnection />
           <ProjectManager />
         </div>
+        {/* Single scroll container for the whole Repair column — the sections
+            stack vertically and are reached by scrolling. RepairConsole itself
+            must not add a second scroller, or the wheel gets trapped. */}
         <div
           style={panelMode === "repair" ? undefined : { display: "none" }}
           className="flex-1 min-h-0 overflow-auto"
@@ -121,7 +124,7 @@ function RepairConsole(): React.ReactElement {
   type SectionId = "missing-region-review" | "sequence" | "context" | "results";
   const [expandedSections, setExpandedSections] = React.useState<
     Set<SectionId>
-  >(new Set(["missing-region-review", "context", "results"]));
+  >(new Set(["missing-region-review", "sequence", "context", "results"]));
 
   const currentProject = useCurrentProject();
 
@@ -986,7 +989,7 @@ function RepairConsole(): React.ReactElement {
   );
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto">
+    <div>
       {/* Missing Region Review 섹션 */}
       <Section
         title="Missing & Incomplete Residues"
@@ -997,8 +1000,12 @@ function RepairConsole(): React.ReactElement {
       </Section>
 
       {/* Sequence 섹션 — 잔기 편집(Erase/Mutate/PTM) + UniProt 참조 서열.
-          Always expanded (core workflow surface). */}
-      <Section title="Sequence" expanded onToggle={() => {}}>
+          가장 키가 큰 섹션이므로 접을 수 있어야 아래 섹션에 닿을 수 있다. */}
+      <Section
+        title="Sequence"
+        expanded={expandedSections.has("sequence")}
+        onToggle={() => toggleSection("sequence")}
+      >
         <SequenceEditorPanel />
       </Section>
 

@@ -11,14 +11,8 @@ import {
 } from "molstar/lib/mol-plugin-ui/sequence";
 import { bus } from "../../lib/event-bus";
 import { missingRegionsDetectedAtom } from "../../store/repair-atoms";
-import {
-  Structure,
-  StructureElement,
-  Unit
-} from "molstar/lib/mol-model/structure";
-import { StructureProperties } from "molstar/lib/mol-model/structure/structure/properties";
-import { OrderedSet } from "molstar/lib/mol-data/int";
 import { Loci } from "molstar/lib/mol-model/loci";
+import { findResidueLoci } from "../../lib/residueIndex";
 import { logger } from "../../lib/logger";
 
 /**
@@ -148,7 +142,7 @@ export function useSequenceViewer(
 
       // If we found a target residue, select and zoom to it
       if (targetAuthSeqId !== null) {
-        const targetLoci = findResidueLociByAuthSeqId(
+        const targetLoci = findResidueLoci(
           structure,
           gap.chainId,
           targetAuthSeqId,
@@ -272,46 +266,5 @@ export function useSequenceViewer(
   }, [plugin, missingRegions]);
 }
 
-/**
- * Find residue loci by auth_seq_id
- */
-function findResidueLociByAuthSeqId(
-  structure: Structure,
-  chainId: string,
-  authSeqId: number,
-  insCode: string
-): StructureElement.Loci | null {
-  for (const unit of structure.units) {
-    if (!Unit.isAtomic(unit)) continue;
-
-    const elements: StructureElement.UnitIndex[] = [];
-
-    for (let i = 0; i < unit.elements.length; i++) {
-      const loc = StructureElement.Location.create(
-        structure,
-        unit,
-        unit.elements[i]
-      );
-      const elemChainId = StructureProperties.chain.auth_asym_id(loc);
-      const elemAuthSeqId = StructureProperties.residue.auth_seq_id(loc);
-      const elemInsCode =
-        StructureProperties.residue.pdbx_PDB_ins_code(loc) || "";
-
-      if (
-        elemChainId === chainId &&
-        elemAuthSeqId === authSeqId &&
-        elemInsCode === insCode
-      ) {
-        elements.push(i as StructureElement.UnitIndex);
-      }
-    }
-
-    if (elements.length > 0) {
-      return StructureElement.Loci(structure, [
-        { unit, indices: OrderedSet.ofSortedArray(elements) }
-      ]);
-    }
-  }
-
-  return null;
-}
+// Residue lookup lives in lib/residueIndex, which indexes the structure once
+// instead of rescanning every atom per click.

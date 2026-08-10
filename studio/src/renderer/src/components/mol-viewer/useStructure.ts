@@ -45,6 +45,39 @@ async function waitForRepresentations(
   return false;
 }
 
+const WATER_RESIDUES = ["HOH", "WAT", "SOL", "H2O"];
+
+// Matches a whitespace-delimited token equal to one of the water residue names,
+// i.e. the same predicate as splitting the line and comparing each token
+// upper-cased — but without allocating an array per line.
+const WATER_TOKEN_RE = /(?:^|\s)(?:HOH|WAT|SOL|H2O)(?=\s|$)/i;
+
+/**
+ * Walk `data` line by line and keep the lines `keep` accepts.
+ *
+ * Equivalent to `data.split("\n").filter(keep).join("\n")`, including how a
+ * trailing newline round-trips, but never materialises the full line array —
+ * that array alone is a large allocation on a 100 MB mmCIF.
+ */
+function filterLines(data: string, keep: (line: string) => boolean): string {
+  const kept: string[] = [];
+  let start = 0;
+
+  for (;;) {
+    let end = data.indexOf("\n", start);
+    const atEnd = end === -1;
+    if (atEnd) end = data.length;
+
+    const line = data.slice(start, end);
+    if (keep(line)) kept.push(line);
+
+    if (atEnd) break;
+    start = end + 1;
+  }
+
+  return kept.join("\n");
+}
+
 /**
  * Filter out water residues (HOH, WAT, SOL, H2O) from structure data
  */
@@ -54,52 +87,34 @@ function filterWaterResidues(
 ): string {
   if (format === "pdb") {
     // Filter PDB format: remove ATOM/HETATM lines where residue name is water
-    const waterResidues = ["HOH", "WAT", "SOL", "H2O"];
-    const lines = dataString.split("\n");
-    const filteredLines = lines.filter(line => {
+    return filterLines(dataString, line => {
       if (line.startsWith("ATOM") || line.startsWith("HETATM")) {
         // PDB format: columns 17-20 contain residue name
         const resName = line.substring(17, 20).trim();
-        return !waterResidues.includes(resName);
+        return !WATER_RESIDUES.includes(resName);
       }
       return true;
     });
-    return filteredLines.join("\n");
   } else if (format === "mmcif") {
     // Filter mmCIF format: remove lines for water residues
-    const lines = dataString.split("\n");
     let inAtomSite = false;
-    const waterResidues = ["HOH", "WAT", "SOL", "H2O"];
-    const filteredLines: string[] = [];
 
-    for (const line of lines) {
+    return filterLines(dataString, line => {
       if (line.startsWith("loop_")) {
         inAtomSite = false;
-        filteredLines.push(line);
-      } else if (line.startsWith("_atom_site")) {
-        inAtomSite = true;
-        filteredLines.push(line);
-      } else if (inAtomSite && !line.startsWith("_") && line.trim()) {
-        // Check if this is a water residue line
-        const parts = line.split(/\s+/);
-        // In mmCIF, residue name is typically in the format entries
-        // We'll be conservative and keep most lines, filtering only obvious water entries
-        let isWater = false;
-        for (const part of parts) {
-          if (waterResidues.includes(part.toUpperCase())) {
-            isWater = true;
-            break;
-          }
-        }
-        if (!isWater) {
-          filteredLines.push(line);
-        }
-      } else {
-        filteredLines.push(line);
+        return true;
       }
-    }
-
-    return filteredLines.join("\n");
+      if (line.startsWith("_atom_site")) {
+        inAtomSite = true;
+        return true;
+      }
+      if (inAtomSite && !line.startsWith("_") && line.trim()) {
+        // In mmCIF the residue name column isn't fixed, so this stays
+        // conservative and drops a row only when some token is a water name.
+        return !WATER_TOKEN_RE.test(line);
+      }
+      return true;
+    });
   }
 
   // For bcif or unknown, return as-is
@@ -252,7 +267,10 @@ export function useStructure(
         setInfo(structInfo);
 
         // 이벤트 발행
-        bus.emit("structure:loaded", { format: structInfo.format, chainCount: structInfo.chainIds.length });
+        bus.emit("structure:loaded", {
+          format: structInfo.format,
+          chainCount: structInfo.chainIds.length
+        });
 
         logger.log(`✅ Structure loaded and rendered (${format})`);
       } catch (err) {

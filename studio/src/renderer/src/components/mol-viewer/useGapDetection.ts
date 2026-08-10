@@ -17,6 +17,7 @@ import {
   Unit
 } from "molstar/lib/mol-model/structure";
 import { StructureProperties } from "molstar/lib/mol-model/structure/structure/properties";
+import { logger } from "../../lib/logger";
 
 // Standard amino acid backbone atoms
 const BACKBONE_ATOMS = new Set(["N", "CA", "C", "O"]);
@@ -513,7 +514,7 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
     polymerType: "protein" | "dna" | "rna" | "unknown";
   }
 > {
-  console.log("[Sequence Panel GT] >>> getSequencePanelData called <<<");
+  logger.log("[Sequence Panel GT] >>> getSequencePanelData called <<<");
 
   const chainData = new Map<
     string,
@@ -527,31 +528,28 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
 
   try {
     const hierarchy = plugin.managers.structure.hierarchy;
-    console.log(
-      "[Sequence Panel GT] hierarchy:",
-      hierarchy ? "exists" : "null"
-    );
+    logger.log("[Sequence Panel GT] hierarchy:", hierarchy ? "exists" : "null");
 
     const structures = hierarchy.current.structures;
 
-    console.log(
+    logger.log(
       `[Sequence Panel GT] Starting - found ${structures.length} structure(s)`
     );
 
     for (const structRef of structures) {
       const structure = structRef.cell.obj?.data as Structure | undefined;
       if (!structure) {
-        console.log("[Sequence Panel GT] Structure data is null, skipping");
+        logger.log("[Sequence Panel GT] Structure data is null, skipping");
         continue;
       }
 
       const model = structure.models[0];
       if (!model?.sequence) {
-        console.log("[Sequence Panel GT] No model.sequence, skipping");
+        logger.log("[Sequence Panel GT] No model.sequence, skipping");
         continue;
       }
 
-      console.log(
+      logger.log(
         `[Sequence Panel GT] Processing structure with ${structure.units.length} units`
       );
 
@@ -573,7 +571,7 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
 
         if (!chainToEntityKeyMap.has(chainId)) {
           chainToEntityKeyMap.set(chainId, entityKey);
-          console.log(
+          logger.log(
             `[Sequence Panel GT] Chain "${chainId}" → EntityKey=${entityKey}, EntityId="${entityId}" (direct mapping)`
           );
         }
@@ -590,10 +588,10 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
       >();
 
       const entityKeys = Object.keys(model.sequence.byEntityKey);
-      console.log(
+      logger.log(
         `[Sequence Panel GT] Available entity keys in model.sequence.byEntityKey: [${entityKeys.join(", ")}]`
       );
-      console.log(
+      logger.log(
         `[Sequence Panel GT] Chain → EntityKey map: ${JSON.stringify(Object.fromEntries(chainToEntityKeyMap))}`
       );
 
@@ -605,15 +603,13 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const seq = (entitySeq as any).sequence;
         if (!seq) {
-          console.log(
-            `[Sequence Panel GT] EntityKey ${entityKey}: no sequence`
-          );
+          logger.log(`[Sequence Panel GT] EntityKey ${entityKey}: no sequence`);
           continue;
         }
 
         const compIdArray = seq.compId?.toArray?.() || [];
         if (compIdArray.length === 0) {
-          console.log(
+          logger.log(
             `[Sequence Panel GT] EntityKey ${entityKey}: no compId data`
           );
           continue;
@@ -665,7 +661,7 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
           }
         }
 
-        console.log(
+        logger.log(
           `[Sequence Panel GT] EntityKey ${entityKey}: compId analysis -> dna=${dnaCount}, rna=${rnaCount}, protein=${proteinCount} => polymerType="${polymerType}"`
         );
 
@@ -675,13 +671,13 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
           polymerType
         });
 
-        console.log(
+        logger.log(
           `[Sequence Panel GT] EntityKey ${entityKey}: ${polymerType}, ${fullSequence.length} residues, seq=${fullSequence.substring(0, 20)}${fullSequence.length > 20 ? "..." : ""}`
         );
       }
 
       // 3. Chain → Entity 매칭 (직접 매핑 사용, entityKey 기반)
-      console.log(
+      logger.log(
         `[Sequence Panel GT] Mapping ${chainToEntityKeyMap.size} chains to entities...`
       );
 
@@ -693,18 +689,18 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
             entityId: String(entityKey), // entityKey를 문자열로 변환하여 저장
             ...eData
           });
-          console.log(
+          logger.log(
             `[Sequence Panel GT] ✓ Chain "${chainId}" → EntityKey ${entityKey}: ${eData.polymerType}, ${eData.sequence.length} residues, sequence: ${eData.sequence.substring(0, 20)}${eData.sequence.length > 20 ? "..." : ""}`
           );
         } else {
-          console.warn(
+          logger.warn(
             `[Sequence Panel GT] ✗ Chain "${chainId}": EntityKey ${entityKey} data not found!`
           );
         }
       }
     }
   } catch (e) {
-    console.error("[Sequence Panel GT] Error extracting data:", e);
+    logger.error("[Sequence Panel GT] Error extracting data:", e);
   }
 
   return chainData;
@@ -715,12 +711,12 @@ export function getSequencePanelData(plugin: PluginUIContext): Map<
  */
 function logSequencePanelState(plugin: PluginUIContext): void {
   try {
-    console.log("[Sequence Panel] ========== PLUGIN STATE LOGGING ==========");
+    logger.log("[Sequence Panel] ========== PLUGIN STATE LOGGING ==========");
 
     // 1. Plugin managers에서 structure hierarchy 확인
     const hierarchy = plugin.managers.structure.hierarchy;
     const structures = hierarchy.current.structures;
-    console.log("[Sequence Panel] Structures in hierarchy:", structures.length);
+    logger.log("[Sequence Panel] Structures in hierarchy:", structures.length);
 
     // 2. 각 구조에서 model 정보 추출
     for (let i = 0; i < structures.length; i++) {
@@ -728,15 +724,15 @@ function logSequencePanelState(plugin: PluginUIContext): void {
       const structure = structRef.cell.obj?.data as Structure | undefined;
       if (!structure) continue;
 
-      console.log(`[Sequence Panel] ---- Structure ${i} ----`);
-      console.log(`[Sequence Panel] Units:`, structure.units.length);
-      console.log(`[Sequence Panel] Models:`, structure.models.length);
+      logger.log(`[Sequence Panel] ---- Structure ${i} ----`);
+      logger.log(`[Sequence Panel] Units:`, structure.units.length);
+      logger.log(`[Sequence Panel] Models:`, structure.models.length);
 
       // Model의 sequence 정보 확인
       const model = structure.models[0];
       if (model?.sequence) {
-        console.log(`[Sequence Panel] Model sequence available`);
-        console.log(
+        logger.log(`[Sequence Panel] Model sequence available`);
+        logger.log(
           `[Sequence Panel] Entity keys in model.sequence.byEntityKey:`,
           Object.keys(model.sequence.byEntityKey)
         );
@@ -751,7 +747,7 @@ function logSequencePanelState(plugin: PluginUIContext): void {
             const compIdArray = seq.compId?.toArray?.() || [];
             // 전체 시퀀스를 1-letter code로 변환
             const fullSequence = compIdArray.map(threeToOne).join("");
-            console.log(`[Sequence Panel]   Entity "${entityId}":`, {
+            logger.log(`[Sequence Panel]   Entity "${entityId}":`, {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               label: (entitySeq as any).label,
               length: compIdArray.length,
@@ -759,18 +755,18 @@ function logSequencePanelState(plugin: PluginUIContext): void {
               seqObjKeys: Object.keys(seq).slice(0, 10)
             });
           } else {
-            console.log(
+            logger.log(
               `[Sequence Panel]   Entity "${entityId}": no sequence object`
             );
           }
         }
       } else {
-        console.log(`[Sequence Panel] No model.sequence`);
+        logger.log(`[Sequence Panel] No model.sequence`);
       }
 
       // 각 unit에서 chain 정보 추출
       const atomicUnits = structure.units.filter(u => Unit.isAtomic(u));
-      console.log(`[Sequence Panel] Atomic units: ${atomicUnits.length}`);
+      logger.log(`[Sequence Panel] Atomic units: ${atomicUnits.length}`);
 
       // 각 chain의 정보 수집
       const chainInfo = new Map<
@@ -806,9 +802,9 @@ function logSequencePanelState(plugin: PluginUIContext): void {
         }
       }
 
-      console.log(`[Sequence Panel] Chains in structure:`);
+      logger.log(`[Sequence Panel] Chains in structure:`);
       for (const [chainId, info] of chainInfo.entries()) {
-        console.log(
+        logger.log(
           `[Sequence Panel]   Chain "${chainId}" (Entity "${info.entityId}"): ~${info.residueCount} residues`
         );
       }
@@ -816,7 +812,7 @@ function logSequencePanelState(plugin: PluginUIContext): void {
       // 첫 atomic unit에서 샘플 residue 정보
       if (atomicUnits.length > 0) {
         const unit = atomicUnits[0];
-        console.log(`[Sequence Panel] Sample residues from first unit:`);
+        logger.log(`[Sequence Panel] Sample residues from first unit:`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sampleResidues = new Map<number, any>();
@@ -851,16 +847,16 @@ function logSequencePanelState(plugin: PluginUIContext): void {
 
         const sample = Array.from(sampleResidues.values()).slice(0, 10);
         for (const res of sample) {
-          console.log(
+          logger.log(
             `[Sequence Panel]   label_seq_id=${res.labelSeqId}, auth_seq_id=${res.authSeqId}${res.insCode}, ${res.compId}, atoms=${Array.from(res.atoms).join(",")}`
           );
         }
       }
     }
 
-    console.log("[Sequence Panel] ========== END LOGGING ==========\n");
+    logger.log("[Sequence Panel] ========== END LOGGING ==========\n");
   } catch (e) {
-    console.error("[Sequence Panel] Error logging state:", e);
+    logger.error("[Sequence Panel] Error logging state:", e);
   }
 }
 
@@ -883,20 +879,20 @@ export function useMissingRegionDetection(
 
       try {
         // 0. Plugin sequence panel state logging 먼저 실행
-        console.log(
+        logger.log(
           "[Missing Region Detection] ========== SEQUENCE PANEL STATE INFO =========="
         );
         logSequencePanelState(plugin);
-        console.log(
+        logger.log(
           "[Missing Region Detection] ========== START GAP DETECTION ==========\n"
         );
 
         // 0-1. Sequence Panel Ground Truth 데이터 추출
-        console.log(
+        logger.log(
           "[Missing Region Detection] Extracting Sequence Panel GT..."
         );
         const sequencePanelGT = getSequencePanelData(plugin);
-        console.log(
+        logger.log(
           `[Missing Region Detection] ✓ Extracted ${sequencePanelGT.size} chains from Sequence Panel\n`
         );
 
@@ -909,7 +905,7 @@ export function useMissingRegionDetection(
           return;
         }
 
-        console.log("[Missing Region Detection] Starting analysis...");
+        logger.log("[Missing Region Detection] Starting analysis...");
 
         const detectedRegions: MissingRegionInfo[] = [];
 
@@ -922,6 +918,10 @@ export function useMissingRegionDetection(
 
           // 체인별로 residue 정보 수집
           const chainResidues = new Map<string, ResidueData[]>();
+          // Side index into chainResidues so the per-atom lookup below is O(1).
+          // Scanning the residue array per atom made this O(atoms x residues),
+          // which dominated load time on large chains.
+          const residueByKey = new Map<string, ResidueData>();
 
           // Sequence Panel GT를 사용하여 chain별 SEQRES 및 매핑 생성
           const chainSequenceData = new Map<
@@ -955,7 +955,7 @@ export function useMissingRegionDetection(
 
               const gtData = sequencePanelGT.get(chainId);
               if (gtData) {
-                console.log(
+                logger.log(
                   `[Missing Region Detection] ✓ Chain ${chainId} GT: ${gtData.polymerType}, ${gtData.sequence.length} residues`
                 );
 
@@ -991,7 +991,7 @@ export function useMissingRegionDetection(
                   mapping
                 });
               } else {
-                console.warn(
+                logger.warn(
                   `[Missing Region Detection] ✗ No GT data for chain ${chainId}`
                 );
               }
@@ -1029,12 +1029,8 @@ export function useMissingRegionDetection(
 
               const residues = chainResidues.get(chainId)!;
               // Use both authSeqId and insCode for unique identification
-              let residueData = residues.find(
-                r =>
-                  r.chainId === chainId &&
-                  r.authSeqId === authSeqId &&
-                  r.insCode === insCode
-              );
+              const residueKey = `${chainId}|${authSeqId}|${insCode}`;
+              let residueData = residueByKey.get(residueKey);
 
               if (!residueData) {
                 // 초기 타입은 일단 "unknown"으로 설정
@@ -1049,6 +1045,7 @@ export function useMissingRegionDetection(
                   atomNames: new Set<string>()
                 };
                 residues.push(residueData);
+                residueByKey.set(residueKey, residueData);
               }
 
               // atom 추가
@@ -1070,7 +1067,7 @@ export function useMissingRegionDetection(
             // 1️⃣ 체인의 polymer type은 GT 데이터에서 가져옴
             const chainPolymerType = seqData?.polymerType ?? "unknown";
 
-            console.log(
+            logger.log(
               `[Missing Region Detection] Chain ${chainId} polymer type: ${chainPolymerType} (from GT)`
             );
 
@@ -1095,7 +1092,7 @@ export function useMissingRegionDetection(
               .map(([type, count]) => `${type}: ${count}`)
               .join(", ");
 
-            console.log(
+            logger.log(
               `[Missing Region Detection] Chain ${chainId}: ${residues.length} residues (${typeInfo}), SEQRES length: ${seqData?.sequence.length || "N/A"}`
             );
 
@@ -1130,7 +1127,7 @@ export function useMissingRegionDetection(
                   sequenceKnown: true
                 };
                 detectedRegions.push(regionInfo);
-                console.log(
+                logger.log(
                   `  ✗ [N-terminal] Missing ${nTermGap} residues (label_seq_id 1-${firstResId - 1}) before ${residues[0].resName}${residues[0].authSeqId}${residues[0].insCode} [SEQRES: ${nTermSequence}]`
                 );
               }
@@ -1166,7 +1163,7 @@ export function useMissingRegionDetection(
                     sequenceKnown: true
                   };
                   detectedRegions.push(regionInfo);
-                  console.log(
+                  logger.log(
                     `  ✗ [C-terminal] Missing ${cTermGap} residues (label_seq_id ${maxMappedResId + 1}-${seqresLength}) after label_seq_id=${maxMappedResId} (auth_seq_id=${lastMappedInfo.authSeqId}) [SEQRES: ${cTermSequence}]`
                   );
                 }
@@ -1205,12 +1202,12 @@ export function useMissingRegionDetection(
                       sequenceKnown = true;
                     } else {
                       // Index out of range - fallback으로 진행
-                      console.debug(
+                      logger.debug(
                         `    Index out of range: startIdx=${startIdx}, endIdx=${endIdx}, length=${seqData.sequence.length}`
                       );
                     }
                   } catch (e) {
-                    console.debug(`    Failed to extract sequence:`, e);
+                    logger.debug(`    Failed to extract sequence:`, e);
                   }
                 }
 
@@ -1235,10 +1232,10 @@ export function useMissingRegionDetection(
                       );
                       sequenceKnown = true;
                     } catch (e) {
-                      console.debug(`    Failed to extract from SEQRES:`, e);
+                      logger.debug(`    Failed to extract from SEQRES:`, e);
                     }
                   } else {
-                    console.log(
+                    logger.log(
                       `    ✗ Fallback out of range: start-1=${gapStart - 1}, end-1=${gapEnd - 1}, length=${seqData.sequence.length}`
                     );
                   }
@@ -1259,7 +1256,7 @@ export function useMissingRegionDetection(
                   sequenceKnown
                 };
                 detectedRegions.push(regionInfo);
-                console.log(
+                logger.log(
                   `  ✗ [${curr.resType}→${next.resType}] Gap: between ${curr.resName}${currDisplay} and ${next.resName}${nextDisplay} (${gap} residues missing)${sequenceKnown ? " [SEQRES]" : " [no SEQRES]"}`
                 );
               }
@@ -1336,7 +1333,7 @@ export function useMissingRegionDetection(
                     sequenceKnown: true
                   };
                   detectedRegions.push(regionInfo);
-                  console.log(
+                  logger.log(
                     `  ⚠ [${residueCategory}] Partial: ${resDisplay} missing ${missingAtoms.length} base/sidechain atoms: ${missingAtoms.join(", ")}`
                   );
                 }
@@ -1361,7 +1358,7 @@ export function useMissingRegionDetection(
                     sequenceKnown: true
                   };
                   detectedRegions.push(regionInfo);
-                  console.log(
+                  logger.log(
                     `  ⚠⚠ [${residueCategory}] Incomplete backbone: ${resDisplay} missing backbone atoms: ${missingBackboneAtoms.join(", ")} and base/sidechain atoms: ${missingAtoms.filter(a => !missingBackboneAtoms.includes(a)).join(", ")}`
                   );
                 }
@@ -1413,7 +1410,7 @@ export function useMissingRegionDetection(
           allSegmentIds.push(segment.segmentId); // 모든 segment ID 수집
         }
 
-        console.log(
+        logger.log(
           `[Missing Region Detection] Found ${detectedRegions.length} regions, ${repairSegments.length} segments (including ${repairSegments.length - segmentsByChain.size} chains without missing regions)`
         );
 
@@ -1426,7 +1423,7 @@ export function useMissingRegionDetection(
         // 이벤트 버스로 다른 컴포넌트에 알림
         bus.emit("repair:missing-regions-ready", repairSegments);
       } catch (error) {
-        console.error("[Missing Region Detection] Error:", error);
+        logger.error("[Missing Region Detection] Error:", error);
         setError(
           error instanceof Error ? error.message : "Unknown error occurred"
         );
@@ -1446,7 +1443,7 @@ export function useMissingRegionDetection(
     const structures = plugin.managers.structure.hierarchy.current.structures;
     if (structures && structures.length > 0) {
       // Structure already exists, run detection immediately
-      console.log(
+      logger.log(
         "[Missing Region Detection] Structure already loaded, running analysis..."
       );
       void detectMissingRegions();

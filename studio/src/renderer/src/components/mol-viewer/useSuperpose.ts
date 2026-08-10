@@ -35,6 +35,7 @@ import { Script } from "molstar/lib/mol-script/script";
 import { Color } from "molstar/lib/mol-util/color";
 import { clearStructureTransparency } from "molstar/lib/mol-plugin-state/helpers/structure-transparency";
 import { createChainColorLayers } from "./useChainColors";
+import { logger } from "../../lib/logger";
 
 /**
  * Hook to handle loading inpainting results and superposing them with the original structure
@@ -55,13 +56,13 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
   const loadAndSuperpose = useCallback(
     async (filePath: string, fileContent: string, superpose: boolean) => {
       if (!plugin) {
-        console.error("Plugin not initialized");
+        logger.error("Plugin not initialized");
         return;
       }
 
       try {
-        console.log("🔬 Loading inpainting result:", filePath);
-        console.log("Superpose:", superpose);
+        logger.log("🔬 Loading inpainting result:", filePath);
+        logger.log("Superpose:", superpose);
 
         // Extract run ID from file path (e.g., run_001, run_002)
         const pathParts = pathSplit(filePath);
@@ -81,7 +82,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             /_entry\.id\s+(MODEL|model|Model|\w+)/gi,
             `_entry.id    ${runId}`
           );
-          console.log(
+          logger.log(
             `✓ Modified CIF _entry.id to: ${runId} for sequence panel`
           );
         }
@@ -101,7 +102,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           label: uniqueLabel
         });
 
-        console.log("✓ Result data node created");
+        logger.log("✓ Result data node created");
 
         const resultTrajectory =
           await plugin.builders.structure.parseTrajectory(
@@ -109,7 +110,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             "mmcif"
           );
 
-        console.log("✓ Result trajectory parsed");
+        logger.log("✓ Result trajectory parsed");
 
         // Use Molstar's standard hierarchy preset - this creates proper representations
         // without duplicates
@@ -122,12 +123,12 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           }
         );
 
-        console.log("✓ Structure loaded with standard preset");
+        logger.log("✓ Structure loaded with standard preset");
 
         // Get the structure from the preset result
         const resultStructure = preset?.structure;
         if (!resultStructure) {
-          console.warn("No structure created from preset");
+          logger.warn("No structure created from preset");
           return;
         }
 
@@ -149,7 +150,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
           // Make sure we're not comparing the same structure
           if (originalStructureRef !== resultHierarchyRef) {
             originalStructure = originalStructureRef.cell.obj.data;
-            console.log("✓ Original structure found for superposition");
+            logger.log("✓ Original structure found for superposition");
           }
         }
 
@@ -160,7 +161,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         )?.obj?.data;
 
         if (superpose && originalStructure && resultStructureData) {
-          console.log("🔄 Performing superposition using Molstar API...");
+          logger.log("🔄 Performing superposition using Molstar API...");
 
           try {
             // Create loci for both structures (protein CA atoms only)
@@ -172,7 +173,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
               const originalAtomCount = countLociAtoms(originalLoci);
               const resultAtomCount = countLociAtoms(resultLoci);
 
-              console.log(
+              logger.log(
                 `[Superposition] Original: ${originalAtomCount} atoms, Result: ${resultAtomCount} atoms`
               );
 
@@ -186,13 +187,13 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
                 originalAtomCount > 0
               ) {
                 // Same number of atoms - use direct superposition
-                console.log(
+                logger.log(
                   "[Superposition] Using direct superposition (same atom count)"
                 );
                 transforms = superposeStructures([originalLoci, resultLoci]);
               } else if (originalAtomCount > 0 && resultAtomCount > 0) {
                 // Different number of atoms - use sequence alignment
-                console.log(
+                logger.log(
                   "[Superposition] Using sequence alignment (different atom counts)"
                 );
                 transforms = alignAndSuperpose([originalLoci, resultLoci]);
@@ -200,7 +201,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
               if (transforms.length > 0) {
                 const { bTransform, rmsd } = transforms[0];
-                console.log(
+                logger.log(
                   `✓ Superposition calculated: RMSD = ${rmsd.toFixed(2)} Å`
                 );
 
@@ -211,23 +212,23 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
                   bTransform
                 );
 
-                console.log("✓ Transformation applied to result structure");
+                logger.log("✓ Transformation applied to result structure");
               } else {
-                console.warn(
+                logger.warn(
                   "⚠ Superposition returned no transforms - structures may not align"
                 );
               }
             } else {
-              console.warn("⚠ Could not create loci for superposition");
-              if (!originalLoci) console.warn("  - Original loci is null");
-              if (!resultLoci) console.warn("  - Result loci is null");
+              logger.warn("⚠ Could not create loci for superposition");
+              if (!originalLoci) logger.warn("  - Original loci is null");
+              if (!resultLoci) logger.warn("  - Result loci is null");
             }
           } catch (superposeErr) {
-            console.error("Failed to perform superposition:", superposeErr);
+            logger.error("Failed to perform superposition:", superposeErr);
             // Continue loading without superposition
           }
         } else {
-          console.warn(
+          logger.warn(
             `[Superposition] SKIPPED — superpose=${superpose}, originalStructureFound=${!!originalStructure}, resultData=${!!resultStructureData}, structuresInScene=${allStructures.length}. ` +
               `Result stays in its own coordinate frame (may sit far from the base → empty-middle framing).`
           );
@@ -244,17 +245,17 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
               label: uniqueLabel
             });
             await plugin.runTask(plugin.state.data.updateTree(update));
-            console.log(
+            logger.log(
               `✓ Trajectory label updated to: ${uniqueLabel} for sequence panel`
             );
           } catch (err) {
-            console.warn("Failed to update trajectory label:", err);
+            logger.warn("Failed to update trajectory label:", err);
           }
         }
 
         // Store hierarchy ref for visibility control
         loadedStructures.set(filePath, resultHierarchyRef || null);
-        console.log(
+        logger.log(
           `✓ Structure ref stored: ${filePath} (label: ${uniqueLabel})`
         );
 
@@ -264,7 +265,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
           // Apply combined colors (chain colors as base + inpainting metadata overlays)
           // This ensures chain colors are visible except where inpainting regions override them
-          console.log(
+          logger.log(
             `[Superpose] Applying combined colors to ${uniqueLabel}...`
           );
           await applyInpaintingMetadataColors(
@@ -274,7 +275,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             resultHierarchyRef,
             mutationsRef.current
           );
-          console.log(`[Superpose] ✓ Combined colors applied`);
+          logger.log(`[Superpose] ✓ Combined colors applied`);
         }
 
         // Clear any lingering erase-ghosting transparency so the result (and the
@@ -292,7 +293,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
             }
           }
         } catch (transpErr) {
-          console.warn(
+          logger.warn(
             "Failed to clear erase transparency on result load:",
             transpErr
           );
@@ -316,23 +317,23 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
                 Structure.toStructureElementLoci(data)
               );
               const sph = data.boundary?.sphere;
-              console.log(
+              logger.log(
                 `[Camera] focused on result "${uniqueLabel}" (radius=${sph ? sph.radius.toFixed(0) : "?"}Å, center=${sph ? sph.center.map((v: number) => v.toFixed(0)).join(",") : "?"})`
               );
             } else {
-              console.warn("[Camera] no result structure to focus");
+              logger.warn("[Camera] no result structure to focus");
             }
           } catch (e) {
-            console.warn("[Camera] focus on result failed:", e);
+            logger.warn("[Camera] focus on result failed:", e);
           }
         });
 
         // Emit event that structure is loaded (for tracking in UI)
         bus.emit("inpainting:structure-loaded", { filePath });
 
-        console.log("✅ Result loaded successfully");
+        logger.log("✅ Result loaded successfully");
       } catch (err) {
-        console.error("Failed to load result:", err);
+        logger.error("Failed to load result:", err);
         throw err;
       }
     },
@@ -342,7 +343,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
   const toggleStructureVisibility = useCallback(
     async (filePath: string, visible: boolean) => {
       if (!plugin) {
-        console.error("[Visibility] Plugin not initialized");
+        logger.error("[Visibility] Plugin not initialized");
         return;
       }
 
@@ -356,7 +357,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         hierarchyRef &&
         !structures.some(s => s.cell === hierarchyRef!.cell)
       ) {
-        console.log(
+        logger.log(
           `[Visibility] Cached ref stale for: ${filePath}, re-searching`
         );
         loadedStructures.delete(filePath);
@@ -369,7 +370,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         const fileNameWithoutExt = fileName.replace(/\.[^.]*$/, "");
         const isBaseStructure = pathIncludes(filePath, "/structures/original/");
 
-        console.log(
+        logger.log(
           `[Visibility] Finding structure for: ${fileName} (${structures.length} structures, isBase: ${isBaseStructure})`
         );
 
@@ -435,12 +436,12 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
         if (hierarchyRef) {
           loadedStructures.set(filePath, hierarchyRef);
-          console.log(
+          logger.log(
             `[Visibility] ✓ Found structure: ${filePath} -> ${hierarchyRef.cell?.obj?.label}`
           );
         } else {
-          console.warn(`[Visibility] ✗ Structure not found: ${filePath}`);
-          console.log(
+          logger.warn(`[Visibility] ✗ Structure not found: ${filePath}`);
+          logger.log(
             `[Visibility] Available:`,
             structures.map(s => ({
               label: s.cell?.obj?.label,
@@ -453,16 +454,16 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
 
       try {
         const action = visible ? "show" : "hide";
-        console.log(`[Visibility] ${action}: ${filePath}`);
+        logger.log(`[Visibility] ${action}: ${filePath}`);
 
         plugin.managers.structure.hierarchy.toggleVisibility(
           [hierarchyRef],
           action
         );
 
-        console.log(`[Visibility] ✓ ${action} successful`);
+        logger.log(`[Visibility] ✓ ${action} successful`);
       } catch (err) {
-        console.error("[Visibility] Toggle failed:", err);
+        logger.error("[Visibility] Toggle failed:", err);
       }
     },
     [plugin]
@@ -473,7 +474,7 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
     async (_filePath: string, fileContent: string, label: string) => {
       if (!plugin) return;
       try {
-        console.log("Loading simulation system:", label);
+        logger.log("Loading simulation system:", label);
 
         const dataNode = await plugin.builders.data.rawData({
           data: fileContent,
@@ -495,9 +496,9 @@ export function useSuperpose(plugin: PluginUIContext | null): void {
         );
 
         plugin.canvas3d?.requestCameraReset();
-        console.log("Simulation system loaded:", label);
+        logger.log("Simulation system loaded:", label);
       } catch (err) {
-        console.error("Failed to load simulation system:", err);
+        logger.error("Failed to load simulation system:", err);
       }
     },
     [plugin]
@@ -615,13 +616,13 @@ function createStructureLoci(
       const atomicUnit = unit as Unit.Atomic;
       const caIndices: StructureElement.UnitIndex[] = [];
 
+      // One Location per unit, mutated in place — allocating one per atom made
+      // this scan dominate superposition setup on large structures.
+      const loc = StructureElement.Location.create(structure, atomicUnit);
+
       // Iterate through all atoms in the unit
       for (let i = 0; i < atomicUnit.elements.length; i++) {
-        const loc = StructureElement.Location.create(
-          structure,
-          atomicUnit,
-          atomicUnit.elements[i]
-        );
+        loc.element = atomicUnit.elements[i];
 
         const atomName = StructureProperties.atom.label_atom_id(loc);
         const compId = StructureProperties.atom.label_comp_id(loc);
@@ -647,7 +648,7 @@ function createStructureLoci(
     const chainInfo = Array.from(chainCounts.entries())
       .map(([chain, count]) => `${chain}:${count}`)
       .join(", ");
-    console.log(
+    logger.log(
       `[Superposition] Found ${totalCaAtoms} CA atoms from protein chains: ${chainInfo}`
     );
 
@@ -656,7 +657,7 @@ function createStructureLoci(
     }
 
     // Fallback: try to use trace atoms if no CA found
-    console.warn(
+    logger.warn(
       "[Superposition] No protein CA atoms found, trying trace atoms"
     );
     const { query: traceQuery } = StructureSelectionQueries.trace;
@@ -671,7 +672,7 @@ function createStructureLoci(
 
     return null;
   } catch (err) {
-    console.error("Failed to create structure loci:", err);
+    logger.error("Failed to create structure loci:", err);
     return null;
   }
 }
@@ -727,7 +728,7 @@ async function applyStructureTransform(
 
     await plugin.runTask(plugin.state.data.updateTree(update));
   } catch (err) {
-    console.error("Failed to apply structure transform:", err);
+    logger.error("Failed to apply structure transform:", err);
     throw err;
   }
 }
@@ -779,7 +780,7 @@ async function waitForRepresentations(
     foundRepresentations = checkRepresentations(parentRef);
 
     if (foundRepresentations) {
-      console.log(
+      logger.log(
         `[Superpose] ✓ Representations ready after ${attempt} attempt(s)`
       );
       return true;
@@ -789,7 +790,7 @@ async function waitForRepresentations(
     await new Promise(resolve => requestAnimationFrame(resolve));
   }
 
-  console.warn(
+  logger.warn(
     `[Superpose] ⚠️ Timeout waiting for representations after ${maxAttempts} attempts`
   );
   return false;
@@ -824,7 +825,7 @@ async function applyChainColorsOnly(
       }
     }
     if (!parentRef) {
-      console.warn("[Chain Colors Fallback] Could not get parent ref");
+      logger.warn("[Chain Colors Fallback] Could not get parent ref");
       return;
     }
 
@@ -842,12 +843,12 @@ async function applyChainColorsOnly(
     ];
     if (layers.length > 0) {
       await applyOverpaintToRepresentations(plugin, parentRef, layers);
-      console.log(
+      logger.log(
         `[Chain Colors Fallback] ✓ Applied ${layers.length} layer(s) (chain colors + edits) with palette index ${resultIndex}`
       );
     }
   } catch (err) {
-    console.error("[Chain Colors Fallback] Failed to apply colors:", err);
+    logger.error("[Chain Colors Fallback] Failed to apply colors:", err);
   }
 }
 
@@ -864,14 +865,14 @@ async function applyInpaintingMetadataColors(
   mutations: StagedMutation[] = []
 ): Promise<void> {
   if (!structure) {
-    console.warn("[Inpainting Metadata] No structure available for coloring");
+    logger.warn("[Inpainting Metadata] No structure available for coloring");
     return;
   }
 
   // Extract result index from file path (run_001 -> 0, run_002 -> 1, etc.)
   const runMatch = filePath.match(/run_(\d+)/);
   const resultIndex = runMatch ? parseInt(runMatch[1], 10) - 1 : 0;
-  console.log(
+  logger.log(
     `[Inpainting Metadata] Result index: ${resultIndex} (from path: ${filePath})`
   );
 
@@ -935,10 +936,10 @@ async function applyInpaintingMetadataColors(
     // Deduplicate
     const uniqueMetadataPaths = Array.from(new Set(possibleMetadataPaths));
 
-    console.log(
+    logger.log(
       `[Inpainting Metadata] Searching for metadata file. CIF dir: ${cifDir}, chainId: ${chainId}, dirPrefix: ${chainPrefixFromDir || "none"}, filePrefix: ${chainPrefixFromFile || "none"}`
     );
-    console.log(`[Inpainting Metadata] Trying paths:`, uniqueMetadataPaths);
+    logger.log(`[Inpainting Metadata] Trying paths:`, uniqueMetadataPaths);
 
     let metadataContent: string | null = null;
     for (const metadataPath of uniqueMetadataPaths) {
@@ -946,17 +947,17 @@ async function applyInpaintingMetadataColors(
         const result = await window.api.project.readFileByPath(metadataPath);
         if (result.success && result.content) {
           metadataContent = result.content;
-          console.log(
+          logger.log(
             `[Inpainting Metadata] ✓ Found metadata at: ${metadataPath}`
           );
           break;
         } else {
-          console.log(
+          logger.log(
             `[Inpainting Metadata] ✗ Not found: ${metadataPath} (success: ${result.success})`
           );
         }
       } catch (err) {
-        console.log(
+        logger.log(
           `[Inpainting Metadata] ✗ Error reading: ${metadataPath}`,
           err
         );
@@ -964,7 +965,7 @@ async function applyInpaintingMetadataColors(
     }
 
     if (!metadataContent) {
-      console.warn(
+      logger.warn(
         "[Inpainting Metadata] Could not find metadata file for:",
         filePath
       );
@@ -998,7 +999,7 @@ async function applyInpaintingMetadataColors(
 
     // Check if metadata has chains data
     if (!metadata.chains || Object.keys(metadata.chains).length === 0) {
-      console.warn(`[Inpainting Metadata] No chains data in metadata`);
+      logger.warn(`[Inpainting Metadata] No chains data in metadata`);
       // Still apply chain colors even if no chain data in metadata
       await applyChainColorsOnly(
         plugin,
@@ -1033,7 +1034,7 @@ async function applyInpaintingMetadataColors(
     }
 
     if (!parentRef) {
-      console.warn(
+      logger.warn(
         "[Inpainting Metadata] Could not get parent ref for structure"
       );
       return;
@@ -1075,10 +1076,10 @@ async function applyInpaintingMetadataColors(
           if (colorTheme) {
             const themeName = colorTheme.name || "";
             if (themeName === "chain-id" || themeName === "chain-name") {
-              console.warn(
+              logger.warn(
                 `[Inpainting Metadata] ⚠️ WARNING: Representation uses ${themeName} color theme, which may include warm colors (yellow/orange/red)!`
               );
-              console.warn(
+              logger.warn(
                 `[Inpainting Metadata] ⚠️ Chain colors should be applied first to use cool colors (blue/cyan/purple).`
               );
             } else if (themeName === "uniform") {
@@ -1089,7 +1090,7 @@ async function applyInpaintingMetadataColors(
               // Check if uniform color is warm
               if (r > 200 || (r > 150 && g > 150 && b < 150)) {
                 const colorHex = `#${uniformValue.toString(16).padStart(6, "0")}`;
-                console.warn(
+                logger.warn(
                   `[Inpainting Metadata] ⚠️ WARNING: Representation uniform color ${colorHex} (RGB=${r},${g},${b}) is warm!`
                 );
               }
@@ -1113,7 +1114,7 @@ async function applyInpaintingMetadataColors(
       true,
       resultIndex
     );
-    console.log(
+    logger.log(
       `[Inpainting Metadata] Created ${chainColorLayers.length} chain color layer(s) as base (palette index: ${resultIndex})`
     );
 
@@ -1126,14 +1127,14 @@ async function applyInpaintingMetadataColors(
 
     // Process all chains in metadata, not just the one from filename
     const allChainIds = Object.keys(metadata.chains);
-    console.log(
+    logger.log(
       `[Inpainting Metadata] Processing ${allChainIds.length} chain(s): ${allChainIds.join(", ")}`
     );
 
     for (const currentChainId of allChainIds) {
       const chainData = metadata.chains[currentChainId];
       if (!chainData) {
-        console.warn(
+        logger.warn(
           `[Inpainting Metadata] No data for chain ${currentChainId}`
         );
         continue;
@@ -1156,7 +1157,7 @@ async function applyInpaintingMetadataColors(
         );
         if (layer) {
           overpaintLayers.push(layer);
-          console.log(
+          logger.log(
             `[Inpainting Metadata] Added boundary exclusion layer for chain ${currentChainId}: ${boundaryResidues.length} residues -> ${colorHex} (RGB=${r},${g},${b}) [Yellow]`
           );
         }
@@ -1184,7 +1185,7 @@ async function applyInpaintingMetadataColors(
         );
         if (layer) {
           overpaintLayers.push(layer);
-          console.log(
+          logger.log(
             `[Inpainting Metadata] Added partially fixed layer for chain ${currentChainId}: ${partialResidues.length} residues -> ${colorHex} (RGB=${r},${g},${b}) [Orange]`
           );
         }
@@ -1208,7 +1209,7 @@ async function applyInpaintingMetadataColors(
         );
         if (layer) {
           overpaintLayers.push(layer);
-          console.log(
+          logger.log(
             `[Inpainting Metadata] Added fully inpainted layer for chain ${currentChainId}: ${chainData.fully_inpainted_residues.length} residues -> ${colorHex} (RGB=${r},${g},${b}) [Red]`
           );
         }
@@ -1234,14 +1235,14 @@ async function applyInpaintingMetadataColors(
       fullyInpainted: { hex: "#ef4444", name: "Red", rgb: "239,68,68" }
     };
 
-    console.log(
+    logger.log(
       `[Inpainting Metadata] ✓ Applied colors to ${allChainIds.length} chain(s) (${allChainIds.join(", ")}) using overpaint`
     );
-    console.log(
+    logger.log(
       `[Inpainting Metadata] Color scheme: Boundary=${colorSummary.boundary.hex} (${colorSummary.boundary.name}), Partially Fixed=${colorSummary.partiallyFixed.hex} (${colorSummary.partiallyFixed.name}), Fully Inpainted=${colorSummary.fullyInpainted.hex} (${colorSummary.fullyInpainted.name})`
     );
   } catch (err) {
-    console.error("[Inpainting Metadata] Failed to apply colors:", err);
+    logger.error("[Inpainting Metadata] Failed to apply colors:", err);
   }
 }
 
@@ -1294,7 +1295,7 @@ function createOverpaintLayer(
       clear: false
     };
   } catch (err) {
-    console.error(
+    logger.error(
       `[Inpainting Metadata] Failed to create overpaint layer:`,
       err
     );
@@ -1341,7 +1342,7 @@ function fixModifiedResidueChemCompType(cif: string): string {
     return `${indent}${ccd}${sp}'L-peptide linking'`;
   });
   if (n > 0) {
-    console.log(
+    logger.log(
       `[CIF Fix] Set _chem_comp.type='L-peptide linking' for ${n} modified residue(s) so they render in the cartoon`
     );
   }
@@ -1397,7 +1398,7 @@ function createPtmPurpleLayers(structure: Structure): Array<{
     );
     if (layer) {
       layers.push(layer);
-      console.log(
+      logger.log(
         `[PTM] Painted chain ${chainId} residues [${Array.from(seqIds).join(", ")}] purple (#a855f7)`
       );
     }
@@ -1441,7 +1442,7 @@ function createMutationTealLayers(
     );
     if (layer) {
       layers.push(layer);
-      console.log(
+      logger.log(
         `[Mutation] Painted chain ${chainId} residues [${seqIds.join(", ")}] teal (#14b8a6)`
       );
     }
@@ -1497,7 +1498,7 @@ async function applyOverpaintToRepresentations(
     findRepresentations(structureRef);
 
     if (representationRefs.length === 0) {
-      console.warn(
+      logger.warn(
         "[Inpainting Metadata] No representations found to apply overpaint"
       );
       return;
@@ -1517,10 +1518,10 @@ async function applyOverpaintToRepresentations(
     }
 
     await update.commit();
-    console.log(
+    logger.log(
       `[Inpainting Metadata] ✓ Applied overpaint with ${layers.length} layer(s) to ${representationRefs.length} representation(s)`
     );
   } catch (err) {
-    console.error("[Inpainting Metadata] Failed to apply overpaint:", err);
+    logger.error("[Inpainting Metadata] Failed to apply overpaint:", err);
   }
 }
