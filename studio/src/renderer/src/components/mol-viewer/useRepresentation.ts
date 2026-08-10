@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAtom } from "jotai";
 import type { PluginContext } from "molstar/lib/mol-plugin/context";
 import { viewerSettingsAtom } from "../../store/mol-viewer-atoms";
+import { logger } from "../../lib/logger";
 
 /**
  * Apply visual representations to the loaded structure
@@ -20,9 +21,9 @@ export function useRepresentation(
       try {
         // TODO: Implement representation change using Mol* API
         // This requires deeper understanding of Mol* StateBuilder and representation types
-        console.log("Applying representation:", settings);
+        logger.log("Applying representation:", settings);
       } catch (error) {
-        console.error("Failed to apply representation:", error);
+        logger.error("Failed to apply representation:", error);
       }
     };
 

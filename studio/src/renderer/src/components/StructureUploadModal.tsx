@@ -18,6 +18,7 @@ import {
   DialogDescription
 } from "./ui/dialog";
 import { pdb2cif } from "../lib/gemmi-wasm/pdb2cif";
+import { logger } from "../lib/logger";
 
 interface ChainInfo {
   id: string;
@@ -335,11 +336,10 @@ export function StructureUploadModal({
         if (filename.endsWith(".pdb")) {
           try {
             content = await pdb2cif(content);
-            savedFilename =
-              file.name.replace(/\.pdb$/i, "") + ".cif";
+            savedFilename = file.name.replace(/\.pdb$/i, "") + ".cif";
           } catch (err) {
             // Conversion failed – fall back to raw PDB
-            console.warn(
+            logger.warn(
               "PDB→CIF conversion failed; loading raw PDB. Gap detection may be inaccurate.",
               err
             );

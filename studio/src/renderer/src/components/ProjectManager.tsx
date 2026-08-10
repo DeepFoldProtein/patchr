@@ -28,6 +28,7 @@ import {
   FolderTree,
   FileText
 } from "lucide-react";
+import { logger } from "../lib/logger";
 
 export function ProjectManager(): React.ReactElement {
   // Zustand store selectors
@@ -65,13 +66,13 @@ export function ProjectManager(): React.ReactElement {
       const project = await createProjectDialog();
       if (project) {
         setCurrentProject(project);
-        console.log("✅ Project created:", project);
+        logger.log("✅ Project created:", project);
       }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create project";
       setError(message);
-      console.error("❌ Error creating project:", message);
+      logger.error("❌ Error creating project:", message);
     } finally {
       setLoading(false);
     }
@@ -84,13 +85,13 @@ export function ProjectManager(): React.ReactElement {
       const project = await openProjectDialog();
       if (project) {
         setCurrentProject(project);
-        console.log("✅ Project opened:", project);
+        logger.log("✅ Project opened:", project);
       }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to open project";
       setError(message);
-      console.error("❌ Error opening project:", message);
+      logger.error("❌ Error opening project:", message);
     } finally {
       setLoading(false);
     }
@@ -100,12 +101,12 @@ export function ProjectManager(): React.ReactElement {
     try {
       await closeProject();
       clearProject();
-      console.log("🔒 Project closed");
+      logger.log("🔒 Project closed");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to close project";
       setError(message);
-      console.error("❌ Error closing project:", message);
+      logger.error("❌ Error closing project:", message);
     }
   };
 

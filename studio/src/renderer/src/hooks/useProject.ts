@@ -4,6 +4,7 @@ import type {
   InpaintingYAML,
   ResidueMapping
 } from "../types/project";
+import { logger } from "../lib/logger";
 
 /**
  * Hook for project management operations
@@ -35,7 +36,7 @@ export function useProject(): {
     ): Promise<ProjectInfo | null> => {
       const result = await window.api.project.create(projectName, parentDir);
       if (!result.success || !result.project) {
-        console.error("Failed to create project:", result.error);
+        logger.error("Failed to create project:", result.error);
         return null;
       }
       return result.project;
@@ -47,7 +48,7 @@ export function useProject(): {
     async (projectPath: string): Promise<ProjectInfo | null> => {
       const result = await window.api.project.open(projectPath);
       if (!result.success || !result.project) {
-        console.error("Failed to open project:", result.error);
+        logger.error("Failed to open project:", result.error);
         return null;
       }
       return result.project;
@@ -60,7 +61,7 @@ export function useProject(): {
       const result = await window.api.project.openDialog();
       if (!result.success || !result.project) {
         if (result.error) {
-          console.error("Failed to open project:", result.error);
+          logger.error("Failed to open project:", result.error);
         }
         return null;
       }
@@ -72,7 +73,7 @@ export function useProject(): {
       const result = await window.api.project.createDialog(defaultName);
       if (!result.success || !result.project) {
         if (result.error) {
-          console.error("Failed to create project:", result.error);
+          logger.error("Failed to create project:", result.error);
         }
         return null;
       }
@@ -85,7 +86,7 @@ export function useProject(): {
     async (yaml: InpaintingYAML): Promise<boolean> => {
       const result = await window.api.project.saveYAML(yaml);
       if (!result.success) {
-        console.error("Failed to save YAML:", result.error);
+        logger.error("Failed to save YAML:", result.error);
         return false;
       }
       return true;
@@ -96,7 +97,7 @@ export function useProject(): {
   const loadYAML = useCallback(async (): Promise<InpaintingYAML | null> => {
     const result = await window.api.project.loadYAML();
     if (!result.success || !result.yaml) {
-      console.error("Failed to load YAML:", result.error);
+      logger.error("Failed to load YAML:", result.error);
       return null;
     }
     return result.yaml as InpaintingYAML;
@@ -106,7 +107,7 @@ export function useProject(): {
     async (mapping: ResidueMapping): Promise<boolean> => {
       const result = await window.api.project.saveMapping(mapping);
       if (!result.success) {
-        console.error("Failed to save mapping:", result.error);
+        logger.error("Failed to save mapping:", result.error);
         return false;
       }
       return true;
@@ -117,7 +118,7 @@ export function useProject(): {
   const loadMapping = useCallback(async (): Promise<ResidueMapping | null> => {
     const result = await window.api.project.loadMapping();
     if (!result.success || !result.mapping) {
-      console.error("Failed to load mapping:", result.error);
+      logger.error("Failed to load mapping:", result.error);
       return null;
     }
     return result.mapping as ResidueMapping;
@@ -130,7 +131,7 @@ export function useProject(): {
     ): Promise<string | null> => {
       const result = await window.api.project.importStructure(sourcePath, type);
       if (!result.success || !result.destPath) {
-        console.error("Failed to import structure:", result.error);
+        logger.error("Failed to import structure:", result.error);
         return null;
       }
       return result.destPath;
@@ -155,7 +156,7 @@ export function useProject(): {
   const openProjectFolder = useCallback(async (): Promise<boolean> => {
     const result = await window.api.project.openFolder();
     if (!result.success) {
-      console.error("Failed to open project folder:", result.error);
+      logger.error("Failed to open project folder:", result.error);
       return false;
     }
     return true;

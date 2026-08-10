@@ -19,6 +19,7 @@ import { Progress } from "./ui/progress";
 import { apiUrlAtom, apiConnectionStatusAtom } from "../store/api-atoms";
 import { DisconnectedHint } from "./DisconnectedHint";
 import { pathBasename, pathSplit } from "../lib/path-utils";
+import { logger } from "../lib/logger";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -319,7 +320,7 @@ export function SimulationSection({
           // disk under simulations/, but the list only re-fetches on this event.
           bus.emit("results:updated");
         } catch (dlErr) {
-          console.warn("Auto-download failed:", dlErr);
+          logger.warn("Auto-download failed:", dlErr);
         }
       }
     } catch (err) {

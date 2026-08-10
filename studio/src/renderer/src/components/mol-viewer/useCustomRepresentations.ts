@@ -4,6 +4,7 @@
  */
 import { useEffect } from "react";
 import type { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
+import { logger } from "../../lib/logger";
 
 export function useCustomRepresentations(
   plugin: PluginUIContext | null,
@@ -14,7 +15,7 @@ export function useCustomRepresentations(
 
     const applyCustomRepresentations = async (): Promise<void> => {
       try {
-        console.log("[CustomRepr] Applying custom representations...");
+        logger.log("[CustomRepr] Applying custom representations...");
 
         const structures =
           plugin.managers.structure.hierarchy.current.structures;
@@ -26,9 +27,9 @@ export function useCustomRepresentations(
         // Since MolStar's public API doesn't provide direct water filtering,
         // we log this for now and document the limitation
 
-        console.log("[CustomRepr] ✓ Custom representation analysis complete");
+        logger.log("[CustomRepr] ✓ Custom representation analysis complete");
       } catch (err) {
-        console.debug(
+        logger.debug(
           "[CustomRepr] Error:",
           err instanceof Error ? err.message : String(err)
         );

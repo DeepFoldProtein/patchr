@@ -4,6 +4,7 @@
  */
 import { useEffect } from "react";
 import type { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
+import { logger } from "../../lib/logger";
 
 export function useHideWater(
   plugin: PluginUIContext | null,
@@ -14,7 +15,7 @@ export function useHideWater(
 
     const tryHideWater = async (): Promise<void> => {
       try {
-        console.log("[Water] Attempting to hide water molecules...");
+        logger.log("[Water] Attempting to hide water molecules...");
 
         const structures =
           plugin.managers.structure.hierarchy.current.structures;
@@ -22,9 +23,9 @@ export function useHideWater(
           return;
         }
 
-        console.log("[Water] ✓ Water hiding logic ready");
+        logger.log("[Water] ✓ Water hiding logic ready");
       } catch (err) {
-        console.debug(
+        logger.debug(
           "[Water] Error:",
           err instanceof Error ? err.message : String(err)
         );
