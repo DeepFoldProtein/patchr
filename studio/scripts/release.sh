@@ -91,8 +91,11 @@ if [ "$NO_UPLOAD" = false ]; then
 fi
 
 # ── Install dependencies ─────────────────────────────────────────────────────
+# pnpm, matching .github/workflows/studio-build.yml. This used to be `npm ci`,
+# which resolved against a stale package-lock.json and built releases from a
+# different (older) dependency tree than CI and local development.
 echo "📦 Installing dependencies..."
-npm ci
+pnpm install --frozen-lockfile
 
 # ── Build renderer + main ────────────────────────────────────────────────────
 echo "🔨 Building app..."
