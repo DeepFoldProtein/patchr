@@ -10,6 +10,7 @@ import logoIcon from "@/assets/logo.png";
 import { Card, CardContent } from "./ui/card";
 import { useProject } from "../hooks/useProject";
 import { useProjectStore, useRecentProjects } from "../store/project-store";
+import { UpdateBanner } from "./UpdateBanner";
 
 // Sample structures available
 const SAMPLE_STRUCTURES = [
@@ -195,6 +196,11 @@ export function ProjectWelcome(): React.ReactElement {
             AI-powered molecular structure inpainting for DNA, RNA, and protein
             complexes
           </p>
+        </div>
+
+        {/* Update — hidden unless an update is available or in flight */}
+        <div className="opacity-0 animate-[fadeInUp_0.7s_ease-out_0.2s_forwards]">
+          <UpdateBanner />
         </div>
 
         {/* Main Actions */}

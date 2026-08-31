@@ -1,63 +1,18 @@
 // Explicit update control in the status bar. Shows the current version and,
 // when a newer GitHub release is available, lets the user deliberately Download
 // and then Restart to install. Nothing happens without a click.
-import React, { useEffect, useState } from "react";
+//
+// The state machine lives in useUpdater so the welcome screen can render the
+// same update affordances.
+import React from "react";
 import { RefreshCw, Download, ArrowUpCircle } from "lucide-react";
-
-type State =
-  | { type: "idle" }
-  | { type: "checking" }
-  | { type: "uptodate" }
-  | { type: "available"; version?: string }
-  | { type: "progress"; version?: string; percent?: number }
-  | { type: "downloaded"; version?: string }
-  | { type: "error"; message?: string };
+import { useUpdater } from "../hooks/useUpdater";
 
 export function UpdateStatus(): React.JSX.Element | null {
-  const [version, setVersion] = useState<string>("");
-  const [state, setState] = useState<State>({ type: "idle" });
+  const { version, state, unavailable, check, download, restart } =
+    useUpdater();
 
-  useEffect(() => {
-    window.api?.updater
-      ?.getVersion?.()
-      .then(setVersion)
-      .catch(() => {});
-    if (!window.api?.updater?.onEvent) return;
-    return window.api.updater.onEvent((type, payload) => {
-      switch (type) {
-        case "checking":
-          setState({ type: "checking" });
-          break;
-        case "available":
-          setState({ type: "available", version: payload?.version });
-          break;
-        case "not-available":
-          setState({ type: "uptodate" });
-          window.setTimeout(() => setState({ type: "idle" }), 3000);
-          break;
-        case "progress":
-          setState(prev => ({
-            type: "progress",
-            version: "version" in prev ? prev.version : undefined,
-            percent: payload?.percent
-          }));
-          break;
-        case "downloaded":
-          setState({ type: "downloaded", version: payload?.version });
-          break;
-        case "error":
-          setState({ type: "error", message: payload?.message });
-          window.setTimeout(() => setState({ type: "idle" }), 4000);
-          break;
-      }
-    });
-  }, []);
-
-  if (!window.api?.updater) return null;
-
-  const check = (): void => void window.api.updater.check();
-  const download = (): void => void window.api.updater.download();
-  const restart = (): void => void window.api.updater.quitAndInstall();
+  if (unavailable) return null;
 
   const versionTag = version ? `v${version}` : "";
 
