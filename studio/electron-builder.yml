@@ -30,6 +30,12 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # productName has a space, so the default zip name is "Patchr Studio-...zip".
+  # electron-builder writes that into latest-mac.yml with spaces as hyphens,
+  # while GitHub renames the uploaded asset with dots — the two never matched
+  # and every macOS auto-update 404'd. Pin a space-free name so the feed and
+  # the asset agree. dmg keeps its own artifactName below.
+  artifactName: ${name}-${version}-${arch}-mac.${ext}
   icon: icon.png
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
