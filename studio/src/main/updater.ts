@@ -25,7 +25,18 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
     getWindow()?.webContents.send(channel, payload);
   };
 
-  autoUpdater.on("checking-for-update", () => send("updater:checking"));
+  // electron-updater reports every failure through the same "error" event, so
+  // the renderer cannot tell a failed check from a failed download. Track which
+  // operation is in flight and tag the error with it.
+  let phase: "check" | "download" = "check";
+  // A check can start while a download is still running (the welcome screen
+  // checks on mount), and it must not relabel the download's failure.
+  let downloading = false;
+
+  autoUpdater.on("checking-for-update", () => {
+    if (!downloading) phase = "check";
+    send("updater:checking");
+  });
   autoUpdater.on("update-available", info =>
     send("updater:available", { version: info.version })
   );
@@ -33,12 +44,14 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   autoUpdater.on("download-progress", p =>
     send("updater:progress", { percent: Math.round(p.percent) })
   );
-  autoUpdater.on("update-downloaded", info =>
-    send("updater:downloaded", { version: info.version })
-  );
-  autoUpdater.on("error", err =>
-    send("updater:error", { message: err?.message ?? String(err) })
-  );
+  autoUpdater.on("update-downloaded", info => {
+    downloading = false;
+    send("updater:downloaded", { version: info.version });
+  });
+  autoUpdater.on("error", err => {
+    downloading = false;
+    send("updater:error", { message: err?.message ?? String(err), phase });
+  });
 
   // Current app version — shown in the status bar.
   ipcMain.handle("updater:version", () => app.getVersion());
@@ -61,6 +74,8 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
 
   // User clicked "Download" — download the available update.
   ipcMain.handle("updater:download", async () => {
+    phase = "download";
+    downloading = true;
     try {
       await autoUpdater.downloadUpdate();
       return { success: true };

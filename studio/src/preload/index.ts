@@ -111,7 +111,12 @@ const api = {
     onEvent: (
       callback: (
         type: string,
-        payload?: { version?: string; percent?: number; message?: string }
+        payload?: {
+          version?: string;
+          percent?: number;
+          message?: string;
+          phase?: "check" | "download";
+        }
       ) => void
     ) => {
       const names = [

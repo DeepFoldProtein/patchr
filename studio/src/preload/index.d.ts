@@ -244,6 +244,8 @@ export interface UpdaterEventPayload {
   version?: string;
   percent?: number;
   message?: string;
+  /** Which operation failed, on "error" events. */
+  phase?: "check" | "download";
 }
 
 export interface UpdaterAPI {

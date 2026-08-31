@@ -5,7 +5,7 @@
 // The preload bridge registers one ipcRenderer listener per subscriber and
 // hands back an unsubscribe, so several components can listen at once and stay
 // in sync — every one of them sees the same events.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type UpdaterState =
   | { type: "idle" }
@@ -14,7 +14,7 @@ export type UpdaterState =
   | { type: "available"; version?: string }
   | { type: "progress"; version?: string; percent?: number }
   | { type: "downloaded"; version?: string }
-  | { type: "error"; message?: string };
+  | { type: "error"; phase: "check" | "download"; message?: string };
 
 export interface Updater {
   /** Running app version, without a leading "v". Empty until it resolves. */
@@ -37,6 +37,9 @@ export function useUpdater(options?: { autoCheck?: boolean }): Updater {
   const autoCheck = options?.autoCheck ?? false;
   const [version, setVersion] = useState<string>("");
   const [state, setState] = useState<UpdaterState>({ type: "idle" });
+  // Remembered so a failed download can fall back to "available" rather than
+  // dropping the user back to a bare version label with no way to retry.
+  const offeredVersion = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     window.api?.updater
@@ -51,6 +54,7 @@ export function useUpdater(options?: { autoCheck?: boolean }): Updater {
           setState({ type: "checking" });
           break;
         case "available":
+          offeredVersion.current = payload?.version;
           setState({ type: "available", version: payload?.version });
           break;
         case "not-available":
@@ -65,12 +69,26 @@ export function useUpdater(options?: { autoCheck?: boolean }): Updater {
           }));
           break;
         case "downloaded":
+          offeredVersion.current = payload?.version;
           setState({ type: "downloaded", version: payload?.version });
           break;
-        case "error":
-          setState({ type: "error", message: payload?.message });
-          window.setTimeout(() => setState({ type: "idle" }), 4000);
+        case "error": {
+          const phase = payload?.phase === "download" ? "download" : "check";
+          setState({ type: "error", phase, message: payload?.message });
+          // A failed download does not make the release go away, so return to
+          // the available state and let the user try again.
+          const retry = offeredVersion.current;
+          window.setTimeout(
+            () =>
+              setState(
+                phase === "download" && retry
+                  ? { type: "available", version: retry }
+                  : { type: "idle" }
+              ),
+            4000
+          );
           break;
+        }
       }
     });
   }, []);

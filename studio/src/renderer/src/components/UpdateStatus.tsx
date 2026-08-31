@@ -61,14 +61,20 @@ export function UpdateStatus(): React.JSX.Element | null {
       : state.type === "uptodate"
         ? "Up to date"
         : state.type === "error"
-          ? "Check failed"
+          ? state.phase === "download"
+            ? "Download failed"
+            : "Check failed"
           : "";
 
   return (
     <button
       onClick={check}
       disabled={state.type === "checking"}
-      title="Check for updates"
+      title={
+        state.type === "error" && state.phase === "download"
+          ? "Download failed — click to check again"
+          : "Check for updates"
+      }
       className="inline-flex items-center gap-1.5 text-xs text-neutral-500 transition-colors hover:text-neutral-700 disabled:opacity-70 dark:text-neutral-500 dark:hover:text-neutral-300"
     >
       <RefreshCw

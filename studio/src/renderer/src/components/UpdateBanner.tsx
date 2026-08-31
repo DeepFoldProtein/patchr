@@ -102,14 +102,16 @@ export function UpdateBanner(): React.JSX.Element | null {
         <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-neutral-900 dark:text-white">
-            Could not check for updates
+            {state.phase === "download"
+              ? "Could not download the update"
+              : "Could not check for updates"}
           </p>
           <p className="truncate text-xs text-neutral-600 dark:text-neutral-400">
             {state.message || "Check your connection and try again."}
           </p>
         </div>
         <button
-          onClick={check}
+          onClick={state.phase === "download" ? download : check}
           className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-500/10 dark:border-neutral-700 dark:text-neutral-200"
         >
           Retry
