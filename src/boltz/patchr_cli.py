@@ -1054,15 +1054,39 @@ def serve(
     click.echo(f"API docs: http://{host}:{port}/docs")
 
     if reload:
-        uvicorn.run("server:app", host=host, port=port, reload=True)
-    else:
-        # Import server app directly
-        project_root = Path(__file__).resolve().parent.parent.parent
-        if str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-        from server import app  # noqa: E402
+        # Hot-reload needs an import string, but "server:app" resolves to the
+        # server/ support package (which has no `app`), not to server.py.
+        click.echo("Warning: --reload is not supported; starting without hot-reload.")
 
-        uvicorn.run(app, host=host, port=port)
+    uvicorn.run(_load_server_app(), host=host, port=port)
+
+
+def _load_server_app():
+    """Load the FastAPI ``app`` from repo-root ``server.py``.
+
+    ``server.py`` and the ``server/`` support package share a name, and the
+    package wins on a plain ``import server``, so the entrypoint has to be
+    loaded from its file path. The package still imports normally as ``server``
+    for server.py's own ``from server.config import ...`` lines.
+    """
+    import importlib.util
+
+    project_root = Path(__file__).resolve().parent.parent.parent
+    server_py = project_root / "server.py"
+    if not server_py.is_file():
+        raise click.ClickException(
+            f"Server entrypoint not found at {server_py}. 'patchr serve' needs a "
+            "repository checkout — clone the repo and install it with 'pip install -e .'."
+        )
+
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    spec = importlib.util.spec_from_file_location("patchr_server_main", server_py)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["patchr_server_main"] = module
+    spec.loader.exec_module(module)
+    return module.app
 
 
 # ---------------------------------------------------------------------------
