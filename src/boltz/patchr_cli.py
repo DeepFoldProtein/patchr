@@ -132,6 +132,13 @@ def _print_logo() -> None:
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """PATCHR — diffusion-based structure completion for proteins, DNA, RNA, and complexes."""
+    # A notebook parent (Colab, Jupyter) exports MPLBACKEND=module://matplotlib_inline...
+    # and child processes inherit it. That backend is useless here and raises on
+    # import when the module is missing from this environment, taking down every
+    # import chain that touches matplotlib (e.g. torchmetrics).
+    if os.environ.get("MPLBACKEND", "").startswith("module://"):
+        os.environ["MPLBACKEND"] = "Agg"
+
     if ctx.invoked_subcommand is None:
         _print_logo()
         click.echo(ctx.get_help())
