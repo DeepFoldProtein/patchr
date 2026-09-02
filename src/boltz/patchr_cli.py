@@ -1071,12 +1071,17 @@ def _load_server_app():
     """
     import importlib.util
 
-    project_root = Path(__file__).resolve().parent.parent.parent
-    server_py = project_root / "server.py"
-    if not server_py.is_file():
+    # Normally <repo>/src/boltz/patchr_cli.py; fall back to the working directory
+    # for installs whose module path does not sit inside the checkout.
+    candidates = [Path(__file__).resolve().parent.parent.parent, Path.cwd()]
+    for project_root in candidates:
+        server_py = project_root / "server.py"
+        if server_py.is_file():
+            break
+    else:
         raise click.ClickException(
-            f"Server entrypoint not found at {server_py}. 'patchr serve' needs a "
-            "repository checkout — clone the repo and install it with 'pip install -e .'."
+            f"Server entrypoint (server.py) not found in {candidates[0]}. 'patchr serve' "
+            "needs a repository checkout — clone the repo and install it with 'pip install -e .'."
         )
 
     if str(project_root) not in sys.path:
