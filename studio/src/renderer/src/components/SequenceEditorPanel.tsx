@@ -37,6 +37,8 @@ import {
 } from "../lib/chainSequences";
 import { parsePolySeqScheme } from "../lib/polySeq";
 import { parseUniProtRefs } from "../lib/structRef";
+import { parseFastaByChain } from "../lib/fastaByChain";
+import { authorAtTargetIndex, targetIndexOf } from "../lib/mutationTarget";
 import { cn } from "../lib/utils";
 import { logger } from "../lib/logger";
 import { Switch } from "./ui/switch";
@@ -83,25 +85,6 @@ function markTerminals(cells: DisplayCell[]): DisplayCell[] {
 }
 
 // Parse a multi-chain FASTA (">Chain A\nSEQ" or ">A\nSEQ") into chain -> seq.
-function parseFastaByChain(fasta: string): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!fasta) return map;
-  let chain: string | null = null;
-  let seq: string[] = [];
-  for (const line of fasta.split("\n")) {
-    if (line.startsWith(">")) {
-      if (chain) map.set(chain, seq.join(""));
-      const m = line.match(/Chain[_\s]+(\S+)/i) || line.match(/^>(\S+)/);
-      chain = m ? m[1] : null;
-      seq = [];
-    } else if (chain) {
-      seq.push(line.trim());
-    }
-  }
-  if (chain) map.set(chain, seq.join(""));
-  return map;
-}
-
 // Standard amino acids offered as mutation targets.
 const AA_TARGETS = [
   "A",
@@ -313,17 +296,17 @@ export function SequenceEditorPanel(): React.ReactElement {
         continue;
       }
       const arr = baseStr.split("");
-      const ref = uniprotRefs.get(chainId);
+      // Same author -> target-position rule the result viewer uses to locate
+      // mutations, so the residue we rewrite is the one that gets painted.
+      const ctx = {
+        polySeq: polySeq.get(chainId),
+        uniprotRef: uniprotRefs.get(chainId),
+        reference: fromUniProt ? baseStr : undefined
+      };
       for (const m of muts) {
-        let idx: number | undefined;
-        if (fromUniProt && ref && m.authSeqId >= ref.authBeg) {
-          idx = ref.dbBeg + (m.authSeqId - ref.authBeg) - 1;
-        } else {
-          idx = polySeq
-            .get(chainId)
-            ?.keyToIndex.get(`${m.authSeqId}|${m.insCode}`);
-        }
-        if (idx !== undefined && idx >= 0 && idx < arr.length) arr[idx] = m.to;
+        const pos = targetIndexOf(m.authSeqId, m.insCode, ctx);
+        if (pos !== undefined && pos >= 1 && pos <= arr.length)
+          arr[pos - 1] = m.to;
       }
       out.set(chainId, arr.join(""));
     }
@@ -400,26 +383,21 @@ export function SequenceEditorPanel(): React.ReactElement {
     const ref = uniprotRefs.get(chainId);
     const reference = referenceByChain.get(chainId);
 
-    // 1) UniProt reference loaded: render the full reference aligned to authors.
+    // 1) UniProt reference loaded: render the full reference, each position
+    //    aligned to the structure's residue (SEQRES order, so insertion codes
+    //    and author numbering jumps line up the way the backend aligns them).
     if (reference && ref && ref.dbEnd >= ref.dbBeg) {
-      const authToSeqId = chainPolySeq?.keyToSeqId;
+      const ctx = { polySeq: chainPolySeq, uniprotRef: ref, reference };
       const cells: DisplayCell[] = [];
       for (let p0 = 0; p0 < reference.length; p0++) {
-        const p = p0 + 1;
-        const authSeqId =
-          p >= ref.dbBeg && p <= ref.dbEnd
-            ? ref.authBeg + (p - ref.dbBeg)
-            : undefined;
+        const author = authorAtTargetIndex(p0 + 1, ctx);
         cells.push(
           makeCell({
             key: `u${p0}`,
             origCode: reference[p0],
-            authSeqId,
-            insCode: "",
-            seqId:
-              authSeqId !== undefined
-                ? authToSeqId?.get(`${authSeqId}|`)
-                : undefined
+            authSeqId: author?.authSeqId,
+            insCode: author?.insCode ?? "",
+            seqId: author?.seqId
           })
         );
       }

@@ -1,11 +1,21 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { PluginUIContext } from "molstar/lib/mol-plugin-ui/context";
 import { bus } from "../../lib/event-bus";
 import {
+  erasedResidueKeysAtom,
+  skipTerminalAtom,
   stagedMutationsAtom,
-  type StagedMutation
+  uniprotReferenceAtom
 } from "../../store/repair-atoms";
+import { useStructureContent } from "../../store/project-store";
+import { parsePolySeqScheme } from "../../lib/polySeq";
+import { parseUniProtRefs } from "../../lib/structRef";
+import { parseFastaByChain } from "../../lib/fastaByChain";
+import {
+  toResultSites,
+  type ResultResidueSite
+} from "../../lib/mutationTarget";
 import {
   pathBasename,
   pathDirname,
@@ -48,10 +58,45 @@ const loadedStructures = new Map<string, StructureHierarchyRef | null>();
 export function useSuperpose(plugin: PluginUIContext | null): void {
   // Staged mutations aren't structurally identifiable in a result (a mutated
   // residue just looks like a normal amino acid), so we highlight them from the
-  // staged list. A ref keeps the latest value without recreating the loader.
+  // staged list. Results are numbered canonically (1..N over the target
+  // sequence, trimmed under skip-terminal), not by author number, so each
+  // mutation is converted to its result residue number first. A ref keeps the
+  // latest value without recreating the loader.
   const stagedMutations = useAtomValue(stagedMutationsAtom);
-  const mutationsRef = useRef<StagedMutation[]>(stagedMutations);
-  mutationsRef.current = stagedMutations;
+  const erasedKeys = useAtomValue(erasedResidueKeysAtom);
+  const skipTerminal = useAtomValue(skipTerminalAtom);
+  const uniprotReference = useAtomValue(uniprotReferenceAtom);
+  const structureContent = useStructureContent();
+  const mutationSites = useMemo<ResultResidueSite[]>(() => {
+    if (stagedMutations.length === 0) return [];
+    const polySeq = parsePolySeqScheme(structureContent);
+    const uniprotRefs = parseUniProtRefs(structureContent);
+    const referenceByChain = parseFastaByChain(uniprotReference);
+    const sites = toResultSites(
+      stagedMutations,
+      chainId => ({
+        polySeq: polySeq.get(chainId),
+        uniprotRef: uniprotRefs.get(chainId),
+        reference: referenceByChain.get(chainId),
+        erasedKeys: erasedKeys.get(chainId)
+      }),
+      skipTerminal
+    );
+    if (sites.length !== stagedMutations.length) {
+      logger.warn(
+        `[Mutation] ${stagedMutations.length - sites.length} staged mutation(s) have no residue in the result and won't be painted`
+      );
+    }
+    return sites;
+  }, [
+    stagedMutations,
+    erasedKeys,
+    skipTerminal,
+    uniprotReference,
+    structureContent
+  ]);
+  const mutationsRef = useRef<ResultResidueSite[]>(mutationSites);
+  mutationsRef.current = mutationSites;
 
   const loadAndSuperpose = useCallback(
     async (filePath: string, fileContent: string, superpose: boolean) => {
@@ -805,7 +850,7 @@ async function applyChainColorsOnly(
   structure: Structure,
   hierarchyRef: StructureHierarchyRef | null,
   resultIndex: number = 0,
-  mutations: StagedMutation[] = []
+  mutations: ResultResidueSite[] = []
 ): Promise<void> {
   try {
     // Get parent ref
@@ -862,7 +907,7 @@ async function applyInpaintingMetadataColors(
   filePath: string,
   structure: Structure | undefined,
   hierarchyRef: StructureHierarchyRef | null,
-  mutations: StagedMutation[] = []
+  mutations: ResultResidueSite[] = []
 ): Promise<void> {
   if (!structure) {
     logger.warn("[Inpainting Metadata] No structure available for coloring");
@@ -1411,11 +1456,12 @@ const MUTATION_TEAL = 0x14b8a6; // Tailwind teal-500, matches the sequence panel
 /**
  * Build teal overpaint layers for staged mutations. Mutated residues aren't
  * structurally distinguishable in the result, so we color them from the staged
- * list (chain + author residue number). Applied at the same top priority as PTM.
+ * list, already converted to result residue numbers (see lib/mutationTarget).
+ * Applied at the same top priority as PTM.
  */
 function createMutationTealLayers(
   structure: Structure,
-  mutations: StagedMutation[]
+  mutations: ResultResidueSite[]
 ): Array<{
   bundle: typeof StructureElement.Bundle.Empty;
   color: Color;
@@ -1424,7 +1470,7 @@ function createMutationTealLayers(
   const byChain = new Map<string, number[]>();
   for (const m of mutations) {
     const arr = byChain.get(m.chainId) ?? [];
-    arr.push(m.authSeqId);
+    if (!arr.includes(m.resNum)) arr.push(m.resNum);
     byChain.set(m.chainId, arr);
   }
 

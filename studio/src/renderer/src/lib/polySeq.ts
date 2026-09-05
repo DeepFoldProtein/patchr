@@ -67,6 +67,8 @@ export interface PolySeqPosition {
   authSeqId?: number; // author residue number (pdb_seq_num); absent if unknown
   insCode: string;
   seqId: number; // entity seq_id (_entity_poly_seq.num)
+  /** Whether the residue has coordinates in the structure (auth_seq_num set). */
+  resolved: boolean;
 }
 
 export interface ChainPolySeq {
@@ -205,8 +207,11 @@ export function parsePolySeqScheme(
     entry.monIds.push(mon);
 
     const ins = insCol !== undefined ? normalizeIns(row[insCol]) : "";
+    // auth_seq_num is "?" exactly for residues without coordinates, so its
+    // presence doubles as the resolved flag.
+    const authSeqNum = numOf(authCol !== undefined ? row[authCol] : undefined);
     const authSeqId =
-      numOf(authCol !== undefined ? row[authCol] : undefined) ??
+      authSeqNum ??
       numOf(pdbNumCol !== undefined ? row[pdbNumCol] : undefined) ??
       numOf(ndbNumCol !== undefined ? row[ndbNumCol] : undefined);
     const seqIdRaw = seqIdCol !== undefined ? row[seqIdCol] : undefined;
@@ -217,7 +222,9 @@ export function parsePolySeqScheme(
       resName: mon,
       authSeqId: Number.isFinite(authSeqId) ? authSeqId : undefined,
       insCode: ins,
-      seqId: Number.isFinite(seqId) ? seqId : index + 1
+      seqId: Number.isFinite(seqId) ? seqId : index + 1,
+      // Without an auth_seq_num column we cannot tell; assume resolved.
+      resolved: authCol === undefined || authSeqNum !== undefined
     });
 
     if (authSeqId !== undefined && Number.isFinite(authSeqId)) {

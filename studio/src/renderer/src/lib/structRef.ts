@@ -119,6 +119,10 @@ export interface UniProtRef {
   authBeg: number;
   /** Author residue number aligned to dbEnd. */
   authEnd: number;
+  /** SEQRES (label_seq_id) position aligned to dbBeg, when recorded. */
+  seqBeg?: number;
+  /** SEQRES (label_seq_id) position aligned to dbEnd, when recorded. */
+  seqEnd?: number;
 }
 
 function toInt(v: string | undefined): number | undefined {
@@ -173,7 +177,15 @@ export function parseUniProtRefs(
       });
       continue;
     }
-    result.set(chain, { accession: acc, dbBeg, dbEnd, authBeg, authEnd });
+    result.set(chain, {
+      accession: acc,
+      dbBeg,
+      dbEnd,
+      authBeg,
+      authEnd,
+      seqBeg: toInt(rs["seq_align_beg"]),
+      seqEnd: toInt(rs["seq_align_end"])
+    });
   }
   return result;
 }
